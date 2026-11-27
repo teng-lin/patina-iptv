@@ -1282,6 +1282,7 @@ pub fn hold_reports(held: bool) {
 pub fn reports_waiting() -> usize {
     host::host_handle().map_or(0, |owner| owner.reports_waiting())
 }
+
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
 #[cfg(feature = "test-support")]

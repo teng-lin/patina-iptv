@@ -361,7 +361,6 @@ the migration to `iptv-presentation`. These departures remain.
 | What | Where it is today | Rule | Where it goes |
 | --- | --- | --- | --- |
 | A holder issues an operation's identity | Each `Wizard` numbers its imports from 1 (`ImportId`), so a wizard opened again can take a reply meant for the last one | 5 | The runtime issues the identity when it accepts the import. |
-| Refusals as English sentences | `recording::Request::validate` returns sentences, which reach the screen through `iptv-store-sqlite`'s error and the runtime's admission | 7 | A typed reason. |
 | A lookup that reads a file | In a browser package the first lookup of a language reads a package file inside `translate`, and a failed read stays an empty catalog | 4 | The host loads a language's catalog and hands it in; `translate` only looks up. |
 | Untyped message IDs | `key` marks a string in `iptv_core::message`. Its type also admits unmarked sentences. | 7 | A typed message ID. |
 | One crate in two layers | `iptv-web`: browser adapters, and behind `bridge` the bridge | 1 | Two crates, with one owner for the wasm entry points both workers call. It waits for the decision on the bridge's future. |

@@ -30,6 +30,14 @@
 //! ```compile_fail
 //! use iptv_runtime::stored::configs_from_sources;
 //! ```
+//!
+//! Runtime failures cannot be converted back into storage errors by consumers.
+//!
+//! ```compile_fail
+//! fn convert(error: iptv_runtime::Error) -> iptv_store_sqlite::StoreError {
+//!     error.into()
+//! }
+//! ```
 pub mod build_config;
 pub mod cast;
 pub mod data;
@@ -99,6 +107,44 @@ struct TaskHost {
     delay: Box<dyn Fn(std::time::Duration) -> LocalTask>,
 }
 
+#[derive(Default)]
+struct TaskBinding(RefCell<Option<Rc<TaskHost>>>);
+impl TaskBinding {
+    fn bind(
+        &self,
+        spawn: impl Fn(LocalTask) + 'static,
+        delay: impl Fn(std::time::Duration) -> LocalTask + 'static,
+    ) {
+        self.0.replace(Some(Rc::new(TaskHost {
+            spawn: Box::new(spawn),
+            delay: Box::new(delay),
+        })));
+    }
+
+    fn host(&self) -> Option<Rc<TaskHost>> {
+        self.0.borrow().clone()
+    }
+
+    fn has_tasks(&self) -> bool {
+        self.0.borrow().is_some()
+    }
+
+    fn try_spawn(&self, task: LocalTask) -> bool {
+        let Some(host) = self.host() else {
+            return false;
+        };
+        (host.spawn)(task);
+        true
+    }
+
+    fn delay(&self, duration: std::time::Duration) -> LocalTask {
+        match self.host() {
+            Some(host) => (host.delay)(duration),
+            None => Box::pin(std::future::pending()),
+        }
+    }
+}
+
 type EventSink = Rc<dyn Fn(RuntimeEvent)>;
 type BrowserObserver = Rc<dyn Fn() -> BrowserState>;
 type PageWaiters = RefCell<Vec<data::pages::Waiter>>;
@@ -159,7 +205,8 @@ pub struct Runtime {
     schedule: RefCell<Rc<dyn Schedule>>,
     schedule_revision: Cell<u64>,
     events: RefCell<Option<EventSink>>,
-    tasks: RefCell<Option<Rc<TaskHost>>>,
+    tasks: TaskBinding,
+    wizard_tickets: Cell<u64>,
     foreground: Cell<bool>,
     scheduler_started: Cell<bool>,
     guide_checks: RefCell<guide_checks::GuideChecks>,
@@ -233,7 +280,8 @@ impl Runtime {
             schedule: RefCell::new(schedule),
             schedule_revision: Cell::new(0),
             events: RefCell::new(None),
-            tasks: RefCell::new(None),
+            tasks: TaskBinding::default(),
+            wizard_tickets: Cell::new(0),
             foreground: Cell::new(true),
             scheduler_started: Cell::new(false),
             guide_checks: RefCell::new(guide_checks),
@@ -263,31 +311,26 @@ impl Runtime {
         spawn: impl Fn(LocalTask) + 'static,
         delay: impl Fn(std::time::Duration) -> LocalTask + 'static,
     ) {
-        *self.tasks.borrow_mut() = Some(Rc::new(TaskHost {
-            spawn: Box::new(spawn),
-            delay: Box::new(delay),
-        }));
+        self.tasks.bind(spawn, delay);
     }
     /// Runs `task` on the host's local executor. The task holds its owner
     /// itself: it names no other one, whichever owner the host polls it under.
     pub(crate) fn spawn(&self, task: impl std::future::Future<Output = ()> + 'static) {
-        let host = self
-            .tasks
-            .borrow()
-            .clone()
-            .expect("runtime task host installed");
-        (host.spawn)(Box::pin(task));
+        let _ = self.tasks.try_spawn(Box::pin(task));
+    }
+
+    pub(crate) fn has_tasks(&self) -> bool {
+        self.tasks.has_tasks()
+    }
+
+    pub(crate) fn try_spawn(&self, task: impl std::future::Future<Output = ()> + 'static) -> bool {
+        self.tasks.try_spawn(Box::pin(task))
     }
     pub(crate) fn delay(
         &self,
         duration: std::time::Duration,
     ) -> impl std::future::Future<Output = ()> + use<> {
-        let host = self
-            .tasks
-            .borrow()
-            .clone()
-            .expect("runtime task host installed");
-        (host.delay)(duration)
+        self.tasks.delay(duration)
     }
     pub fn flush_files(&self, limit: std::time::Duration) -> bool {
         self.store.files().flush(limit)
@@ -320,7 +363,7 @@ impl Runtime {
         self.close_cast();
         let drained = self
             .store
-            .drain_on_shutdown_with(|| self.inspection.cancel_requests());
+            .drain_on_shutdown_until(deadline, || self.inspection.cancel_requests());
         let probes_drained = self
             .inspection
             .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()));

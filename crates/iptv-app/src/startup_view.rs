@@ -50,12 +50,15 @@ pub(crate) fn store_failed(
         Cause::Newer { found, supported }
     } else if let Some(reason) = error.reopen_reason() {
         Cause::RestartRequired(reason)
+    } else if let Some(reason) = error
+        .unavailable_reason()
+        .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
+    {
+        log::warn!("iptv storage initialization failed: {error}");
+        Cause::Other(crate::i18n::tr(reason).to_owned())
     } else {
-        Cause::Other(
-            error
-                .unavailable_reason()
-                .map_or_else(|| error.to_string(), str::to_owned),
-        )
+        log::warn!("iptv storage initialization failed: {error}");
+        Cause::Other(crate::i18n::tr("The saved library could not be opened").to_owned())
     };
     ui.store_startup_failure.update(|failure| {
         let retrying = failure

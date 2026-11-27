@@ -1048,8 +1048,7 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
 /// Local admission uses the same retryable refusal as a connection held by
 /// recording in open_allowed(). The channel resolved; its address is present.
 fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &crate::runtime::Error) -> bool {
-    let reason = crate::i18n::key("No provider connection available; check Streams at once");
-    if error.unavailable_reason() != Some(reason) {
+    if !error.provider_capacity() {
         return false;
     }
     fail(

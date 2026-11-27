@@ -133,6 +133,10 @@ impl crate::Runtime {
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
+fn remaining(deadline: Instant) -> Duration {
+    deadline.saturating_duration_since(Instant::now())
+}
+
 /// One connection's worker: a lane of the owner's execution port (natively
 /// a thread) that runs jobs in order, each with the connection.
 struct Lane {
@@ -140,6 +144,7 @@ struct Lane {
     /// The execution lane, started on first use: a job may not queue on
     /// its own lane and wait for itself.
     jobs: OnceLock<Box<dyn crate::execution::Lane>>,
+    initializing: Mutex<()>,
     execution: Arc<dyn crate::execution::Execution>,
     /// The lane's connection; only its jobs, one at a time, lock it.
     connection: Arc<Mutex<Connection>>,
@@ -152,6 +157,7 @@ impl Lane {
         Self {
             name,
             jobs: OnceLock::new(),
+            initializing: Mutex::new(()),
             execution,
             connection: Arc::default(),
             metrics: Arc::default(),
@@ -363,7 +369,15 @@ impl Service {
     }
 
     pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
-        self.drain_on_shutdown_with_limit(self.drain_limit(), after_writer)
+        self.drain_on_shutdown_until(Instant::now() + self.drain_limit(), after_writer)
+    }
+
+    pub(crate) fn drain_on_shutdown_until(
+        self: &Arc<Self>,
+        deadline: Instant,
+        after_writer: impl FnOnce(),
+    ) -> bool {
+        self.drain_on_shutdown_with_deadline(deadline, after_writer)
     }
 
     pub(crate) fn drain_limit(&self) -> std::time::Duration {
@@ -373,9 +387,18 @@ impl Service {
         limit
     }
 
+    #[cfg(test)]
     fn drain_on_shutdown_with_limit(
         self: &Arc<Self>,
         limit: std::time::Duration,
+        after_writer: impl FnOnce(),
+    ) -> bool {
+        self.drain_on_shutdown_with_deadline(Instant::now() + limit, after_writer)
+    }
+
+    fn drain_on_shutdown_with_deadline(
+        self: &Arc<Self>,
+        deadline: Instant,
         after_writer: impl FnOnce(),
     ) -> bool {
         let epoch = self.epochs.active.load(Ordering::SeqCst);
@@ -389,7 +412,21 @@ impl Service {
             // writer directly or through a reader's first connection. Always
             // queue the native FIFO barrier so jobs ahead of it keep their
             // epoch. Starting the lane itself does not open a store.
-            self.writer.initialize();
+            if self.writer.initialize().is_err() {
+                self.epochs.close(epoch);
+                after_writer();
+                // The other native lanes may already own connections even
+                // though the writer never started. Retire those handles with
+                // whatever remains of the same shutdown deadline.
+                let reader = self.reader.barrier(remaining(deadline), |connection| {
+                    *connection = Connection::default();
+                });
+                let analysis = self.analysis.barrier(remaining(deadline), |connection| {
+                    *connection = Connection::default();
+                });
+                let _ = reader && analysis;
+                return false;
+            }
         }
         if let Some(lane) = self.writer.jobs.get() {
             // A cooperative publish still in slices is abandoned on shutdown.
@@ -401,7 +438,7 @@ impl Service {
         // The writer first: once it closed the epoch, a late read cannot open
         // the reader's connection again.
         let owner = self.clone();
-        let writer = self.writer.barrier(limit, move |connection| {
+        let writer = self.writer.barrier(remaining(deadline), move |connection| {
             // Release SQLite handles before a new app instance opens or restores
             // its library in the same process.
             owner.epochs.close(epoch);
@@ -411,10 +448,10 @@ impl Service {
         });
         // Queued writes have acknowledged before transient read/probe cancellation.
         after_writer();
-        let reader = self.reader.barrier(limit, |connection| {
+        let reader = self.reader.barrier(remaining(deadline), |connection| {
             *connection = Connection::default();
         });
-        let analysis = self.analysis.barrier(limit, |connection| {
+        let analysis = self.analysis.barrier(remaining(deadline), |connection| {
             *connection = Connection::default();
         });
         let drained = writer && reader && analysis;
@@ -563,8 +600,14 @@ impl Services {
 
     /// Drive a non-Send import on its bounded blocking worker, sharing the
     /// IO executor.
+    pub(crate) fn try_block_on<F: Future>(&self, future: F) -> Option<F::Output> {
+        crate::execution::try_block_on(self.service.tasks(), future)
+    }
+
+    #[cfg(test)]
     pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
-        crate::execution::block_on(self.service.tasks(), future)
+        self.try_block_on(future)
+            .expect("test execution port must drive its task")
     }
 
     /// `future`, unless `deadline` passes first on the owner's timer.
@@ -620,15 +663,22 @@ impl Services {
         visible: bool,
         cancel_while_queued: Option<CancelToken>,
         work: impl FnOnce(Services) -> F + Send + 'static,
+        unavailable: impl FnOnce() + Send + 'static,
     ) -> bool
     where
         F: Future<Output = ()> + 'static,
     {
         if self.has_workers() {
+            if !self.service.tasks().ready() {
+                unavailable();
+                return true;
+            }
             let worker = self.clone();
             return self.submit(visible, move || {
                 let services = worker.clone();
-                worker.block_on(work(services))
+                if worker.try_block_on(work(services)).is_none() {
+                    unavailable();
+                }
             });
         }
         #[cfg(not(feature = "native"))]
@@ -647,7 +697,7 @@ impl Services {
             }));
             return true;
         }
-        let _ = (visible, cancel_while_queued, work);
+        let _ = (visible, cancel_while_queued, work, unavailable);
         false
     }
 
@@ -1033,14 +1083,25 @@ fn with_epoch<R>(
 }
 
 impl Lane {
-    fn initialize(&self) -> &dyn crate::execution::Lane {
+    fn initialize(&self) -> Result<&dyn crate::execution::Lane, StoreError> {
+        if self.jobs.get().is_none() {
+            let _guard = self.initializing.lock().unwrap_or_else(|e| e.into_inner());
+            if self.jobs.get().is_none() {
+                let lane = self
+                    .execution
+                    .lane(self.name)
+                    .map_err(|_| StoreError::Unavailable("cannot start store worker"))?;
+                let _ = self.jobs.set(lane);
+            }
+        }
         self.jobs
-            .get_or_init(|| self.execution.lane(self.name).expect("start store service"))
-            .as_ref()
+            .get()
+            .map(|lane| lane.as_ref())
+            .ok_or(StoreError::Unavailable("cannot start store worker"))
     }
 
     fn lane(&self) -> Result<&dyn crate::execution::Lane, StoreError> {
-        let lane = self.initialize();
+        let lane = self.initialize()?;
         if lane.is_current() {
             return Err(StoreError::Unavailable("recursive store request"));
         }
@@ -1354,6 +1415,183 @@ mod tests {
         fn is_current(&self) -> bool {
             false
         }
+    }
+
+    struct FailingLaneExecution;
+    impl crate::execution::Execution for FailingLaneExecution {
+        fn lane(&self, _: &'static str) -> std::io::Result<Box<dyn crate::execution::Lane>> {
+            Err(std::io::Error::other("synthetic lane spawn refusal"))
+        }
+
+        fn worker(&self, _: String, _: crate::execution::Job) -> std::io::Result<()> {
+            Err(std::io::Error::other("synthetic worker spawn refusal"))
+        }
+
+        fn tasks(&self) -> Box<dyn crate::execution::Tasks> {
+            Box::new(FailingTasks)
+        }
+    }
+
+    struct FailingTasks;
+    impl crate::execution::Tasks for FailingTasks {
+        fn ready(&self) -> bool {
+            false
+        }
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn spawn_blocking(&self, _: crate::execution::Job) {}
+        fn block_on(&self, _: crate::execution::LocalTask<'_>) -> bool {
+            false
+        }
+        fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
+            Box::pin(std::future::ready(()))
+        }
+    }
+
+    #[test]
+    fn failed_lane_initialization_is_a_store_unavailable_error() {
+        let lane = super::Lane::new("synthetic-failed-lane", Arc::new(FailingLaneExecution));
+        let error = lane.queue(Box::new(|_| panic!("failed initialization ran a job")));
+        assert!(matches!(
+            error,
+            Err(iptv_store_sqlite::StoreError::Unavailable(
+                "cannot start store worker"
+            ))
+        ));
+    }
+
+    #[test]
+    fn failed_task_runtime_reports_unavailable_instead_of_queue_saturation() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x79; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(FailingLaneExecution),
+            crate::native::entropy,
+        );
+        let owner = Arc::new(Service::new(ports));
+        owner.epochs.begin();
+        let services = owner.accept();
+        let unavailable = Arc::new(AtomicBool::new(false));
+        let reported = unavailable.clone();
+        assert!(services.submit_import(
+            true,
+            None,
+            |_| async {},
+            move || {
+                reported.store(true, Ordering::SeqCst);
+            }
+        ));
+        assert!(unavailable.load(Ordering::SeqCst));
+        assert!(!owner.drain_on_shutdown());
+    }
+
+    #[test]
+    fn a_task_executor_that_cannot_drive_a_future_returns_none() {
+        let result = crate::execution::try_block_on(&FailingTasks, async { 7 });
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn shutdown_closes_admission_when_the_writer_lane_cannot_start() {
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x77; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(FailingLaneExecution),
+            crate::native::entropy,
+        );
+        let owner = Arc::new(Service::new(ports));
+        owner.epochs.begin();
+        assert!(!owner.drain_on_shutdown());
+        assert!(!owner.accept().is_current());
+    }
+
+    #[test]
+    fn failed_writer_start_still_drains_already_started_reader_lanes() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct RunsBarrier(Arc<AtomicBool>);
+        impl crate::execution::Lane for RunsBarrier {
+            fn push(&self, job: crate::execution::Job) -> bool {
+                job();
+                true
+            }
+            fn run(&self, job: crate::execution::Job, _: Option<std::time::Duration>) -> bool {
+                job();
+                self.0.store(true, Ordering::SeqCst);
+                true
+            }
+            fn is_current(&self) -> bool {
+                false
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x76; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(FailingLaneExecution),
+            crate::native::entropy,
+        );
+        let owner = Arc::new(Service::new(ports));
+        owner.epochs.begin();
+        let reader_drained = Arc::new(AtomicBool::new(false));
+        let analysis_drained = Arc::new(AtomicBool::new(false));
+        assert!(
+            owner
+                .reader
+                .jobs
+                .set(Box::new(RunsBarrier(reader_drained.clone())))
+                .is_ok()
+        );
+        assert!(
+            owner
+                .analysis
+                .jobs
+                .set(Box::new(RunsBarrier(analysis_drained.clone())))
+                .is_ok()
+        );
+        let writer_finished = AtomicBool::new(false);
+
+        assert!(!owner.drain_on_shutdown_with(|| {
+            writer_finished.store(true, Ordering::SeqCst);
+        }));
+        assert!(writer_finished.load(Ordering::SeqCst));
+        assert!(reader_drained.load(Ordering::SeqCst));
+        assert!(analysis_drained.load(Ordering::SeqCst));
+        assert!(!owner.accept().is_current());
+    }
+
+    #[test]
+    fn shutdown_uses_one_deadline_for_all_three_contended_lanes() {
+        use std::time::{Duration, Instant};
+
+        let directory = tempfile::tempdir().unwrap();
+        let owner = service(directory.path(), 0x78);
+        owner.epochs.begin();
+        let writer_release = hold_lane(&owner.writer);
+        let reader_release = hold_lane(&owner.reader);
+        let analysis_release = hold_lane(&owner.analysis);
+        let deadline = Instant::now() + Duration::from_millis(150);
+        let started = Instant::now();
+        assert!(!owner.drain_on_shutdown_until(deadline, || {}));
+        assert!(
+            started.elapsed() < Duration::from_millis(400),
+            "three barriers exceeded the shared deadline: {:?}",
+            started.elapsed()
+        );
+
+        writer_release.send(()).unwrap();
+        reader_release.send(()).unwrap();
+        analysis_release.send(()).unwrap();
+        assert!(owner.writer.barrier(Duration::from_secs(5), |_| {}));
+        assert!(owner.reader.barrier(Duration::from_secs(5), |_| {}));
+        assert!(owner.analysis.barrier(Duration::from_secs(5), |_| {}));
     }
 
     /// A host loop that is never polled: blocking requests run inline.

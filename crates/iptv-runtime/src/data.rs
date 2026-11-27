@@ -427,7 +427,7 @@ pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), Stor
 
 fn run_import(owner: &Rc<Runtime>, source: StoredSource, purpose: Purpose, edit: bool) {
     let (job, cancel, report) = library::prepare_import(owner, source, purpose, edit);
-    start_import_with(owner, job, cancel, report);
+    let _ = start_import_with(owner, job, cancel, |_| report);
 }
 
 pub fn refresh_guide_status(owner: &Rc<Runtime>) {
@@ -1311,17 +1311,20 @@ pub fn start_import(
     on_update: impl Fn(Update) + 'static,
 ) -> CancelToken {
     let cancel = CancelToken::new();
-    start_import_with(owner, job, cancel.clone(), on_update);
+    let _ = start_import_with(owner, job, cancel.clone(), |_| on_update);
     cancel
 }
 
 /// [`start_import`] with the caller's cancel token.
-fn start_import_with(
+pub(crate) fn start_import_with<F>(
     owner: &std::rc::Rc<crate::Runtime>,
     job: Job,
     cancel: CancelToken,
-    on_update: impl Fn(Update) + 'static,
-) {
+    on_update: impl FnOnce(u64) -> F,
+) -> u64
+where
+    F: Fn(Update) + 'static,
+{
     let purpose = job.purpose;
     let mut import_source = job.stored;
     let completion = crate::library::import_completion(cancel.clone());
@@ -1339,6 +1342,13 @@ fn start_import_with(
     } else {
         owner.generation.with(Cell::get)
     };
+    let on_update = on_update(generation);
+    if !owner.has_tasks() {
+        on_update(Update::Done(Err(ImportFailure::new(
+            FailureKind::Unavailable,
+        ))));
+        return generation;
+    }
     // Only the startup refresh may start the last channel.
     let resume = purpose == Purpose::Startup;
     let (tx, mut rx) = unbounded_channel();
@@ -1408,14 +1418,24 @@ fn start_import_with(
                     return;
                 }
                 let failed = tx.clone();
+                let failed_if_worker_unavailable = tx.clone();
                 // A new source with a typed guide waits for its terminal
                 // result even after Cancel. Waiting for an unrelated import
                 // on the browser lane should not delay that result.
                 let cancel_while_queued =
                     (job.stored.is_none() && job.epg_url.is_some()).then(|| cancel.clone());
-                if !services.submit_import(visible, cancel_while_queued, move |worker| async move {
-                    pipeline(&worker, job, &tx, &cancel, &revoked, &authorization).await;
-                }) {
+                if !services.submit_import(
+                    visible,
+                    cancel_while_queued,
+                    move |worker| async move {
+                        pipeline(&worker, job, &tx, &cancel, &revoked, &authorization).await;
+                    },
+                    move || {
+                        let _ = failed_if_worker_unavailable.send(Msg::Playlist(Err(
+                            ImportFailure::new(FailureKind::Unavailable),
+                        )));
+                    },
+                ) {
                     let _ = failed.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Busy))));
                 }
             }
@@ -1602,6 +1622,7 @@ fn start_import_with(
             }
         }
     });
+    generation
 }
 
 /// Puts `imported` on screen unless a newer import owns the guide.
@@ -2041,6 +2062,7 @@ async fn read_guide(
         }
     };
     let (tx, mut rx) = unbounded_channel();
+    let failed_tx = tx.clone();
     let services = owner.services();
     if !services.can_import() {
         // Guide reads cannot run on this host: no check is owed and none
@@ -2053,6 +2075,9 @@ async fn read_guide(
         None,
         move |worker| async move {
             guide_pipeline(&worker, source, &tx, read, &cancel).await;
+        },
+        move || {
+            let _ = failed_tx.send(Msg::NoCheck { source });
         },
     ) {
         owner.end_guide_check(source);
@@ -2133,6 +2158,34 @@ pub fn generation(owner: &crate::Runtime) -> u64 {
 mod playlist_lifecycle_tests {
     use super::*;
     use iptv_providers::{SecretUrl, model::M3uSourceConfig};
+
+    #[test]
+    fn unbound_import_reports_unavailable_instead_of_losing_its_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().into(),
+            |_| Ok(crate::model::DatabaseKey::from_bytes([0x72; 32])),
+        )));
+        owner.start_services();
+        let reports = Rc::new(RefCell::new(Vec::new()));
+        let sink = reports.clone();
+        start_import(
+            &owner,
+            Job {
+                source: synthetic("Synthetic unbound import"),
+                epg_url: None,
+                stored: None,
+                purpose: Purpose::Add,
+                edit: false,
+            },
+            move |update| sink.borrow_mut().push(update),
+        );
+        assert!(matches!(
+            reports.borrow().as_slice(),
+            [Update::Done(Err(failure))] if failure.kind == FailureKind::Unavailable
+        ));
+        assert!(owner.drain_services());
+    }
 
     fn run(test: impl AsyncFnOnce(Rc<Runtime>)) {
         let directory = tempfile::tempdir().unwrap();

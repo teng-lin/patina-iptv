@@ -337,8 +337,8 @@ async fn record_now_says_a_full_library_before_it_starts() {
     request.end = request.start + 20;
     let error = owner.schedule_recording(request.clone()).await.unwrap_err();
     assert_eq!(
-        error.unavailable_reason(),
-        Some("The recordings library is full. Delete recordings to record more.")
+        error.recording_space_refusal(),
+        Some(iptv_core::recording::SpaceRefusal::LibraryFull)
     );
     assert!(
         owner.recording_snapshot().is_empty(),
@@ -356,12 +356,15 @@ fn space_admission_counts_a_library_not_created_yet_as_empty() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("generated-app");
     std::fs::create_dir_all(&root).unwrap();
-    assert_eq!(space_admission(&root, &[], 60), Ok(()));
+    assert!(space_admission(&root, &[], 60).is_ok());
     // A day at the estimated rate is capped at one recording's maximum,
     // which a real temporary directory may or may not hold: either answer
     // is the free-space check, never a storage failure.
-    if let Err(reason) = space_admission(&root, &[], iptv_core::recording::MAX_DURATION) {
-        assert!(reason.contains("free space"), "{reason}");
+    if let Err(error) = space_admission(&root, &[], iptv_core::recording::MAX_DURATION) {
+        assert_eq!(
+            error.recording_space_refusal(),
+            Some(iptv_core::recording::SpaceRefusal::InsufficientFreeSpace)
+        );
     }
 }
 

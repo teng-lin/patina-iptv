@@ -253,6 +253,8 @@ pub enum Step {
         focus: Target,
     },
     Form,
+    /// The host is admitting a submitted import and will assign its identity.
+    Admitting,
     /// The form is locked; Back or [`WizardEvent::Cancel`] stops it.
     Processing {
         id: ImportId,
@@ -387,9 +389,8 @@ pub enum WizardEffect {
     },
     /// Answer with [`WizardEvent::FilePicked`].
     PickFile,
-    /// Answer with progress, then one result, all carrying `id`.
+    /// Submit a draft. The runtime admits it and assigns the operation ID.
     StartImport {
-        id: ImportId,
         draft: PlaylistDraft,
     },
     CancelImport {
@@ -428,7 +429,6 @@ pub struct Wizard {
     /// The last import's failure, shown on the form until the next submit.
     failure: Option<ImportFailure>,
     notice: Option<Notice>,
-    next_id: u64,
 }
 
 impl Wizard {
@@ -470,7 +470,6 @@ impl Wizard {
             errors: BTreeMap::new(),
             failure: None,
             notice: None,
-            next_id: 1,
         }
     }
 
@@ -524,7 +523,9 @@ impl Wizard {
             Step::Form => Some(self.form_focus),
             Step::Succeeded { .. } => Some(Target::Done),
             Step::Failed { .. } => Some(Target::ChooseAnotherType),
-            Step::Processing { .. } | Step::Canceling { .. } | Step::Closed => None,
+            Step::Admitting | Step::Processing { .. } | Step::Canceling { .. } | Step::Closed => {
+                None
+            }
         }
     }
 
@@ -534,6 +535,7 @@ impl Wizard {
             Step::Empty => self.on_empty(event),
             Step::ChooseType { focus } => self.on_choose_type(focus, event),
             Step::Form => self.on_form(event),
+            Step::Admitting => None,
             Step::Processing { id, .. } => self.on_processing(id, event),
             Step::Canceling { id } => match event {
                 WizardEvent::Succeeded { .. } | WizardEvent::Failed { .. } => {
@@ -795,14 +797,18 @@ impl Wizard {
             self.focus_field(*first);
             return None;
         }
-        let id = ImportId(self.next_id);
-        self.next_id += 1;
         self.failure = None;
-        self.step = Step::Processing { id, progress: None };
+        self.step = Step::Admitting;
         Some(WizardEffect::StartImport {
-            id,
             draft: self.draft(),
         })
+    }
+
+    /// The runtime accepted the submitted draft and assigned its identity.
+    pub fn admit_import(&mut self, id: ImportId) {
+        if self.step == Step::Admitting {
+            self.step = Step::Processing { id, progress: None };
+        }
     }
 
     /// The draft for the current values. Only meaningful once they validate.
@@ -937,9 +943,31 @@ mod tests {
         w
     }
 
+    #[test]
+    fn submit_waits_for_runtime_admission_before_processing() {
+        let mut w = filled(PlaylistKind::M3uUrl);
+        let effect = w.handle(E::Tap(Target::Submit));
+        let Some(WizardEffect::StartImport { draft }) = effect else {
+            panic!("validated submit should request import admission");
+        };
+        assert_eq!(w.step(), Step::Admitting);
+        assert_eq!(w.handle(E::Cancel), None);
+        assert_eq!(w.step(), Step::Admitting);
+
+        let id = ImportId(44);
+        w.admit_import(id);
+        assert_eq!(w.step(), Step::Processing { id, progress: None });
+        assert!(matches!(draft.source, DraftSource::M3uUrl { .. }));
+    }
+
     fn submit(w: &mut Wizard) -> Option<(ImportId, PlaylistDraft)> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         match w.handle(E::Tap(Target::Submit)) {
-            Some(WizardEffect::StartImport { id, draft }) => Some((id, draft)),
+            Some(WizardEffect::StartImport { draft }) => {
+                let id = ImportId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+                w.admit_import(id);
+                Some((id, draft))
+            }
             _ => None,
         }
     }

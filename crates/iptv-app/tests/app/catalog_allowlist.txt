@@ -10,6 +10,29 @@
 [untranslated]
 
 [not-shown]
+# Internal runtime classifier/debug labels and fixed diagnostics. Startup UI
+# uses only cataloged reasons and generic text; these labels stay in logs.
+iptv-runtime/src/error.rs	SettingsLocked
+iptv-runtime/src/error.rs	ProviderCapacity
+iptv-runtime/src/error.rs	Unavailable
+iptv-runtime/src/error.rs	RestartRequired
+iptv-runtime/src/error.rs	SchemaTooNew
+iptv-runtime/src/error.rs	CorruptDatabase
+iptv-runtime/src/error.rs	WorkerUnavailable
+iptv-runtime/src/error.rs	RecordingRequest
+iptv-runtime/src/error.rs	RecordingSpace
+iptv-runtime/src/error.rs	Storage
+iptv-runtime/src/error.rs	settings are locked
+iptv-runtime/src/error.rs	provider viewing capacity is full
+iptv-runtime/src/error.rs	store unavailable: {reason}
+iptv-runtime/src/error.rs	database schema version {found} is newer than this build supports ({supported})
+iptv-runtime/src/error.rs	database is corrupt
+iptv-runtime/src/error.rs	cannot start store worker
+iptv-runtime/src/error.rs	recording request refused
+iptv-runtime/src/error.rs	recording space refused
+iptv-runtime/src/error.rs	storage operation failed
+iptv-runtime/src/store_service.rs	cannot start store worker
+iptv-runtime/src/native/execution.rs	network runtime initialization failed
 # Fixed Windows system interpreter and module paths.
 iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\Modules
 iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\powershell.exe

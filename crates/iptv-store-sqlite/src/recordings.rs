@@ -87,7 +87,7 @@ fn insert_job(
     require_channel(tx, request, authorized)?;
     request
         .validate(now)
-        .map_err(|m| StoreError::InvalidData(m.into()))?;
+        .map_err(|_| StoreError::InvalidData("recording request refused".into()))?;
     // An identical accepted request is idempotent, including a lost reply.
     if let Some(id) = tx
         .query_row(
@@ -122,7 +122,7 @@ fn insert_rule(
     use iptv_core::recording::Repeat;
     rule.request
         .validate(now)
-        .map_err(|m| StoreError::InvalidData(m.into()))?;
+        .map_err(|_| StoreError::InvalidData("recording request refused".into()))?;
     let repeat = match rule.repeat {
         Repeat::Daily => "daily",
         Repeat::Weekly => "weekly",
@@ -294,7 +294,7 @@ impl Store {
         require_channel(&tx, request, authorized)?;
         request
             .validate(now)
-            .map_err(|m| StoreError::InvalidData(m.into()))?;
+            .map_err(|_| StoreError::InvalidData("recording request refused".into()))?;
         let changed = tx.execute(
             "UPDATE recording_jobs SET starts_at=?1,ends_at=?2
             WHERE id=?3 AND source_id=?4 AND channel_id=?5 AND status='scheduled'

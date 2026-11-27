@@ -669,7 +669,9 @@ impl Runtime {
     /// start time (Record now asks for now). The app offers nothing that
     /// starts later: scheduled recording is retired.
     pub async fn schedule_recording(&self, request: Request) -> Result<JobId, Error> {
-        request.validate(now()).map_err(Error::unavailable)?;
+        request
+            .validate(now())
+            .map_err(Error::from_recording_request_refusal)?;
         let admission = self.recording_admission(&request).await?;
         if self.recordings.is_stopping() || !self.services().is_current() {
             return Err(Error::unavailable("Recording service unavailable"));
@@ -703,8 +705,8 @@ impl Runtime {
                 .services()
                 .spawn_blocking(move || space_admission(&root, &active, seconds))
                 .await;
-            if let Ok(Err(reason)) = checked {
-                return Err(Error::unavailable(reason));
+            if let Ok(Err(error)) = checked {
+                return Err(error);
             }
         }
         if request.start <= now() && !self.recordings.lock().recording_capacity(&request) {
@@ -1766,15 +1768,16 @@ fn storage_admission(directory: &Path, active: &[JobId]) -> std::io::Result<()> 
 /// whether the library's budget and the free space allow it
 /// ([`iptv_core::recording::check_space`]). A library not created yet holds
 /// nothing; its free space is its data directory's.
-fn space_admission(root: &Path, active: &[JobId], seconds: i64) -> Result<(), &'static str> {
+fn space_admission(root: &Path, active: &[JobId], seconds: i64) -> Result<(), Error> {
     let directory = media_directory(root);
     let library = match library_bytes(&directory, active) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
-        Err(_) => return Err("Recording storage unavailable"),
+        Err(_) => return Err(Error::unavailable("Recording storage unavailable")),
     };
     let free = available_space(&directory).or_else(|| available_space(root));
     iptv_core::recording::check_space(seconds, library, free)
+        .map_err(Error::from_recording_space_refusal)
 }
 
 /// What the library at `directory` holds and reserves ([`storage_admission`]).

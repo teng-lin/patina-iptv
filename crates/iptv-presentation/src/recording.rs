@@ -2,10 +2,32 @@
 
 use iptv_core::{
     on_demand::Progress,
-    recording::{Job, JobId, Request, RetiredSchedule, Status},
+    recording::{Job, JobId, Request, RequestRefusal, RetiredSchedule, SpaceRefusal, Status},
 };
 
 use crate::menu::Origin;
+
+pub fn request_refusal_message(refusal: RequestRefusal) -> &'static str {
+    match refusal {
+        RequestRefusal::UnavailableChannel => "Choose an available channel",
+        RequestRefusal::NameTooLong => "Recording name is too long",
+        RequestRefusal::InvalidDuration => {
+            "Choose a recording duration between one second and 24 hours"
+        }
+        RequestRefusal::AlreadyEnded => "This recording would already have ended",
+    }
+}
+
+pub fn space_refusal_message(refusal: SpaceRefusal) -> &'static str {
+    match refusal {
+        SpaceRefusal::LibraryFull => {
+            "The recordings library is full. Delete recordings to record more."
+        }
+        SpaceRefusal::InsufficientFreeSpace => {
+            "Not enough free space for this recording. Free some storage, then try again."
+        }
+    }
+}
 
 pub fn status_label(status: Status) -> &'static str {
     match status {

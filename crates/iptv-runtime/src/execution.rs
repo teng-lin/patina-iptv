@@ -170,6 +170,10 @@ pub enum Progress {
 
 /// One owner's task executor.
 pub trait Tasks: Send + Sync {
+    /// Whether the underlying executor can accept work now.
+    fn ready(&self) -> bool {
+        true
+    }
     /// Runs `task` to its end; nothing waits for it here.
     fn spawn(&self, task: Task);
 
@@ -178,8 +182,9 @@ pub trait Tasks: Send + Sync {
 
     /// Drives `future` to its end on the calling worker, with the task
     /// executor's timers and I/O available to it. Only workers call this,
-    /// never the UI thread.
-    fn block_on(&self, future: LocalTask<'_>);
+    /// never the UI thread. Returns false if the executor could not start;
+    /// in that case it drops `future` without polling it.
+    fn block_on(&self, future: LocalTask<'_>) -> bool;
 
     /// A future that ends after `duration`.
     fn delay(&self, duration: Duration) -> Task;
@@ -239,12 +244,12 @@ pub(crate) fn spawn_blocking<R: Send + 'static>(
 }
 
 /// Drives `future` to its end on the calling worker.
-pub(crate) fn block_on<F: Future>(tasks: &dyn Tasks, future: F) -> F::Output {
+pub(crate) fn try_block_on<F: Future>(tasks: &dyn Tasks, future: F) -> Option<F::Output> {
     let mut output = None;
-    tasks.block_on(Box::pin(async {
+    let completed = tasks.block_on(Box::pin(async {
         output = Some(future.await);
     }));
-    output.expect("block_on drives its future to the end")
+    completed.then_some(output).flatten()
 }
 
 /// The deadline passed before the future ended.

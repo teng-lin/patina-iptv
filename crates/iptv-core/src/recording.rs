@@ -23,12 +23,26 @@ pub fn estimated_bytes(seconds: i64) -> u64 {
 /// `library`: what the recordings library holds and reserves now (see
 /// [`LIBRARY_BYTES`]); `free`: the free space where it writes, `None` where
 /// the host cannot tell (then only the write itself can fail).
-pub fn check_space(seconds: i64, library: u64, free: Option<u64>) -> Result<(), &'static str> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpaceRefusal {
+    LibraryFull,
+    InsufficientFreeSpace,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestRefusal {
+    UnavailableChannel,
+    NameTooLong,
+    InvalidDuration,
+    AlreadyEnded,
+}
+
+pub fn check_space(seconds: i64, library: u64, free: Option<u64>) -> Result<(), SpaceRefusal> {
     if library.saturating_add(MAX_BYTES) > LIBRARY_BYTES {
-        return Err("The recordings library is full. Delete recordings to record more.");
+        return Err(SpaceRefusal::LibraryFull);
     }
     if free.is_some_and(|free| free < estimated_bytes(seconds)) {
-        return Err("Not enough free space for this recording. Free some storage, then try again.");
+        return Err(SpaceRefusal::InsufficientFreeSpace);
     }
     Ok(())
 }
@@ -62,18 +76,18 @@ pub struct Request {
     pub end: i64,
 }
 impl Request {
-    pub fn validate(&self, now: i64) -> Result<(), &'static str> {
+    pub fn validate(&self, now: i64) -> Result<(), RequestRefusal> {
         if self.source <= 0 || self.channel.is_empty() || self.channel.len() > 4096 {
-            return Err("Choose an available channel");
+            return Err(RequestRefusal::UnavailableChannel);
         }
         if self.title.len() > 4096 || self.channel_name.len() > 4096 {
-            return Err("Recording name is too long");
+            return Err(RequestRefusal::NameTooLong);
         }
         if self.start < 0 || self.end <= self.start || self.end - self.start > MAX_DURATION {
-            return Err("Choose a recording duration between one second and 24 hours");
+            return Err(RequestRefusal::InvalidDuration);
         }
         if self.end <= now {
-            return Err("This recording would already have ended");
+            return Err(RequestRefusal::AlreadyEnded);
         }
         Ok(())
     }
@@ -150,23 +164,20 @@ mod tests {
         assert_eq!(check_space(hour, 0, None), Ok(()));
         // The new capture's reservation must fit the library's budget.
         assert_eq!(check_space(hour, LIBRARY_BYTES - MAX_BYTES, None), Ok(()));
-        assert!(
-            check_space(hour, LIBRARY_BYTES - MAX_BYTES + 1, Some(100 * GIB))
-                .unwrap_err()
-                .contains("library is full")
+        assert_eq!(
+            check_space(hour, LIBRARY_BYTES - MAX_BYTES + 1, Some(100 * GIB)),
+            Err(SpaceRefusal::LibraryFull)
         );
         // A full library is reported before a full disk.
-        assert!(
-            check_space(hour, LIBRARY_BYTES, Some(0))
-                .unwrap_err()
-                .contains("library is full")
+        assert_eq!(
+            check_space(hour, LIBRARY_BYTES, Some(0)),
+            Err(SpaceRefusal::LibraryFull)
         );
         // The disk must hold the estimate for the requested length.
         assert_eq!(check_space(hour, 0, Some(3_600_000_000)), Ok(()));
-        assert!(
-            check_space(hour, 0, Some(3_599_999_999))
-                .unwrap_err()
-                .contains("free space")
+        assert_eq!(
+            check_space(hour, 0, Some(3_599_999_999)),
+            Err(SpaceRefusal::InsufficientFreeSpace)
         );
         assert_eq!(check_space(600, 0, Some(600_000_000)), Ok(()));
     }
@@ -194,10 +205,16 @@ mod tests {
     fn invalid_windows_and_ended_programs_are_rejected() {
         let mut r = job(1).request;
         assert!(r.validate(150).is_ok());
-        assert!(r.validate(200).is_err());
+        assert_eq!(r.validate(200), Err(RequestRefusal::AlreadyEnded));
         r.end = r.start;
-        assert!(r.validate(0).is_err());
+        assert_eq!(r.validate(0), Err(RequestRefusal::InvalidDuration));
         r.end = i64::MAX;
-        assert!(r.validate(0).is_err());
+        assert_eq!(r.validate(0), Err(RequestRefusal::InvalidDuration));
+        r.end = 200;
+        r.channel.clear();
+        assert_eq!(r.validate(0), Err(RequestRefusal::UnavailableChannel));
+        r.channel = "channel".into();
+        r.channel_name = "x".repeat(4097);
+        assert_eq!(r.validate(0), Err(RequestRefusal::NameTooLong));
     }
 }

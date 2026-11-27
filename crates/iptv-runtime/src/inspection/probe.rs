@@ -549,12 +549,13 @@ impl ProbeLease {
             cancel: cancel.clone(),
             timeout: deadline.saturating_duration_since(Instant::now()),
         };
-        let valid = self.0.services.block_on(guarded(
-            &self.0.services,
-            &control,
-            deadline,
-            async move { current.await.map_err(|_| InspectionError::Storage)? },
-        ))?;
+        let valid = self
+            .0
+            .services
+            .try_block_on(guarded(&self.0.services, &control, deadline, async move {
+                current.await.map_err(|_| InspectionError::Storage)?
+            }))
+            .ok_or(InspectionError::Storage)??;
         if !valid {
             return Err(InspectionError::StaleEvidence);
         }
@@ -882,8 +883,9 @@ impl Runtime {
             let key = key.ok_or(InspectionError::Storage)?;
             let reservation = Reservation::acquire(stages.clone())?;
             check(&accepted, &cancel, deadline)?;
-            let configuration =
-                accepted.block_on(guarded(&accepted, &worker_control, deadline, config))?;
+            let configuration = accepted
+                .try_block_on(guarded(&accepted, &worker_control, deadline, config))
+                .ok_or(InspectionError::Storage)??;
             if configuration.url.expose().len() > 4096 {
                 return Err(InspectionError::InvalidRequest);
             }
@@ -944,10 +946,11 @@ impl Runtime {
             if let Some(agent) = configuration.user_agent {
                 request = request.with_header("User-Agent", agent);
             }
-            let mut response =
-                accepted.block_on(guarded(&accepted, &worker_control, deadline, async {
+            let mut response = accepted
+                .try_block_on(guarded(&accepted, &worker_control, deadline, async {
                     client.fetch_stream(request).await.map_err(network_error)
-                }))?;
+                }))
+                .ok_or(InspectionError::Storage)??;
             if !response.is_success() {
                 return Err(InspectionError::Network);
             }
@@ -957,10 +960,11 @@ impl Runtime {
             let mut error = None;
             loop {
                 check(&accepted, &cancel, deadline)?;
-                let chunk =
-                    accepted.block_on(guarded(&accepted, &worker_control, deadline, async {
+                let chunk = accepted
+                    .try_block_on(guarded(&accepted, &worker_control, deadline, async {
                         response.body.next_chunk().await.map_err(network_error)
-                    }))?;
+                    }))
+                    .ok_or(InspectionError::Storage)??;
                 let Some(chunk) = chunk else { break };
                 for part in chunk.chunks(64 * 1024) {
                     check(&accepted, &cancel, deadline)?;
@@ -1044,10 +1048,11 @@ impl Runtime {
                         None => true,
                     })
             });
-            if !accepted
-                .block_on(current)
-                .map_err(|_| InspectionError::Storage)?
-            {
+            let current = accepted
+                .try_block_on(current)
+                .ok_or(InspectionError::Storage)?
+                .map_err(|_| InspectionError::Storage)?;
+            if !current {
                 return Err(InspectionError::StaleEvidence);
             }
             {

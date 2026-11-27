@@ -36,6 +36,29 @@ impl ExternalPlaybackAuthorization {
 }
 
 impl Runtime {
+    /// Starts a wizard import with a runtime-owned identity and its actual
+    /// presentation generation before constructing the callback.
+    pub fn start_wizard_import<F>(
+        self: &Rc<Self>,
+        job: crate::data::Job,
+        on_admitted: impl FnOnce(ImportId, u64),
+        on_update: impl FnOnce(ImportId, u64) -> F,
+    ) -> (ImportId, u64)
+    where
+        F: Fn(crate::data::Update) + 'static,
+    {
+        let ticket = self.wizard_tickets.get().wrapping_add(1).max(1);
+        self.wizard_tickets.set(ticket);
+        let id = ImportId(ticket);
+        let cancel = CancelToken::new();
+        self.remember_wizard_import(id, cancel.clone());
+        let store_epoch = crate::data::start_import_with(self, job, cancel.clone(), |epoch| {
+            on_admitted(id, epoch);
+            on_update(id, epoch)
+        });
+        (id, store_epoch)
+    }
+
     pub fn browser_generation(&self) -> u64 {
         self.generation.get()
     }
@@ -100,8 +123,11 @@ impl Runtime {
             token.cancel();
         }
     }
-    pub fn finish_wizard_import(&self) {
-        self.wizard_import.borrow_mut().take();
+    pub fn finish_wizard_import(&self, id: ImportId) {
+        let mut running = self.wizard_import.borrow_mut();
+        if running.as_ref().is_some_and(|(at, _)| *at == id) {
+            running.take();
+        }
     }
     /// Starts a backup operation unless one is running (the user is told).
     pub fn begin_backup(self: &Rc<Self>) -> Option<crate::backup::Busy> {

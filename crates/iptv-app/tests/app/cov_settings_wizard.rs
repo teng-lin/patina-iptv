@@ -50,6 +50,9 @@ fn answer(mut stream: TcpStream) {
     let (status, body) = if path.starts_with("/hold") {
         std::thread::sleep(Duration::from_secs(60));
         return;
+    } else if path.starts_with("/delayed.m3u") {
+        std::thread::sleep(Duration::from_millis(800));
+        ("200 OK", PLAYLIST)
     } else if path.starts_with("/empty.m3u") {
         ("200 OK", "#EXTM3U\n")
     } else {
@@ -335,6 +338,66 @@ fn the_wizard_and_the_choosers() {
     assert!(!app.shows("Playlist added"));
 
     choosers(&mut app);
+}
+
+#[test]
+fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
+    struct ReleaseReports;
+    impl Drop for ReleaseReports {
+        fn drop(&mut self) {
+            iptv_app::hold_reports(false);
+        }
+    }
+
+    let Some(home) = isolated!() else { return };
+    let data = home.data_dir();
+    std::fs::create_dir_all(&data).unwrap();
+    let settings = iptv_settings::Settings::new();
+    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
+    let port = serve();
+    let local = format!("http://127.0.0.1:{port}");
+    let config = EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    app.answer_picks_myself();
+    step(app.wait_for("id:wizard-welcome"));
+
+    iptv_app::hold_reports(true);
+    let _release_reports = ReleaseReports;
+    step(app.press("id:wizard-welcome-add"));
+    step(app.wait_for("id:wizard-source-picker"));
+    step(app.press("text:Playlist link"));
+    let old_url = format!("{local}/empty.m3u");
+    enter(&mut app, "http://…/playlist.m3u", &old_url);
+    step(app.press("text:Add playlist"));
+    step(app.wait_for("text:Adding the playlist"));
+    step(app.wait_until("the old import report", IMPORT, |_| {
+        iptv_app::reports_waiting() > 0
+    }));
+
+    // With no required guide, cancel returns to the form while the worker's
+    // result callback is still held. Close this wizard before reopening it.
+    step(app.press("text:Cancel"));
+    step(app.wait_for("text:Stopped. Your entries are kept; add the playlist again when ready."));
+    step(app.press_key("backspace"));
+    step(app.wait_for("id:wizard-welcome"));
+
+    step(app.press("id:wizard-welcome-add"));
+    step(app.wait_for("id:wizard-source-picker"));
+    step(app.press("text:Playlist link"));
+    let new_url = format!("{local}/delayed.m3u");
+    enter(&mut app, "http://…/playlist.m3u", &new_url);
+    step(app.press("text:Add playlist"));
+    step(app.wait_for("text:Adding the playlist"));
+
+    // Let the old empty-playlist failure arrive while the reopened wizard is
+    // processing its own import. Its admission ID must fence that callback.
+    iptv_app::hold_reports(false);
+    step(app.wait_for_within("text:Playlist added", IMPORT));
+    step(app.wait_for("text:2 channels in 1 group"));
+    assert!(!app.shows("The playlist loaded but has nothing to watch in it."));
 }
 
 /// The choosers over full-screen video.

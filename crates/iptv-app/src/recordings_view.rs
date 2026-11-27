@@ -427,7 +427,8 @@ fn start(ui: Ui, mut request: Request) {
     // capture starts now, or the runtime would count the wait as a gap.
     let now = crate::clock::wall_unix();
     request.start = request.start.max(now);
-    if let Err(message) = request.validate(now) {
+    if let Err(refusal) = request.validate(now) {
+        let message = iptv_presentation::recording::request_refusal_message(refusal);
         crate::settings_view::notify(tr(message));
         ui.recordings.update(|s| s.show_error(message));
         return;
@@ -448,9 +449,7 @@ fn start(ui: Ui, mut request: Request) {
                 }
             }
             Err(error) => crate::settings_view::notify(translated_reason(
-                error
-                    .unavailable_reason()
-                    .unwrap_or("Recording action failed"),
+                error_message(error).unwrap_or("Recording action failed"),
             )),
         }
         let jobs = if result.is_ok() {
@@ -458,15 +457,26 @@ fn start(ui: Ui, mut request: Request) {
         } else {
             None
         };
-        let error = result.as_ref().err().map(|error| {
-            error
-                .unavailable_reason()
-                .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-                .unwrap_or("Recording action failed")
-        });
+        let error = result
+            .as_ref()
+            .err()
+            .map(|error| error_message(error).unwrap_or("Recording action failed"))
+            .filter(|reason| iptv_presentation::i18n::is_cataloged(reason));
         ui.recordings.update(|s| s.finish_start(jobs, error));
         reload(ui);
     });
+}
+
+fn error_message(error: &iptv_runtime::Error) -> Option<&'static str> {
+    error
+        .recording_request_refusal()
+        .map(iptv_presentation::recording::request_refusal_message)
+        .or_else(|| {
+            error
+                .recording_space_refusal()
+                .map(iptv_presentation::recording::space_refusal_message)
+        })
+        .or_else(|| error.unavailable_reason())
 }
 fn select_job(ui: Ui, id: JobId) {
     if ui.recordings.with_untracked(|s| s.busy) {

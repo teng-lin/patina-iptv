@@ -1,7 +1,7 @@
 //! The first-run / add-playlist wizard screen. `iptv_presentation::wizard` owns the
 //! flow, focus and validation; this draws each step full screen, feeds it
 //! remote keys and taps, and performs its effects (text entry, clipboard,
-//! file picker, import through `data::start_import`).
+//! file picker, import through the runtime's wizard operation).
 //!
 //! Remote: Up/Down move, OK activates (a field opens text entry), Menu
 //! pastes into the focused field, Back goes back (on the first-run empty
@@ -178,10 +178,11 @@ fn perform(ui: Ui, effect: WizardEffect) {
             };
             send(ui, WizardEvent::FilePicked(path));
         }),
-        WizardEffect::StartImport { id, draft } => {
+        WizardEffect::StartImport { draft } => {
+            let runtime = crate::runtime_owner::runtime();
             let fallback = iptv_presentation::i18n::translate(crate::i18n::language(), "Playlist");
             let (source, epg_url) = data::source_from_draft(&draft, fallback);
-            log::info!("iptv wizard: import {id:?} of {:?}", source.kind());
+            let source_kind = source.kind();
             let job = Job {
                 source,
                 epg_url,
@@ -189,26 +190,59 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 purpose: Purpose::Add,
                 edit: false,
             };
-            let token = data::start_import(&crate::runtime_owner::runtime(), job, move |update| {
-                send(
-                    ui,
-                    match update {
-                        Update::Progress(progress) => WizardEvent::Progress { id, progress },
-                        Update::Done(Ok(counts)) => WizardEvent::Succeeded { id, counts },
-                        Update::Done(Err(failure)) => WizardEvent::Failed { id, failure },
-                    },
-                )
-            });
-            crate::runtime_owner::runtime().remember_wizard_import(id, token);
+            let (id, _) = runtime.start_wizard_import(
+                job,
+                move |id, _store_epoch| {
+                    ui.wizard.update(|open| {
+                        if let Some(open) = open {
+                            open.wizard.admit_import(id);
+                        }
+                    });
+                },
+                move |id, store_epoch| move |update| {
+                    let runtime = crate::runtime_owner::runtime();
+                    let current_import = read(ui, |wizard| {
+                            matches!(wizard.step(),
+                                Step::Processing { id: current, .. } | Step::Canceling { id: current }
+                                    if current == id)
+                        })
+                        .unwrap_or(false);
+                    let current_epoch = runtime.browser_generation() == store_epoch;
+                    if !current_import || (!current_epoch && matches!(&update, Update::Progress(_))) {
+                        return;
+                    }
+                    if matches!(&update, Update::Done(_)) {
+                        runtime.finish_wizard_import(id);
+                    }
+                    send(
+                        ui,
+                        match update {
+                            Update::Progress(progress) => WizardEvent::Progress { id, progress },
+                            Update::Done(Ok(counts)) => WizardEvent::Succeeded { id, counts },
+                            Update::Done(Err(failure)) => WizardEvent::Failed { id, failure },
+                        },
+                    )
+                },
+            );
+            log::info!("iptv wizard: import {id:?} of {source_kind:?}");
         }
         WizardEffect::CancelImport { id } => {
-            crate::runtime_owner::runtime().cancel_wizard_import(id)
+            let runtime = crate::runtime_owner::runtime();
+            runtime.cancel_wizard_import(id);
+            runtime.finish_wizard_import(id);
         }
         WizardEffect::Close(exit) => {
-            crate::runtime_owner::runtime().parental_content_closed();
+            let runtime = crate::runtime_owner::runtime();
+            runtime.parental_content_closed();
             log::info!("iptv wizard: closed ({exit:?})");
+            let import_id = match exit {
+                WizardExit::Added { id } => Some(id),
+                WizardExit::Dismissed => None,
+            };
+            if let Some(id) = import_id {
+                runtime.finish_wizard_import(id);
+            }
             if let WizardExit::Added { .. } = exit {
-                crate::runtime_owner::runtime().finish_wizard_import();
                 // Added from the playlists or settings screen: "Watch"
                 // goes to the guide.
                 crate::playlists_view::close(ui);
@@ -283,7 +317,7 @@ fn screen_of(w: &Wizard) -> Option<Screen> {
         Step::Empty => Screen::Empty,
         Step::ChooseType { .. } => Screen::ChooseType,
         Step::Form => Screen::Form(w.kind()),
-        Step::Processing { .. } | Step::Canceling { .. } => Screen::Processing,
+        Step::Admitting | Step::Processing { .. } | Step::Canceling { .. } => Screen::Processing,
         Step::Succeeded { .. } => Screen::Succeeded,
         Step::Failed { .. } => Screen::Failed,
         Step::Closed => return None,

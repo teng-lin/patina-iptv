@@ -17,7 +17,7 @@
 //! requests, which must not hold this runtime's workers.
 
 use std::io;
-use std::sync::{OnceLock, mpsc};
+use std::sync::{Mutex, OnceLock, mpsc};
 use std::thread::ThreadId;
 use std::time::Duration;
 
@@ -98,18 +98,50 @@ impl Lane for ThreadLane {
 #[derive(Default)]
 struct TokioTasks {
     runtime: OnceLock<Runtime>,
+    initializing: Mutex<()>,
 }
 
 impl TokioTasks {
-    fn runtime(&self) -> &Runtime {
-        self.runtime.get_or_init(|| {
+    fn try_runtime(&self) -> io::Result<&Runtime> {
+        self.try_runtime_with(|| {
             Builder::new_multi_thread()
                 .worker_threads(2)
                 .thread_name("iptv-net")
                 .enable_all()
                 .build()
-                .expect("start the network runtime")
         })
+    }
+
+    fn try_runtime_with(
+        &self,
+        build: impl FnOnce() -> io::Result<Runtime>,
+    ) -> io::Result<&Runtime> {
+        if self.runtime.get().is_none() {
+            let _guard = self.initializing.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(runtime) = self.runtime.get() {
+                return Ok(runtime);
+            }
+            let runtime = build()?;
+            // Only this initializer can reach `set` while holding the mutex.
+            let _ = self.runtime.set(runtime);
+        }
+        self.runtime
+            .get()
+            .ok_or_else(|| io::Error::other("network runtime initialization failed"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TokioTasks;
+
+    #[test]
+    fn failed_tokio_runtime_initialization_is_returned_without_panicking() {
+        let tasks = TokioTasks::default();
+        let result = tasks
+            .try_runtime_with(|| Err(std::io::Error::other("synthetic runtime spawn refusal")));
+        assert!(result.is_err());
+        assert!(tasks.runtime.get().is_none());
     }
 }
 
@@ -122,21 +154,54 @@ impl Drop for TokioTasks {
 }
 
 impl Tasks for TokioTasks {
+    fn ready(&self) -> bool {
+        match self.try_runtime() {
+            Ok(_) => true,
+            Err(error) => {
+                log::error!("iptv network runtime could not start: {error}");
+                false
+            }
+        }
+    }
+
     fn spawn(&self, task: Task) {
-        drop(self.runtime().spawn(task));
+        match self.try_runtime() {
+            Ok(runtime) => drop(runtime.spawn(task)),
+            Err(error) => log::error!("iptv network task could not start: {error}"),
+        }
     }
 
     fn spawn_blocking(&self, work: Job) {
-        drop(self.runtime().spawn_blocking(work));
+        match self.try_runtime() {
+            Ok(runtime) => drop(runtime.spawn_blocking(work)),
+            Err(error) => log::error!("iptv blocking task could not start: {error}"),
+        }
     }
 
-    fn block_on(&self, future: LocalTask<'_>) {
-        self.runtime().block_on(future);
+    fn block_on(&self, future: LocalTask<'_>) -> bool {
+        match self.try_runtime() {
+            Ok(runtime) => {
+                runtime.block_on(future);
+                true
+            }
+            Err(error) => {
+                log::error!("iptv network runtime could not drive task: {error}");
+                false
+            }
+        }
     }
 
     fn delay(&self, duration: Duration) -> Task {
         // A Tokio timer registers with the runtime it is made in.
-        let _context = self.runtime().enter();
-        Box::pin(tokio::time::sleep(duration))
+        match self.try_runtime() {
+            Ok(runtime) => {
+                let _context = runtime.enter();
+                Box::pin(tokio::time::sleep(duration))
+            }
+            Err(error) => {
+                log::error!("iptv network timer could not start: {error}");
+                Box::pin(std::future::ready(()))
+            }
+        }
     }
 }
