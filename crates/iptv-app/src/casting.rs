@@ -354,10 +354,10 @@ fn monitor(ui: Ui, ticket: u64) {
                 {
                     ui.cast_remote.set(false);
                     ui.playing.set(None);
+                    if let Err(error) = ended {
+                        report(error);
+                    }
                     if !ui.cast_busy.get_untracked() {
-                        if let Err(error) = ended {
-                            report(error);
-                        }
                         chooser::open(ui, chooser::Kind::CastEnded);
                     }
                 }
@@ -410,7 +410,10 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
         ui.cast_busy.set(false);
         match result {
             Ok(()) | Err(Error::StopUnconfirmed) if command == Command::Stop => {
-                if let Err(error) = result {
+                // The monitor may already have reported this result and cleared the cast.
+                if ui.cast_remote.get_untracked()
+                    && let Err(error) = result
+                {
                     report(error);
                 }
                 ui.cast_remote.set(false);

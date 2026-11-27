@@ -539,6 +539,33 @@ fn an_unconfirmed_system_stop_reports_the_receiver_result_and_releases_the_cast(
 }
 
 #[test]
+fn an_unconfirmed_system_stop_is_reported_during_another_cast_command() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    ready_controls(app);
+    let reply = fake.hold_next_command();
+    step(app.press("id:play-bar-play-pause"));
+    step(
+        app.wait_until("remote pause", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"pause")
+        }),
+    );
+    fake.states
+        .lock()
+        .unwrap()
+        .push_back(Err(Error::StopUnconfirmed));
+    step(app.wait_for("text:Could not confirm that the TV stopped playback."));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "pause", "retire"]
+    );
+    reply.send(()).unwrap();
+}
+
+#[test]
 fn play_pause_uses_the_receivers_confirmed_pause_state_at_handoff() {
     let Some(home) = isolated!() else { return };
     let fake = FakeCast {
