@@ -17,12 +17,11 @@ mod platform {
 
     pub(crate) struct Service {
         owner: Rc<Runtime>,
-        metadata: Metadata,
     }
 
     impl Service {
-        pub(crate) fn new(owner: Rc<Runtime>, metadata: Metadata) -> Self {
-            Self { owner, metadata }
+        pub(crate) fn new(owner: Rc<Runtime>) -> Self {
+            Self { owner }
         }
 
         pub(crate) async fn restore(&self) -> io::Result<()> {
@@ -49,12 +48,13 @@ mod platform {
             &self,
             trigger: Trigger,
             frequency: Frequency,
+            metadata: Metadata,
         ) -> Option<impl Future<Output = ()> + use<>> {
             let token = self
                 .owner
                 .begin_app_update_check(now(), trigger, frequency)?;
             let owner = self.owner.clone();
-            let installed = super::super::package::installed(self.metadata);
+            let installed = super::super::package::installed(metadata);
             Some(async move {
                 let result = owner.check_github_release(installed).await;
                 owner.finish_app_update_check(token, now(), result);
@@ -102,7 +102,7 @@ mod platform {
     pub(crate) struct Service;
 
     impl Service {
-        pub(crate) fn new(_: Rc<Runtime>, _: Metadata) -> Self {
+        pub(crate) fn new(_: Rc<Runtime>) -> Self {
             Self
         }
 
@@ -128,6 +128,7 @@ mod platform {
             &self,
             _: Trigger,
             _: Frequency,
+            _: Metadata,
         ) -> Option<std::future::Ready<()>> {
             None
         }

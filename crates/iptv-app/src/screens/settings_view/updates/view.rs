@@ -55,7 +55,7 @@ fn metadata() -> Metadata {
 }
 
 fn service() -> Service {
-    Service::new(crate::runtime(), metadata())
+    Service::new(crate::runtime())
 }
 
 struct Prompts(Ui);
@@ -214,7 +214,7 @@ fn check(ui: Ui, trigger: Trigger) {
     let frequency = Frequency::from_setting(crate::wiring::settings::choice(
         iptv_settings::keys::APP_UPDATE_FREQUENCY,
     ));
-    let Some(check) = service.begin_check(trigger, frequency) else {
+    let Some(check) = service.begin_check(trigger, frequency, metadata()) else {
         return;
     };
     changed(ui);
