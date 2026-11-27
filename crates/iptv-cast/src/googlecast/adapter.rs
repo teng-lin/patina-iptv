@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use serde_json::{Value, json};
-use std::{net::SocketAddr, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, time::Duration};
 use tokio::{
     sync::oneshot,
     time::{Instant, timeout, timeout_at},
@@ -73,6 +73,33 @@ impl Endpoint {
     }
 }
 
+// Expose a stable identity only when every observed service claim agrees on
+// its endpoint. Keep identity-less services selectable for this scan.
+fn selectable_receivers(receivers: Vec<discovery::Receiver>) -> Vec<discovery::Receiver> {
+    let mut endpoints = HashMap::new();
+    for receiver in &receivers {
+        if let Some(id) = &receiver.id {
+            endpoints
+                .entry(id.clone())
+                .and_modify(|endpoint| {
+                    if *endpoint != Some(receiver.address) {
+                        *endpoint = None;
+                    }
+                })
+                .or_insert(Some(receiver.address));
+        }
+    }
+    receivers
+        .into_iter()
+        .filter(|receiver| {
+            receiver
+                .id
+                .as_ref()
+                .is_none_or(|id| endpoints.remove(id).flatten() == Some(receiver.address))
+        })
+        .collect()
+}
+
 fn unique_endpoint(id: &str, devices: Vec<discovery::Receiver>) -> Result<SocketAddr, Error> {
     let mut devices = devices
         .into_iter()
@@ -105,7 +132,7 @@ impl Backend for GoogleCast {
                 Error::new(kind, Stage::Discovery, Delivery::NotSent)
             })?;
             let scanned = Instant::now();
-            for receiver in receivers {
+            for receiver in selectable_receivers(receivers) {
                 sink.push(Candidate::new(
                     receiver.name,
                     receiver.id.clone(),

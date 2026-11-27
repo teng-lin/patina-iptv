@@ -473,6 +473,30 @@ async fn transport_loss_cannot_discover_or_resend_a_previous_load() {
     socket.await.unwrap();
 }
 
+#[test]
+fn discovery_suppresses_conflicting_identity_claims_and_keeps_exact_duplicates_once() {
+    let receiver = |name: &str, id: Option<&str>, address: u8| discovery::Receiver {
+        address: ([127, 0, 0, address], 8009).into(),
+        id: id.map(str::to_owned),
+        name: name.into(),
+    };
+    let selectable = receiver("Generated TV", Some("confirmed"), 1);
+    let ephemeral = receiver("Older device", None, 2);
+    let separate = receiver("Other service", Some("other"), 1);
+    assert_eq!(
+        selectable_receivers(vec![
+            receiver("Conflicting device", Some("conflict"), 7),
+            selectable.clone(),
+            receiver("Conflicting device", Some("conflict"), 8),
+            ephemeral.clone(),
+            selectable.clone(),
+            separate.clone(),
+            receiver("Conflicting device", Some("conflict"), 7),
+        ]),
+        [selectable, ephemeral, separate],
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn endpoint_selection_rejects_missing_ambiguous_and_expired_identities() {
     let address: SocketAddr = ([127, 0, 0, 1], 8009).into();
