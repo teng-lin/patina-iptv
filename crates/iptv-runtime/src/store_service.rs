@@ -501,7 +501,6 @@ async fn cooperative_import_turn<'a>(
 }
 
 impl Services {
-    #[cfg(feature = "native")]
     pub(crate) fn tasks_ready(&self) -> bool {
         self.service.tasks().ready()
     }
@@ -673,7 +672,7 @@ impl Services {
         F: Future<Output = ()> + 'static,
     {
         if self.has_workers() {
-            if !self.service.tasks().ready() {
+            if !self.tasks_ready() {
                 unavailable();
                 return true;
             }

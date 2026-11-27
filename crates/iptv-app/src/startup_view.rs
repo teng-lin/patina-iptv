@@ -29,8 +29,8 @@ pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
 #[derive(Clone, PartialEq, Eq)]
 enum Cause {
     Newer { found: u32, supported: u32 },
-    RestartRequired(String),
-    Other(String),
+    RestartRequired(&'static str),
+    Other(&'static str),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -47,21 +47,18 @@ pub(crate) fn store_failed(
 ) {
     let retryable = error.retryable_open();
     let diagnostic = || {
-        if let Some(reason) = error
+        error
             .unavailable_reason()
             .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-        {
-            crate::i18n::tr(reason).to_owned()
-        } else {
-            crate::i18n::tr("The saved library could not be opened").to_owned()
-        }
+            .unwrap_or_else(|| crate::i18n::key("The saved library could not be opened"))
     };
     let cause = if let Some((found, supported)) = error.newer_schema() {
         Cause::Newer { found, supported }
     } else if error.reopen_reason().is_some() {
+        log::warn!("iptv storage initialization failed: {error:?}");
         Cause::RestartRequired(diagnostic())
     } else {
-        log::warn!("iptv storage initialization failed: {error}");
+        log::warn!("iptv storage initialization failed: {error:?}");
         Cause::Other(diagnostic())
     };
     ui.store_startup_failure.update(|failure| {
@@ -275,7 +272,7 @@ fn failure_details(
                         "Database schema version {found} is newer than this build supports ({supported}).",
                         &[("found", (*found).into()), ("supported", (*supported).into())],
                     ),
-                    Cause::RestartRequired(message) | Cause::Other(message) => message.clone(),
+                    Cause::RestartRequired(reason) | Cause::Other(reason) => crate::i18n::tr(reason).to_owned(),
                 };
                 view()
                     .test_id("store-recovery-details")

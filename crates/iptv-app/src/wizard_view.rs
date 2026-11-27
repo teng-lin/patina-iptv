@@ -44,6 +44,9 @@ pub struct Open {
 }
 
 fn open_with(ui: Ui, wizard: Wizard) {
+    if let Some(Step::Processing { id, .. } | Step::Canceling { id }) = read(ui, Wizard::step) {
+        crate::runtime_owner::runtime().cancel_wizard_import(id, false);
+    }
     ui.wizard.set(Some(Open {
         wizard,
         editing: None,

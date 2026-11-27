@@ -1011,8 +1011,7 @@ impl Runtime {
             .services()
             .spawn_blocking(move || retained_media(&services, id, job.status == Status::Partial))
             .await
-            .ok()
-            .flatten()
+            .map_err(|_| Error::unavailable("Recording unavailable"))?
             .map(|(file, _)| file)
             .ok_or_else(|| Error::unavailable("The recording file is missing"))?;
         #[cfg(test)]

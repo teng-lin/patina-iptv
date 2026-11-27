@@ -190,10 +190,21 @@ pub trait Tasks: Send + Sync {
     fn delay(&self, duration: Duration) -> Task;
 }
 
-/// Identifies the pinned Tokio worker-spawn panic handled at the native
-/// execution boundary. Terminal hosts can leave their screen active.
+/// Whether this thread's native execution boundary will recover the panic.
+/// Terminal hosts can leave their screen active for this expected failure.
 #[doc(hidden)]
-pub fn worker_spawn_refusal(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
+pub fn recovering_worker_spawn(payload: &(dyn std::any::Any + Send)) -> bool {
+    #[cfg(feature = "native")]
+    return crate::native::execution::recovering_worker_spawn(payload);
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = payload;
+        false
+    }
+}
+
+#[cfg(feature = "native")]
+pub(crate) fn worker_spawn_refusal(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
     payload
         .downcast_ref::<String>()
         .map(String::as_str)

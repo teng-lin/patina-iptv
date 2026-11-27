@@ -111,6 +111,8 @@ const STATICS: &[(&str, &str)] = &[
     ("time.rs", "ORIGIN"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
     ("native.rs", "NEXT"),
+    // Only a scoped Tokio worker-spawn unwind leaves the TUI terminal in place.
+    ("native/execution.rs", "STARTING_TOKIO_WORKER"),
     // Startup marks seen by one opening unit test (`cfg(test)`): the mark
     // port is a function pointer.
     ("opening/revocation.rs", "MARKS"),

@@ -22,6 +22,11 @@ iptv-runtime/src/error.rs	WorkerUnavailable
 iptv-runtime/src/error.rs	RecordingRequest
 iptv-runtime/src/error.rs	RecordingSpace
 iptv-runtime/src/error.rs	Storage
+iptv-runtime/src/error.rs	Sqlite
+iptv-runtime/src/error.rs	Migration
+iptv-runtime/src/error.rs	SourceNotFound
+iptv-runtime/src/error.rs	CustomGroupNotFound
+iptv-runtime/src/error.rs	InvalidData
 iptv-runtime/src/error.rs	settings are locked
 iptv-runtime/src/error.rs	provider viewing capacity is full
 iptv-runtime/src/error.rs	store unavailable: {reason}

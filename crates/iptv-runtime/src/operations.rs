@@ -1,7 +1,8 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
 use crate::commands::playback_handoff_check;
-use iptv_core::add_playlist::ImportId;
+use crate::data::Update;
+use iptv_core::add_playlist::{FailureKind, ImportFailure, ImportId};
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
 use iptv_import::CancelToken;
@@ -42,7 +43,7 @@ impl Runtime {
         self: &Rc<Self>,
         job: crate::data::Job,
         on_admitted: impl FnOnce(ImportId, u64),
-        on_update: impl Fn(ImportId, crate::data::Update) + 'static,
+        on_update: impl Fn(ImportId, Update) + 'static,
     ) -> (ImportId, u64) {
         let ticket = self.wizard_tickets.get().wrapping_add(1).max(1);
         self.wizard_tickets.set(ticket);
@@ -52,38 +53,46 @@ impl Runtime {
         if let Some((_, cancel)) = previous {
             cancel.cancel();
         }
+        let services = self.services();
+        let store_epoch = services.epoch();
+        on_admitted(id, store_epoch);
+        let refused = if !services.is_current() {
+            Some(FailureKind::Unavailable)
+        } else if cancel.is_canceled() {
+            Some(FailureKind::Canceled)
+        } else {
+            None
+        };
+        if let Some(kind) = refused {
+            if self.finish_wizard_import(id).is_some() {
+                on_update(id, Update::Done(Err(ImportFailure::new(kind))));
+            }
+            return (id, store_epoch);
+        }
         let owner = Rc::downgrade(self);
-        let store_epoch = crate::data::start_import_with(self, job, cancel, |services| {
-            let services = services.clone();
-            on_admitted(id, services.epoch());
-            move |update| {
-                #[cfg(feature = "test-support")]
-                let terminal = matches!(&update, crate::data::Update::Done(_));
-                let Some(owner) = owner.upgrade() else {
-                    return;
-                };
-                if !services.is_current() {
-                    return;
-                }
-                let current = match &update {
-                    crate::data::Update::Progress(_) => owner
+        crate::data::start_import_with(self, job, cancel, services.clone(), move |update| {
+            let terminal = matches!(&update, Update::Done(_));
+            if let Some(owner) = owner.upgrade() {
+                let current = if terminal {
+                    owner.finish_wizard_import(id).is_some()
+                } else {
+                    owner
                         .wizard_import
                         .borrow()
                         .as_ref()
-                        .is_some_and(|(at, _)| *at == id),
-                    crate::data::Update::Done(_) => owner.finish_wizard_import(id).is_some(),
+                        .is_some_and(|(at, _)| *at == id)
                 };
-                if current {
+                if current && services.is_current() {
                     on_update(id, update);
                 }
-                #[cfg(feature = "test-support")]
-                if terminal {
-                    services
-                        .service()
-                        .hooks
-                        .wizard_reports_delivered
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
+            }
+            #[cfg(feature = "test-support")]
+            if terminal {
+                services
+                    .service()
+                    .hooks
+                    .wizard_reports_delivered
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         });
         (id, store_epoch)

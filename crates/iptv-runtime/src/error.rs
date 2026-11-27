@@ -118,6 +118,7 @@ impl Error {
         match reason {
             PROVIDER_CAPACITY_REASON => Self(ErrorKind::ProviderCapacity),
             crate::parental::SETTINGS_LOCKED_REASON => Self(ErrorKind::SettingsLocked),
+            "cannot start store worker" => Self(ErrorKind::WorkerUnavailable),
             _ => Self(ErrorKind::Unavailable(reason)),
         }
     }
@@ -188,7 +189,14 @@ impl std::fmt::Debug for Error {
             ErrorKind::RecordingSpace(refusal) => {
                 f.debug_tuple("RecordingSpace").field(refusal).finish()
             }
-            ErrorKind::Storage(_) => f.write_str("Storage"),
+            ErrorKind::Storage(error) => f.write_str(match error {
+                iptv_store_sqlite::StoreError::Sqlite(_) => "Sqlite",
+                iptv_store_sqlite::StoreError::Migration { .. } => "Migration",
+                iptv_store_sqlite::StoreError::SourceNotFound(_) => "SourceNotFound",
+                iptv_store_sqlite::StoreError::CustomGroupNotFound(_) => "CustomGroupNotFound",
+                iptv_store_sqlite::StoreError::InvalidData(_) => "InvalidData",
+                _ => "Storage",
+            }),
         }
     }
 }

@@ -428,7 +428,7 @@ pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), Stor
 
 fn run_import(owner: &Rc<Runtime>, source: StoredSource, purpose: Purpose, edit: bool) {
     let (job, cancel, report) = library::prepare_import(owner, source, purpose, edit);
-    let _ = start_import_with(owner, job, cancel, |_| report);
+    start_import_with(owner, job, cancel, owner.services(), report);
 }
 
 pub fn refresh_guide_status(owner: &Rc<Runtime>) {
@@ -603,7 +603,14 @@ fn start_update(
                         owner.take_owed_guide_check(source);
                         answered = true;
                     }
-                    Some(Msg::WorkerUnavailable) => accepted = false,
+                    Some(Msg::WorkerUnavailable) => {
+                        accepted = false;
+                        if current() && !force {
+                            owner.emit(crate::RuntimeEvent::Notify(
+                                "Program guide could not be loaded",
+                            ));
+                        }
+                    }
                     Some(_) => {}
                     None => break,
                 }
@@ -1313,27 +1320,23 @@ pub fn start_import(
     on_update: impl Fn(Update) + 'static,
 ) -> CancelToken {
     let cancel = CancelToken::new();
-    let _ = start_import_with(owner, job, cancel.clone(), |_| on_update);
+    start_import_with(owner, job, cancel.clone(), owner.services(), on_update);
     cancel
 }
 
-/// [`start_import`] with the caller's cancel token.
-pub(crate) fn start_import_with<F>(
+/// [`start_import`] with the caller's cancel token and storage admission.
+pub(crate) fn start_import_with(
     owner: &std::rc::Rc<crate::Runtime>,
     job: Job,
     cancel: CancelToken,
-    on_update: impl FnOnce(&Services) -> F,
-) -> u64
-where
-    F: Fn(Update) + 'static,
-{
-    let services = owner.services();
-    let store_epoch = services.epoch();
+    services: Services,
+    on_update: impl Fn(Update) + 'static,
+) {
     if !owner.has_tasks() {
-        on_update(&services)(Update::Done(Err(ImportFailure::new(
+        on_update(Update::Done(Err(ImportFailure::new(
             FailureKind::Unavailable,
         ))));
-        return store_epoch;
+        return;
     }
     let purpose = job.purpose;
     let mut import_source = job.stored;
@@ -1352,7 +1355,6 @@ where
     } else {
         owner.generation.with(Cell::get)
     };
-    let on_update = on_update(&services);
     // Only the startup refresh may start the last channel.
     let resume = purpose == Purpose::Startup;
     let (tx, mut rx) = unbounded_channel();
@@ -1626,7 +1628,6 @@ where
             }
         }
     });
-    store_epoch
 }
 
 /// Puts `imported` on screen unless a newer import owns the guide.
@@ -2164,31 +2165,44 @@ mod playlist_lifecycle_tests {
     use iptv_providers::{SecretUrl, model::M3uSourceConfig};
 
     #[test]
-    fn unbound_import_reports_unavailable_instead_of_losing_its_completion() {
-        let directory = tempfile::tempdir().unwrap();
-        let owner = Rc::new(Runtime::new(crate::Ports::new(
-            directory.path().into(),
-            |_| Ok(crate::model::DatabaseKey::from_bytes([0x72; 32])),
-        )));
-        owner.start_services();
-        let reports = Rc::new(RefCell::new(Vec::new()));
-        let sink = reports.clone();
-        start_import(
-            &owner,
-            Job {
-                source: synthetic("Synthetic unbound import"),
-                epg_url: None,
-                stored: None,
-                purpose: Purpose::Add,
-                edit: false,
-            },
-            move |update| sink.borrow_mut().push(update),
-        );
-        assert!(matches!(
-            reports.borrow().as_slice(),
-            [Update::Done(Err(failure))] if failure.kind == FailureKind::Unavailable
-        ));
-        assert!(owner.drain_services());
+    fn wizard_import_rejects_unstarted_storage_or_an_unbound_task_host() {
+        for start_services in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let owner = Rc::new(Runtime::new(crate::Ports::new(
+                directory.path().into(),
+                |_| Ok(crate::model::DatabaseKey::from_bytes([0x72; 32])),
+            )));
+            if start_services {
+                owner.start_services();
+            }
+            let admitted = Rc::new(Cell::new(None));
+            let request = admitted.clone();
+            let reports = Rc::new(RefCell::new(Vec::new()));
+            let sink = reports.clone();
+            let (id, epoch) = owner.start_wizard_import(
+                Job {
+                    source: synthetic("Synthetic unbound import"),
+                    epg_url: None,
+                    stored: None,
+                    purpose: Purpose::Add,
+                    edit: false,
+                },
+                |id, epoch| admitted.set(Some((id, epoch))),
+                move |id, update| {
+                    assert_eq!(request.get().map(|(admitted, _)| admitted), Some(id));
+                    sink.borrow_mut().push(update);
+                },
+            );
+            assert_eq!(admitted.get(), Some((id, epoch)));
+            assert!(matches!(
+                reports.borrow().as_slice(),
+                [Update::Done(Err(failure))] if failure.kind == FailureKind::Unavailable
+            ));
+            assert!(owner.wizard_import.borrow().is_none());
+            if start_services {
+                assert!(owner.drain_services());
+            }
+        }
     }
 
     fn run(test: impl AsyncFnOnce(Rc<Runtime>)) {

@@ -16,11 +16,11 @@
 //! pool (`workers.rs`): their pipelines call the store with blocking
 //! requests, which must not hold this runtime's workers.
 
-use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread::ThreadId;
 use std::time::Duration;
+use std::{cell::Cell, io};
 
 use tokio::runtime::{Builder, Runtime};
 
@@ -102,10 +102,22 @@ struct TokioTasks {
     initializing: Mutex<()>,
 }
 
+thread_local! {
+    static STARTING_TOKIO_WORKER: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn recovering_worker_spawn(payload: &(dyn std::any::Any + Send)) -> bool {
+    STARTING_TOKIO_WORKER.try_with(Cell::get).unwrap_or(false)
+        && crate::execution::worker_spawn_refusal(payload).is_some()
+}
+
 /// The pinned Tokio runtime panics if its pool cannot spawn a worker, even
 /// when that happens inside the fallible runtime builder.
 fn try_spawn_worker<T>(start: impl FnOnce() -> T) -> io::Result<T> {
-    match catch_unwind(AssertUnwindSafe(start)) {
+    let previous = STARTING_TOKIO_WORKER.replace(true);
+    let result = catch_unwind(AssertUnwindSafe(start));
+    STARTING_TOKIO_WORKER.set(previous);
+    match result {
         Ok(value) => Ok(value),
         Err(panic) => match crate::execution::worker_spawn_refusal(&*panic) {
             Some(reason) => Err(io::Error::other(reason.to_owned())),

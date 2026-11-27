@@ -448,6 +448,9 @@ impl Runtime {
         let drained = self
             .store
             .drain_on_shutdown_until(deadline, || self.inspection.cancel_requests());
+        if let Some((_, cancel)) = self.wizard_import.borrow_mut().take() {
+            cancel.cancel();
+        }
         let probes_drained = self
             .inspection
             .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()));
@@ -547,16 +550,24 @@ impl Drop for Runtime {
         // if a noncooperative lane did not close. Do not spend it again in Drop.
         if !self.shutdown_requested.replace(true) {
             let deadline = crate::time::Instant::now() + self.store.drain_limit();
+            self.inspection.close_workers();
             self.close_cast();
             if !self
                 .store
-                .drain_on_shutdown_with(|| self.inspection.cancel_requests())
+                .drain_on_shutdown_until(deadline, || self.inspection.cancel_requests())
             {
                 log::error!("iptv persistence: fallback store drain did not finish at disposal");
+            }
+            if !self
+                .inspection
+                .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()))
+            {
+                log::error!("iptv inspection: fallback worker drain did not finish at disposal");
             }
             if !self.drain_cast(deadline) {
                 log::error!("iptv cast: relay shutdown exceeded the owner's drain deadline");
             }
+            self.inspection.clear();
         }
         if !self.store.files().flush(std::time::Duration::from_secs(2)) {
             log::error!("iptv persistence: fallback file flush did not finish at disposal");

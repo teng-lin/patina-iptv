@@ -1397,7 +1397,7 @@ pub fn wizard_reports_delivered() -> usize {
 }
 
 #[doc(hidden)]
-pub use iptv_runtime::execution::worker_spawn_refusal;
+pub use iptv_runtime::execution::recovering_worker_spawn;
 
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
