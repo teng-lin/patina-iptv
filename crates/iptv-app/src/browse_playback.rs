@@ -12,7 +12,7 @@ use std::time::Duration;
 fn current(ui: Ui) -> Option<Target> {
     ui.guide_data();
     let context = crate::input::context(&ui);
-    if let Some(target) = ui.pending_zap.get()
+    if let Some(target) = ui.playback.pending_zap.get()
         && matches!(
             context,
             Context::Player | Context::Controls | Context::ChannelList
@@ -23,28 +23,30 @@ fn current(ui: Ui) -> Option<Target> {
     }
     let (ch, surface) = match context {
         Context::ChannelList if !crate::multiview::picking(ui) => {
-            let c = ui.channels.get()?;
+            let c = ui.playback.channels.get()?;
             if c.pane != ListPane::Channels {
                 return None;
             }
-            (ui.list.with(|l| l.channel(c.row))?, Surface::List)
+            (ui.guide.list.with(|l| l.channel(c.row))?, Surface::List)
         }
         Context::Guide
-            if ui.mode.get() != ViewMode::Fullscreen
-                && ui.focus.with(|f| f.pane == crate::guide::Pane::Guide) =>
+            if ui.chrome.mode.get() != ViewMode::Fullscreen
+                && ui.guide.focus.with(|f| f.pane == crate::guide::Pane::Guide) =>
         {
-            let v = crate::lists::view(ui);
+            let v = crate::lists::view(ui.guide);
             let live = ui
+                .guide
                 .focus
                 .with(|f| f.program(&v).airing(f.now) == Airing::Live);
-            let ch = crate::lists::focused_channel(ui)?;
+            let ch = crate::lists::focused_channel(ui.guide)?;
             // A pan from the live program moves the focus along the row
             // without leaving the channel: a waiting choice stays, and
             // panning back starts no preview again.
             if !live {
                 let key = crate::runtime_owner::schedule().channel_key(ch)?;
-                let held = ui.focus.with(|f| {
-                    ui.pan_anchor
+                let held = ui.guide.focus.with(|f| {
+                    ui.guide
+                        .pan_anchor
                         .with(|a| a.as_ref().is_some_and(|a| a.holds(&key, f)))
                 });
                 if !held {
@@ -53,7 +55,7 @@ fn current(ui: Ui) -> Option<Target> {
             }
             (
                 ch,
-                if ui.mode.get() == ViewMode::Overlay {
+                if ui.chrome.mode.get() == ViewMode::Overlay {
                     Surface::Overlay
                 } else {
                     Surface::Guide
@@ -129,8 +131,8 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
 /// right-click or long press moved the focus to open a menu (`menu_view`).
 pub fn hold(ui: Ui) {
     let focused = untracked(|| current(ui)).map(|t| t.key);
-    ui.autoplay_held.set(Some(focused));
-    ui.browse_playback.set(Default::default());
+    ui.guide.autoplay_held.set(Some(focused));
+    ui.guide.browse_playback.set(Default::default());
 }
 
 /// `policy`, with autoplay off while it is held on `target`; moving to
@@ -138,9 +140,9 @@ pub fn hold(ui: Ui) {
 fn policy_for(ui: Ui, target: Option<&Target>) -> Policy {
     let mut p = policy(ui, target.map(|t| t.surface));
     let key = target.map(|t| t.key.clone());
-    match ui.autoplay_held.get() {
+    match ui.guide.autoplay_held.get() {
         Some(held) if held == key || key.is_none() => p.autoplay = false,
-        Some(_) => untracked(|| ui.autoplay_held.set(None)),
+        Some(_) => untracked(|| ui.guide.autoplay_held.set(None)),
         None => {}
     }
     p
@@ -149,13 +151,13 @@ fn sync(ui: Ui) {
     let target = current(ui);
     let p = policy_for(ui, target.as_ref());
     let now = ui.now_ms();
-    ui.browse_playback.update(|b| b.focus(target, p, now));
+    ui.guide.browse_playback.update(|b| b.focus(target, p, now));
 }
 /// A touch or mouse drag in the guide or a list crossed the drag
 /// threshold: a preview waiting to start is canceled; a tap's choice
 /// still plays (`BrowsePlayback::dragged`).
 pub fn dragged(ui: Ui) {
-    ui.browse_playback.update(|b| b.dragged());
+    ui.guide.browse_playback.update(|b| b.dragged());
     activity(ui);
 }
 /// The touches on `list` (the guide's rows, the channel list): a finger
@@ -191,21 +193,23 @@ pub fn watch_drags<E: Interactive>(list: E, ui: Ui) -> E {
     })
 }
 pub fn activity(ui: Ui) {
-    ui.browse_playback.update(|b| b.activity(ui.now_ms()));
+    ui.guide.browse_playback.update(|b| b.activity(ui.now_ms()));
     arm(ui);
 }
 pub fn select(ui: Ui) {
     // A choice hands playback to the viewer once it plays (`Ui::play`):
     // one a guard refuses changes nothing (`interruption.rs`).
     sync(ui);
-    ui.browse_playback.update(|b| b.select(ui.now_ms()));
+    ui.guide.browse_playback.update(|b| b.select(ui.now_ms()));
     run(ui);
 }
 fn run(ui: Ui) {
     // Revalidate at callback time, before using a queued identity.
     sync(ui);
     let mut effect = None;
-    ui.browse_playback.update(|b| effect = b.tick(ui.now_ms()));
+    ui.guide
+        .browse_playback
+        .update(|b| effect = b.tick(ui.now_ms()));
     match effect {
         Some(Effect::Tune {
             target,
@@ -216,26 +220,27 @@ fn run(ui: Ui) {
                 && crate::player::allow_guide_channel(channel)
             {
                 if chosen && crate::external_player::maybe_open(ui, channel, None) {
-                    ui.pending_zap.set(None);
+                    ui.playback.pending_zap.set(None);
                     return;
                 }
                 if !playing_live(ui, channel) {
-                    let state = ui.browse_playback.get_untracked();
+                    let state = ui.guide.browse_playback.get_untracked();
                     ui.play(channel, Playback::Live);
-                    ui.browse_playback.set(state);
+                    ui.guide.browse_playback.set(state);
                 }
                 if target.surface == Surface::Player {
-                    ui.pending_zap.set(None);
+                    ui.playback.pending_zap.set(None);
                     crate::lists::show_channel(ui, channel);
-                    let list = ui.list.get_untracked();
-                    ui.channels
+                    let list = ui.guide.list.get_untracked();
+                    ui.playback
+                        .channels
                         .update(|c| c.iter_mut().for_each(|c| c.follow(channel, &list)));
                     // A touch's zap always shows its banner (#285).
-                    let touched = ui.touch_zapped.get_untracked();
+                    let touched = ui.playback.touch_zapped.get_untracked();
                     if touched {
-                        ui.touch_zapped.set(false);
+                        ui.playback.touch_zapped.set(false);
                     }
-                    if ui.mode.get_untracked() == ViewMode::Fullscreen
+                    if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen
                         && (crate::settings::flag(keys::INFO_ON_SWITCH)
                             || (touched && !untracked(|| crate::play_bar::shows(ui))))
                     {
@@ -244,11 +249,12 @@ fn run(ui: Ui) {
                 } else if fullscreen {
                     full(ui);
                 } else if playing_live(ui, channel) {
-                    ui.browse_playback
+                    ui.guide
+                        .browse_playback
                         .update(|state| state.playing(&target.key, ui.now_ms()));
                 }
             } else if target.surface == Surface::Player {
-                ui.pending_zap.set(None);
+                ui.playback.pending_zap.set(None);
             }
         }
         Some(Effect::Fullscreen) => {
@@ -265,23 +271,29 @@ fn run(ui: Ui) {
     arm(ui);
 }
 fn playing_live(ui: Ui, channel: usize) -> bool {
-    ui.playing.get_untracked() == Some(channel) && ui.playback.get_untracked() == Playback::Live
+    ui.playback.playing.get_untracked() == Some(channel)
+        && ui.playback.playback.get_untracked() == Playback::Live
 }
 
 fn full(ui: Ui) {
     if crate::channels_view::is_open(ui) {
         crate::channels_view::close(ui);
     }
-    ui.mode.apply(crate::mode::Action::EnterFullscreen);
+    ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {
-    if let Some(at) = ui.browse_playback.with_untracked(BrowsePlayback::deadline) {
+    if let Some(at) = ui
+        .guide
+        .browse_playback
+        .with_untracked(BrowsePlayback::deadline)
+    {
         drop(set_timeout(
             Duration::from_millis(at.saturating_sub(ui.now_ms())),
             move || {
                 // Input may have extended this deadline; old timers do nothing.
                 if ui
+                    .guide
                     .browse_playback
                     .with_untracked(|b| b.deadline().is_some_and(|at| ui.now_ms() >= at))
                 {
@@ -295,28 +307,29 @@ pub fn bind(ui: Ui) {
     // A pan's anchor ends once the focus moves anywhere it does not hold
     // (keys, a tap, another list, a zap): coming back later is no pan.
     effect(move || {
-        let focus = ui.focus.get();
-        ui.list.with(|_| ());
-        let channel = untracked(|| crate::lists::focused_channel(ui))
+        let focus = ui.guide.focus.get();
+        ui.guide.list.with(|_| ());
+        let channel = untracked(|| crate::lists::focused_channel(ui.guide))
             .and_then(|ch| crate::runtime_owner::schedule().channel_key(ch));
-        let stale = ui.pan_anchor.with_untracked(|a| {
+        let stale = ui.guide.pan_anchor.with_untracked(|a| {
             a.as_ref()
                 .is_some_and(|a| channel.as_deref().is_none_or(|c| !a.holds(c, &focus)))
         });
         if stale {
-            ui.pan_anchor.set(None);
+            ui.guide.pan_anchor.set(None);
         }
     });
     effect(move || {
         let target = current(ui);
         let p = policy_for(ui, target.as_ref());
         let playing = ui
+            .playback
             .playing
             .get()
             .and_then(|c| crate::runtime_owner::schedule().channel_key(c));
-        let live = ui.playback.get() == Playback::Live;
+        let live = ui.playback.playback.get() == Playback::Live;
         untracked(|| {
-            ui.browse_playback.update(|b| {
+            ui.guide.browse_playback.update(|b| {
                 b.focus(target, p, ui.now_ms());
                 if live && let Some(key) = playing {
                     b.playing(&key, ui.now_ms());
@@ -330,10 +343,10 @@ pub fn bind(ui: Ui) {
 /// The channel a full-screen zap waits to tune (`guide.switch_delay`):
 /// the banner and the play bar name it at once.
 pub(crate) fn pending_channel(ui: Ui) -> Option<usize> {
-    if ui.mode.get() != ViewMode::Fullscreen {
+    if ui.chrome.mode.get() != ViewMode::Fullscreen {
         return None;
     }
-    ui.pending_zap.with(|t| {
+    ui.playback.pending_zap.with(|t| {
         t.as_ref()
             .filter(|t| t.surface == Surface::Player)
             .and_then(|t| crate::favorites::channel_of(&t.key))
@@ -350,14 +363,14 @@ pub fn zap(ui: Ui, channel: usize) {
 /// reader's action), whose banner shows when it tunes whatever
 /// `player.info_on_switch` says (`touch_zap.rs`).
 pub fn zap_by(ui: Ui, channel: usize, touch: bool) {
-    if ui.mode.get_untracked() != ViewMode::Fullscreen {
+    if ui.chrome.mode.get_untracked() != ViewMode::Fullscreen {
         crate::lists::show_channel(ui, channel);
         select(ui);
         return;
     }
     if let Some(key) = crate::runtime_owner::schedule().channel_key(channel) {
-        ui.touch_zapped.set(touch);
-        ui.pending_zap.set(Some(Target {
+        ui.playback.touch_zapped.set(touch);
+        ui.playback.pending_zap.set(Some(Target {
             key,
             source: ui.app.library.shown.get_untracked().map(|s| s.0),
             surface: Surface::Player,

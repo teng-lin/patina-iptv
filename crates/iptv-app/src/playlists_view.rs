@@ -87,14 +87,16 @@ pub fn open(ui: Ui) {
     if ui.app.library.all.get_untracked() {
         screen.focus_all();
     }
-    ui.playlists.set(Some(screen));
-    if ui.mode.get_untracked() == ViewMode::Fullscreen {
-        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+    ui.screens.playlists.set(Some(screen));
+    if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen {
+        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
 }
 
 pub(crate) fn choose_for_management(ui: Ui) {
-    ui.playlists.set(Some(Screen::settings_picker(load())));
+    ui.screens
+        .playlists
+        .set(Some(Screen::settings_picker(load())));
 }
 
 /// Opens a playlist task from Settings or a guide heading.
@@ -104,7 +106,7 @@ pub fn open_only(ui: Ui, id: SourceId, only: Only) {
     }
     if let Some(screen) = Screen::only(load(), id, only) {
         log::info!("iptv playlists: {only:?} of {}", id.0);
-        ui.playlists.set(Some(screen));
+        ui.screens.playlists.set(Some(screen));
     }
 }
 
@@ -113,7 +115,7 @@ pub fn open_only(ui: Ui, id: SourceId, only: Only) {
 /// viewer's choice.
 pub fn open_on_demand(ui: Ui, id: SourceId) {
     open(ui);
-    ui.playlists.update(|s| {
+    ui.screens.playlists.update(|s| {
         if let Some(s) = s {
             s.open_actions(id, Act::OnDemand);
         }
@@ -121,14 +123,14 @@ pub fn open_on_demand(ui: Ui, id: SourceId) {
 }
 
 pub fn close(ui: Ui) {
-    if ui.playlists.with_untracked(Option::is_some) {
-        ui.playlists.set(None);
+    if ui.screens.playlists.with_untracked(Option::is_some) {
+        ui.screens.playlists.set(None);
         dismiss_keyboard();
     }
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.playlists.with(Option::is_some)
+    ui.screens.playlists.with(Option::is_some)
 }
 
 fn load() -> Vec<Playlist> {
@@ -141,14 +143,14 @@ fn load() -> Vec<Playlist> {
 }
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.playlists.with(|s| s.as_ref().map(f))
+    ui.screens.playlists.with(|s| s.as_ref().map(f))
 }
 
 /// Changes the state and carries out what it answers.
 fn update(ui: Ui, f: impl FnOnce(&mut Screen) -> Option<Effect>) {
     let mut effect = None;
     let mut finished = false;
-    ui.playlists.update(|s| {
+    ui.screens.playlists.update(|s| {
         if let Some(s) = s {
             effect = f(s);
             finished = s.finished();
@@ -435,9 +437,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     effect(move || {
         ui.app.library.version.get();
         ui.app.settings.get();
-        if ui.playlists.with_untracked(Option::is_some) {
+        if ui.screens.playlists.with_untracked(Option::is_some) {
             let rows = load();
-            ui.playlists.update(|s| {
+            ui.screens.playlists.update(|s| {
                 if let Some(s) = s {
                     s.set_rows(rows);
                 }
@@ -464,7 +466,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .collect::<Vec<_>>()
         });
         untracked(|| {
-            ui.playlists.update(|s| {
+            ui.screens.playlists.update(|s| {
                 if let Some(s) = s {
                     ended
                         .iter()
@@ -954,7 +956,7 @@ fn edit_text(ui: Ui) -> String {
 }
 
 fn set_edit_text(ui: Ui, text: &str) {
-    ui.playlists.update(|s| {
+    ui.screens.playlists.update(|s| {
         if let Some(s) = s {
             s.set_text(text);
         }

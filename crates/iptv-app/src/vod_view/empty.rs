@@ -88,18 +88,18 @@ fn source_vod(
 /// on), the catalog is read again: titles may have arrived. The first
 /// state only joins the read [`open`] started.
 pub(super) fn bind(ui: Ui) {
-    let kind = computed(move || ui.vod.with(|s| s.query.kind));
+    let kind = computed(move || ui.screens.vod.with(|s| s.query.kind));
     let state = computed(move || VodState::of(&sources(ui, kind.get())));
     let first = std::cell::Cell::new(true);
     effect(move || {
         let state = state.get();
-        let Some(untitled) = ui.vod.with_untracked(|s| {
+        let Some(untitled) = ui.screens.vod.with_untracked(|s| {
             (s.library != state).then(|| s.cards.is_empty() && s.details.is_none())
         }) else {
             first.set(false);
             return;
         };
-        ui.vod.update(|s| s.set_library(state));
+        ui.screens.vod.update(|s| s.set_library(state));
         if untitled && !first.replace(false) {
             reload(ui, false);
         }
@@ -157,7 +157,7 @@ fn label(action: EmptyAction) -> &'static str {
 /// Runs the empty screen's action (OK where the titles would be, a tap
 /// or a click). Never switches an import on by itself.
 pub(super) fn run(ui: Ui) {
-    let Some(action) = ui.vod.with_untracked(|s| s.empty_action()) else {
+    let Some(action) = ui.screens.vod.with_untracked(|s| s.empty_action()) else {
         return;
     };
     match action {
@@ -178,12 +178,17 @@ pub(super) fn run(ui: Ui) {
 pub(super) fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     when(
         move || {
-            ui.vod
+            ui.screens
+                .vod
                 .with(|s| s.cards.is_empty() && !s.busy && s.error.is_none())
         },
         move || {
-            let text = move || ui.vod.with(|s| message(s.empty_state(), s.query.kind));
-            let action = move || ui.vod.with(|s| s.empty_action());
+            let text = move || {
+                ui.screens
+                    .vod
+                    .with(|s| message(s.empty_state(), s.query.kind))
+            };
+            let action = move || ui.screens.vod.with(|s| s.empty_action());
             view()
                 .gap(move || size.px(10.0))
                 .items_start()

@@ -6,11 +6,14 @@ use nsh_core::prelude::*;
 
 pub fn mounted(ui: Ui, surface: usize) -> bool {
     cfg!(any(target_os = "linux", target_os = "macos"))
-        && ui.player_windows.with(|w| w.on_surface(surface).is_some())
+        && ui
+            .playback
+            .player_windows
+            .with(|w| w.on_surface(surface).is_some())
 }
 
 pub fn can_open(ui: Ui, channel: usize) -> bool {
-    if ui.player_surface != 0
+    if ui.playback.player_surface != 0
         || !cfg!(any(target_os = "linux", target_os = "macos"))
         || crate::multiview::session(ui)
     {
@@ -20,15 +23,17 @@ pub fn can_open(ui: Ui, channel: usize) -> bool {
         return false;
     };
     if ui
+        .playback
         .player_windows
         .with(|w| w.sessions().iter().any(|s| s.channel == key))
     {
         return true;
     }
-    let count = ui.player_windows.with(|w| w.sessions().len());
+    let count = ui.playback.player_windows.with(|w| w.sessions().len());
     count < crate::player::SURFACES - 1
-        && crate::multiview::account_limit()
-            .is_none_or(|limit| count + usize::from(ui.playing.get().is_some()) < limit as usize)
+        && crate::multiview::account_limit().is_none_or(|limit| {
+            count + usize::from(ui.playback.playing.get().is_some()) < limit as usize
+        })
 }
 
 pub fn open(ui: Ui, channel: usize) {
@@ -39,12 +44,13 @@ pub fn open(ui: Ui, channel: usize) {
         return;
     };
     if ui
+        .playback
         .player_windows
         .with_untracked(|w| w.sessions().iter().any(|s| s.channel == key))
     {
         return;
     }
-    admit_session(ui.player_windows, key, |surface| {
+    admit_session(ui.playback.player_windows, key, |surface| {
         crate::player::start_surface(ui, surface, channel)
     });
 }
@@ -100,9 +106,9 @@ fn follow_lists(local: Ui) {
                 let kept = crate::lists::keep_in(local, previous);
                 crate::lists::restore(local, kept, next);
                 // These open presentations also contain catalog row indices.
-                local.menu.set(None);
-                local.description.set(None);
-                local.chooser.set(None);
+                local.screens.menu.set(None);
+                local.screens.description.set(None);
+                local.screens.chooser.set(None);
             } else {
                 crate::lists::favorites_changed(local);
             }
@@ -115,24 +121,26 @@ fn follow_lists(local: Ui) {
 /// (only Listen to this, its own Mute or volume, or the main player's
 /// sound controls do; `listen.rs`).
 pub fn audible(ui: Ui, id: SessionId) -> bool {
-    ui.player_windows.with(|w| {
+    ui.playback.player_windows.with(|w| {
         w.audible() == Some(id) && w.sessions().iter().any(|s| s.id == id && !s.volume.muted)
     })
 }
 
 pub fn close(ui: Ui, id: SessionId) {
     let surface = ui
+        .playback
         .player_windows
         .with_untracked(|w| w.sessions().iter().find(|s| s.id == id).map(|s| s.surface));
     if let Some(surface) = surface {
         super::pointer_forget(surface);
         crate::player::stop_surface(ui, surface);
-        ui.player_windows.update(|w| w.close(id));
+        ui.playback.player_windows.update(|w| w.close(id));
     }
 }
 
 pub fn close_all(ui: Ui) {
     let ids: Vec<_> = ui
+        .playback
         .player_windows
         .with_untracked(|w| w.sessions().iter().map(|s| s.id).collect());
     for id in ids {
@@ -144,11 +152,16 @@ pub fn bind(ui: Ui) {
     effect(move || {
         ui.app.data_version.get();
         untracked(|| {
-            let sessions = ui.player_windows.with(|w| w.sessions().to_vec());
+            let sessions = ui.playback.player_windows.with(|w| w.sessions().to_vec());
             let schedule = crate::runtime_owner::schedule();
             for session in sessions {
                 match schedule.find_channel(&session.channel) {
-                    Some(channel) => ui.player.stream(session.surface).channel.set(Some(channel)),
+                    Some(channel) => ui
+                        .playback
+                        .player
+                        .stream(session.surface)
+                        .channel
+                        .set(Some(channel)),
                     None => close(ui, session.id),
                 }
             }
@@ -167,12 +180,14 @@ pub fn windows(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
 
 fn player_window(ui: Ui, surface: usize, back_action: fn(Ui) -> bool) -> impl IntoElement {
     let session = ui
+        .playback
         .player_windows
         .with_untracked(|w| w.on_surface(surface).cloned())
         .unwrap();
     let id = session.id;
     let compact = move || {
-        ui.player_windows
+        ui.playback
+            .player_windows
             .with(|w| w.on_surface(surface).is_some_and(|s| s.compact))
     };
     let window = nsh_core::element::desktop::window()
@@ -183,6 +198,7 @@ fn player_window(ui: Ui, surface: usize, back_action: fn(Ui) -> bool) -> impl In
             }
             ui.guide_data();
             let channel = ui
+                .playback
                 .player
                 .stream(surface)
                 .channel
@@ -277,14 +293,17 @@ fn bind_pip(
             return;
         }
         untracked(|| {
-            parent.player_windows.update(|w| w.set_compact(id, compact));
-            if local.mode.get() != crate::ViewMode::Fullscreen {
+            parent
+                .playback
+                .player_windows
+                .update(|w| w.set_compact(id, compact));
+            if local.chrome.mode.get() != crate::ViewMode::Fullscreen {
                 return; // The compact Close action is disposing this session.
             }
             window.set(window_attributes(compact));
             if compact {
                 saved.set(window.state().map(|s| s.placement));
-                let (w, h) = super::pip_window::size_for(local.player.main().size.get());
+                let (w, h) = super::pip_window::size_for(local.playback.player.main().size.get());
                 window.set_mode(WindowMode::Normal);
                 window.set_bounds(WindowFrame {
                     width: Some(px(w)),
@@ -333,38 +352,53 @@ fn player_content(
     back_action: fn(Ui) -> bool,
 ) -> impl IntoElement {
     let initial = parent
+        .playback
         .player_windows
         .with_untracked(|w| w.on_surface(surface).cloned())
         .unwrap();
-    let mut local = Ui::new(parent.app, parent.player.for_window(surface));
-    local.player_surface = surface;
-    // The one workspace: which player is heard shows, and Listen to this
-    // acts, in every window alike (`listen.rs`).
-    local.player_windows = parent.player_windows;
+    let mut local = Ui::new(parent.app, parent.playback.player.for_window(surface));
     // This presentation controls the already-mounted native surface. The
     // catalog and settings are shared; overlays and input state are fresh.
-    local.playing = parent.player.stream(surface).channel;
-    local.mode.apply(crate::mode::Action::EnterFullscreen);
-    local.input.set(crate::Input::Pointer);
-    local.last_press.set(crate::Input::Pointer);
-    local.paused.set(initial.paused);
-    local.focus.set(parent.focus.get_untracked());
-    local.list.set(parent.list.get_untracked());
-    follow_clock(parent.focus, local.focus, move || crate::lists::view(local));
-    local.media.volume.set(initial.volume);
-    local.media.delay_ms.set(initial.audio_delay);
-    effect(move || {
-        let paused = local.paused.get();
-        untracked(|| parent.player_windows.update(|w| w.set_paused(id, paused)));
+    local.playback = local
+        .playback
+        .for_secondary_window(parent.playback, surface);
+    local
+        .chrome
+        .mode
+        .apply(crate::mode::Action::EnterFullscreen);
+    local.chrome.input.set(crate::Input::Pointer);
+    local.chrome.last_press.set(crate::Input::Pointer);
+    local.playback.paused.set(initial.paused);
+    local.guide.focus.set(parent.guide.focus.get_untracked());
+    local.guide.list.set(parent.guide.list.get_untracked());
+    follow_clock(parent.guide.focus, local.guide.focus, move || {
+        crate::lists::view(local.guide)
     });
+    local.playback.media.volume.set(initial.volume);
+    local.playback.media.delay_ms.set(initial.audio_delay);
     effect(move || {
-        let volume = local.media.volume.get();
-        untracked(|| parent.player_windows.update(|w| w.set_volume(id, volume)));
-    });
-    effect(move || {
-        let delay = local.media.delay_ms.get();
+        let paused = local.playback.paused.get();
         untracked(|| {
             parent
+                .playback
+                .player_windows
+                .update(|w| w.set_paused(id, paused))
+        });
+    });
+    effect(move || {
+        let volume = local.playback.media.volume.get();
+        untracked(|| {
+            parent
+                .playback
+                .player_windows
+                .update(|w| w.set_volume(id, volume))
+        });
+    });
+    effect(move || {
+        let delay = local.playback.media.delay_ms.get();
+        untracked(|| {
+            parent
+                .playback
                 .player_windows
                 .update(|w| w.set_audio_delay(id, delay))
         });
@@ -372,14 +406,19 @@ fn player_content(
     effect(move || {
         let muted = !audible(parent, id);
         untracked(|| {
-            if local.media.volume.with(|v| v.muted) != muted {
-                local.media.volume.update(|v| v.muted = muted);
+            if local.playback.media.volume.with(|v| v.muted) != muted {
+                local.playback.media.volume.update(|v| v.muted = muted);
             }
         });
     });
     effect(move || {
-        if let Some(key) = parent.player.stream(surface).key.get() {
-            untracked(|| parent.player_windows.update(|w| w.retarget(id, key)));
+        if let Some(key) = parent.playback.player.stream(surface).key.get() {
+            untracked(|| {
+                parent
+                    .playback
+                    .player_windows
+                    .update(|w| w.retarget(id, key))
+            });
         }
     });
     let window = nsh_core::element::desktop::current_window();
@@ -391,7 +430,7 @@ fn player_content(
     bind_pip(parent, local, id, window.clone(), back_action);
     let back_window = window.clone();
     effect(move || {
-        if local.mode.get() != crate::ViewMode::Fullscreen {
+        if local.chrome.mode.get() != crate::ViewMode::Fullscreen {
             back_window.close();
         }
     });

@@ -21,10 +21,10 @@ pub fn follow(ui: Ui) -> bool {
     let mut moved = Vec::new();
     let mut gone = Vec::new();
     let mut any = true;
-    ui.multiview.update(|m| {
+    ui.playback.multiview.update(|m| {
         if let Some(m) = m.as_mut() {
             any = m.retain(|surface, channel| {
-                let key = ui.player.stream(surface).key.get_untracked();
+                let key = ui.playback.player.stream(surface).key.get_untracked();
                 match key.and_then(|k| schedule.find_channel(&k)) {
                     Some(row)
                         if schedule.channel_block(row) == iptv_core::organization::Block::None =>
@@ -45,9 +45,9 @@ pub fn follow(ui: Ui) -> bool {
     });
     for (surface, row) in moved {
         if surface == 0 {
-            ui.playing.set(Some(row));
+            ui.playback.playing.set(Some(row));
         } else {
-            ui.player.stream(surface).channel.set(Some(row));
+            ui.playback.player.stream(surface).channel.set(Some(row));
         }
     }
     for surface in gone {
@@ -55,8 +55,8 @@ pub fn follow(ui: Ui) -> bool {
         crate::player::stop_surface(ui, surface);
     }
     if !any {
-        ui.multiview.set(None);
-        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.playback.multiview.set(None);
+        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     true
 }
@@ -67,11 +67,11 @@ pub fn follow(ui: Ui) -> bool {
 /// session with that channel playing on. The key hint goes after a while.
 pub fn bind(ui: Ui) {
     effect(move || {
-        let mode = ui.mode.get();
-        let playing = ui.playing.get();
-        let live = ui.playback.get() == Playback::Live;
+        let mode = ui.chrome.mode.get();
+        let playing = ui.playback.playing.get();
+        let live = ui.playback.playback.get() == Playback::Live;
         untracked(|| {
-            let state = ui.multiview.with(|m| {
+            let state = ui.playback.multiview.with(|m| {
                 m.as_ref().map(|m| {
                     let watched = m.detour().and_then(|d| m.tiles().get(d)).map(|t| t.channel);
                     (m.detour().is_some(), watched, m.active().clone())
@@ -117,6 +117,7 @@ pub fn bind(ui: Ui) {
         let omitted = omitted.get();
         let capacity = capacity.get();
         let reduced = ui
+            .playback
             .multiview
             .with_untracked(|m| m.as_ref().is_some_and(|m| m.limits().decoders > capacity));
         if omitted || reduced {
@@ -125,7 +126,7 @@ pub fn bind(ui: Ui) {
     });
     let hint = computed(move || {
         ui.keys_shown()
-            && ui.multiview.with(|m| {
+            && ui.playback.multiview.with(|m| {
                 m.as_ref().is_some_and(|m| {
                     m.hint() && m.detour().is_none() && m.dialog().is_none() && m.pick().is_none()
                 })
@@ -135,10 +136,12 @@ pub fn bind(ui: Ui) {
         if hint.get() {
             let _task = set_timeout(Duration::from_millis(HINT_MS), move || {
                 if ui
+                    .playback
                     .multiview
                     .with_untracked(|m| m.as_ref().is_some_and(State::hint))
                 {
-                    ui.multiview
+                    ui.playback
+                        .multiview
                         .update(|m| m.iter_mut().for_each(State::dismiss_hint));
                 }
             });
@@ -156,7 +159,7 @@ pub fn bind(ui: Ui) {
 /// is shown full screen and no player view moves. The other surfaces stop,
 /// and a list picking a tile closes.
 pub fn collapse(ui: Ui) {
-    let heard = ui.multiview.with_untracked(|m| {
+    let heard = ui.playback.multiview.with_untracked(|m| {
         m.as_ref().map(|m| {
             let tile = &m.tiles()[m.heard_index()];
             (m.detour().is_some(), tile.channel, tile.surface)

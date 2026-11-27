@@ -34,21 +34,21 @@ thread_local! {
 }
 
 /// The list on screen as a schedule of rows.
-pub fn view(ui: Ui) -> ListView {
-    ListView::new(crate::runtime_owner::schedule(), ui.list.with(Rc::clone))
+pub(crate) fn view(guide: crate::GuideUi) -> ListView {
+    ListView::new(crate::runtime_owner::schedule(), guide.list.with(Rc::clone))
 }
 
 /// The catalog channel on the focused row.
-pub fn focused_channel(ui: Ui) -> Option<usize> {
-    let row = ui.focus.with(|f| f.channel);
-    ui.list.with(|l| l.channel(row))
+pub(crate) fn focused_channel(guide: crate::GuideUi) -> Option<usize> {
+    let row = guide.focus.with(|f| f.channel);
+    guide.list.with(|l| l.channel(row))
 }
 
 /// The number catalog `channel` shows (the player card, History): its
 /// place in the list on screen, as in the guide, else the catalog's.
-pub fn number(ui: Ui, channel: usize) -> u32 {
+pub(crate) fn number(guide: crate::GuideUi, channel: usize) -> u32 {
     let catalog = crate::runtime_owner::schedule();
-    ui.list.with(|l| l.number_of(channel, &*catalog))
+    guide.list.with(|l| l.number_of(channel, &*catalog))
 }
 
 /// Catalogs stay visible unless every enabled playlist is M3U; discovery
@@ -104,7 +104,7 @@ pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
 /// The name of the list on screen.
 pub fn list_name(ui: Ui) -> String {
     ui.app.data_version.get();
-    let entry = ui.list.with(|l| l.entry());
+    let entry = ui.guide.list.with(|l| l.entry());
     entry_name(entry, &*crate::runtime_owner::schedule())
 }
 
@@ -138,8 +138,8 @@ pub fn rebuild(ui: Ui, keep: bool) {
 
 fn rebuild_in(ui: Ui, keep: bool, explicit_entry: Option<usize>) {
     let key = if keep {
-        let v = view(ui);
-        ui.focus.with(|f| v.channel_key(f.channel))
+        let v = view(ui.guide);
+        ui.guide.focus.with(|f| v.channel_key(f.channel))
     } else {
         None
     };
@@ -147,7 +147,8 @@ fn rebuild_in(ui: Ui, keep: bool, explicit_entry: Option<usize>) {
     let player = keep_player_list(ui, &*catalog);
     let entries = entries_in(ui, &*catalog);
     let entry = explicit_entry.unwrap_or_else(|| {
-        ui.focus
+        ui.guide
+            .focus
             .with(|f| entries.retain_selection(f.group, &*catalog, key.as_deref()))
     });
     let list = ChannelList::build(
@@ -160,8 +161,8 @@ fn rebuild_in(ui: Ui, keep: bool, explicit_entry: Option<usize>) {
     let view = ListView::new(catalog, list.clone());
     let row = key.and_then(|k| view.find_channel(&k));
     batch(|| {
-        ui.list.set(list);
-        ui.focus.update(|f| {
+        ui.guide.list.set(list);
+        ui.guide.focus.update(|f| {
             f.group = entry;
             f.restore(row, &view);
         });
@@ -171,7 +172,7 @@ fn rebuild_in(ui: Ui, keep: bool, explicit_entry: Option<usize>) {
 
 /// The favorites changed: the Favorites list follows if it is shown.
 pub fn favorites_changed(ui: Ui) {
-    let entry = Entry::at(ui.focus.with_untracked(|f| f.group));
+    let entry = Entry::at(ui.guide.focus.with_untracked(|f| f.group));
     if matches!(entry, Entry::Favorites | Entry::Recent)
         || matches!(entry, Entry::Group(group) if crate::runtime_owner::schedule().group_preferences(group).favorites_only)
     {
@@ -191,7 +192,11 @@ pub struct Kept {
 /// runtime may have replaced already.
 pub(super) fn keep_in(ui: Ui, catalog: Rc<dyn Schedule>) -> Kept {
     let player = keep_player_list(ui, &*catalog);
-    let mut kept = keep_list(ui.focus.get_untracked(), ui.list.get_untracked(), catalog);
+    let mut kept = keep_list(
+        ui.guide.focus.get_untracked(),
+        ui.guide.list.get_untracked(),
+        catalog,
+    );
     kept.player = player;
     kept
 }
@@ -223,8 +228,8 @@ pub(super) fn restore(ui: Ui, mut kept: Kept, catalog: Rc<dyn Schedule>) {
     focus.retain_rail(&rail_untracked(ui));
     let view = ListView::new(catalog, list.clone());
     batch(|| {
-        ui.list.set(list);
-        ui.focus.set(focus);
+        ui.guide.list.set(list);
+        ui.guide.focus.set(focus);
         restore_player_list(ui, player, &view, entries);
     });
 }
@@ -262,8 +267,9 @@ struct KeptPlayerList {
 }
 
 fn keep_player_list(ui: Ui, catalog: &dyn Schedule) -> Option<KeptPlayerList> {
-    let state = ui.channels.get_untracked()?;
+    let state = ui.playback.channels.get_untracked()?;
     let key = ui
+        .guide
         .list
         .with_untracked(|list| list.channel(state.row))
         .and_then(|channel| catalog.channel_key(channel));
@@ -294,14 +300,14 @@ fn restore_player_list(
             .key
             .and_then(|key| view.find_channel(&key))
             .unwrap_or(0);
-        ui.channels.set(Some(state));
+        ui.playback.channels.set(Some(state));
     }
 }
 
 /// The row of catalog `channel`, selecting the channel's own group first
 /// when the list on screen does not have it.
 fn listed(ui: Ui, channel: usize) -> usize {
-    if let Some(row) = ui.list.with_untracked(|l| l.row_of(channel)) {
+    if let Some(row) = ui.guide.list.with_untracked(|l| l.row_of(channel)) {
         return row;
     }
     let catalog = crate::runtime_owner::schedule();
@@ -309,15 +315,18 @@ fn listed(ui: Ui, channel: usize) -> usize {
     // A direct selection (for example from Search) can reach an ungrouped
     // channel through the aggregate even when its category tab is hidden.
     rebuild_in(ui, false, Some(entry));
-    ui.list.with_untracked(|l| l.row_of(channel)).unwrap_or(0)
+    ui.guide
+        .list
+        .with_untracked(|l| l.row_of(channel))
+        .unwrap_or(0)
 }
 
 /// Shows what plays on catalog `channel` (a zap, a resumed or previous
 /// channel): its row, its live program, the default window.
 pub fn show_channel(ui: Ui, channel: usize) {
     let row = listed(ui, channel);
-    let view = view(ui);
-    ui.focus.update(|f| f.show_channel(row, &view));
+    let view = view(ui.guide);
+    ui.guide.focus.update(|f| f.show_channel(row, &view));
 }
 
 /// The channel resumed at startup (`player::source_ready`,
@@ -351,11 +360,16 @@ fn into_resume_list(ui: Ui, channel: usize) -> bool {
     ) else {
         return false;
     };
-    if ui.focus.with_untracked(|f| f.group) != entry {
-        ui.focus.update(|f| f.group = entry);
+    if ui.guide.focus.with_untracked(|f| f.group) != entry {
+        ui.guide.focus.update(|f| f.group = entry);
         rebuild(ui, false);
     }
-    if ui.list.with_untracked(|l| l.row_of(channel)).is_some() {
+    if ui
+        .guide
+        .list
+        .with_untracked(|l| l.row_of(channel))
+        .is_some()
+    {
         show_channel(ui, channel);
     }
     true
@@ -365,14 +379,14 @@ fn into_resume_list(ui: Ui, channel: usize) -> bool {
 /// result, a closed menu).
 pub fn tap(ui: Ui, channel: usize, minute: i32) {
     let row = listed(ui, channel);
-    let view = view(ui);
-    ui.focus.update(|f| f.tap(row, minute, &view));
+    let view = view(ui.guide);
+    ui.guide.focus.update(|f| f.tap(row, minute, &view));
 }
 
 /// Runs a focus step with the columns and the list on screen.
 fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> Outcome {
     let rail = rail_untracked(ui);
-    let view = view(ui);
+    let view = view(ui.guide);
     let cols = Columns {
         entries: entries_in(ui, &**view.catalog()),
         rail: &rail,
@@ -380,7 +394,9 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
         back_to_now: true,
     };
     let mut outcome = Outcome::None;
-    ui.focus.update(|focus| outcome = f(focus, &cols, &view));
+    ui.guide
+        .focus
+        .update(|focus| outcome = f(focus, &cols, &view));
     outcome
 }
 
@@ -397,8 +413,9 @@ pub(crate) fn bind_categories(ui: Ui) {
             }
             let entries = entries_in(ui, &*catalog);
             let invalid = |entry| entries.retain(entry) != entry;
-            if ui.focus.with(|f| invalid(f.group))
+            if ui.guide.focus.with(|f| invalid(f.group))
                 || ui
+                    .playback
                     .channels
                     .with(|list| list.is_some_and(|list| invalid(list.entry)))
             {
@@ -412,14 +429,14 @@ pub(crate) fn bind_categories(ui: Ui) {
 pub fn bind(ui: Ui) {
     bind_categories(ui);
     effect(move || {
-        let available = (ui.playing.get().is_some() || crate::on_demand::active(ui))
+        let available = (ui.playback.playing.get().is_some() || crate::on_demand::active(ui))
             && matches!(
-                ui.mode.get(),
+                ui.chrome.mode.get(),
                 crate::ViewMode::Guide | crate::ViewMode::Fullscreen
             );
-        if ui.focus.with(|f| f.pane == Pane::Preview) && !available {
-            let view = view(ui);
-            ui.focus.update(|f| {
+        if ui.guide.focus.with(|f| f.pane == Pane::Preview) && !available {
+            let view = view(ui.guide);
+            ui.guide.focus.update(|f| {
                 f.retain_preview(false);
                 f.restore(None, &view);
             });
@@ -434,12 +451,12 @@ pub fn navigate(ui: Ui, m: Move) {
             nsh_core::prelude::idiom(),
             nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Desktop
         )
-        && ui.mode.get_untracked() == crate::ViewMode::Guide
+        && ui.chrome.mode.get_untracked() == crate::ViewMode::Guide
     {
         let mut moved = false;
-        ui.focus.update(|f| {
+        ui.guide.focus.update(|f| {
             moved = f.focus_preview(
-                ui.playing.get_untracked().is_some() || crate::on_demand::active(ui),
+                ui.playback.playing.get_untracked().is_some() || crate::on_demand::active(ui),
             );
         });
         if moved {
@@ -452,8 +469,8 @@ pub fn navigate(ui: Ui, m: Move) {
 
 /// OK on the guide screen.
 pub fn ok(ui: Ui) {
-    if ui.focus.with_untracked(|f| f.pane) == Pane::Groups
-        && toggle_playlist(ui.focus.with_untracked(|f| f.group))
+    if ui.guide.focus.with_untracked(|f| f.pane) == Pane::Groups
+        && toggle_playlist(ui.guide.focus.with_untracked(|f| f.group))
     {
         return;
     }
@@ -471,7 +488,7 @@ pub fn back(ui: Ui) -> bool {
 
 /// Shows the groups column (the Groups key or the guide's corner Back control).
 pub fn open_groups(ui: Ui) {
-    ui.focus.update(Focus::open_groups);
+    ui.guide.focus.update(Focus::open_groups);
 }
 
 /// Opens the rail with its names (an iPad's ‹ in the groups column).
@@ -524,12 +541,12 @@ pub fn tap_rail(ui: Ui, index: usize) {
 fn follow(ui: Ui, outcome: Outcome) {
     match outcome {
         Outcome::Preview => rebuild(ui, false),
-        Outcome::Committed if ui.focus.with_untracked(|f| f.hint) => arm_hint(ui),
+        Outcome::Committed if ui.guide.focus.with_untracked(|f| f.hint) => arm_hint(ui),
         Outcome::Watch => ui.watch(),
         Outcome::ReturnToPlayer
-            if ui.playing.get_untracked().is_some() || crate::on_demand::active(ui) =>
+            if ui.playback.playing.get_untracked().is_some() || crate::on_demand::active(ui) =>
         {
-            ui.mode.apply(crate::mode::Action::EnterFullscreen);
+            ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
             ui.show_playing();
         }
         Outcome::Open(item) => open(ui, item),
@@ -559,15 +576,15 @@ fn arm_hint(ui: Ui) {
         h.get()
     });
     let _task = set_timeout(HINT, move || {
-        if HINT_SHOWN.with(Cell::get) == shown && ui.focus.with_untracked(|f| f.hint) {
-            ui.focus.update(|f| f.hint = false);
+        if HINT_SHOWN.with(Cell::get) == shown && ui.guide.focus.with_untracked(|f| f.hint) {
+            ui.guide.focus.update(|f| f.hint = false);
         }
     });
 }
 
 /// Whether the rail and groups show beside the guide.
 pub fn columns_shown(ui: Ui) -> bool {
-    ui.focus.with(|f| f.columns_shown())
+    ui.guide.focus.with(|f| f.columns_shown())
 }
 
 fn toggle_playlist(entry: usize) -> bool {

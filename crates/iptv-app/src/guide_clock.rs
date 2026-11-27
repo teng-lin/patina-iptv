@@ -10,10 +10,10 @@ use crate::host::reload_time_zone;
 pub fn tick(ui: Ui) {
     reload_time_zone();
     let now = now_minute();
-    if ui.focus.with(|f| f.now) != now {
+    if ui.guide.focus.with(|f| f.now) != now {
         // The focus is on a row of the list on screen.
-        let view = crate::lists::view(ui);
-        ui.focus.update(|f| {
+        let view = crate::lists::view(ui.guide);
+        ui.guide.focus.update(|f| {
             f.tick(now, &view);
         });
     }

@@ -70,7 +70,7 @@ pub fn channel_width() -> f32 {
 /// An opaque guide color; over full-screen video (overlay) at the
 /// overlay's alpha (`appearance.ui_transparency`).
 pub(crate) fn fill(ui: Ui, rgb_hex: u32) -> Rgba {
-    let alpha = match ui.mode.get() {
+    let alpha = match ui.chrome.mode.get() {
         ViewMode::Overlay => crate::theme::overlay_alpha(&crate::settings_wiring::read(ui)),
         ViewMode::Guide | ViewMode::Fullscreen => 0xFF,
     };
@@ -83,7 +83,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let size = Scale::new();
     let pan = Pan::new(ui, width);
     let drag = organization_view::reorder_drag::DragList::new(ui, size, rows).guide(channel_width);
-    let now = computed(move || ui.focus.with(|f| f.now));
+    let now = computed(move || ui.guide.focus.with(|f| f.now));
     let order_scope = computed(move || organization_view::guide_order_scope(ui));
     let order_keys = computed(move || {
         order_scope.with(|scope| {
@@ -105,7 +105,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         order.with(|order| {
             order
                 .as_ref()
-                .map_or_else(|| ui.list.with(|l| l.len()), Vec::len)
+                .map_or_else(|| ui.guide.list.with(|l| l.len()), Vec::len)
         })
     });
     let focused = computed(move || {
@@ -113,8 +113,9 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
             return None;
         }
         ui.guide_data();
-        let view = crate::lists::view(ui);
-        ui.focus
+        let view = crate::lists::view(ui.guide);
+        ui.guide
+            .focus
             .with(|f| (f.pane == Pane::Guide).then(|| (f.channel, f.program(&view).start)))
     });
     // Read where used: a memo of it went stale on window resizes.
@@ -124,7 +125,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         crate::settings_wiring::read(ui);
         if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
             crate::numbers::column_width(
-                ui.list.with(|l| l.len()),
+                ui.guide.list.with(|l| l.len()),
                 size.of(CHANNEL) * crate::settings::font_factor(),
             )
         } else {
@@ -134,7 +135,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     // Now in the band (the slide brings it on screen or past the edge).
     let now_x = computed(move || {
         let at = now.get() - pan.band().base;
-        let rows = ui.list.with(|l| !l.is_empty());
+        let rows = ui.guide.list.with(|l| !l.is_empty());
         (rows && (0..=BAND).contains(&at)).then(|| at as f32 * pan.scale())
     });
     scroll_to_focus_on_new_list(ui, rows, order_focus);
@@ -162,7 +163,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                             let channel = computed(move || {
                                 order.with(|order| match order {
                                     Some(channels) => channels.get(at.index()).copied(),
-                                    None => ui.list.with(|l| l.channel(at.index())),
+                                    None => ui.guide.list.with(|l| l.channel(at.index())),
                                 })
                             });
                             let editing = computed(move || {
@@ -190,7 +191,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                     })
                     .on_viewable_items_change(move |v: &ViewableItems| {
                         if !organization_view::guide_order_open(ui) {
-                            ui.visible_rows.set(v.viewable);
+                            ui.guide.visible_rows.set(v.viewable);
                         }
                     })
                     .flex_1(),
@@ -247,9 +248,9 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
 
 /// Over an empty list: what it would hold and how to fill it.
 fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
-    let empty = move || ui.list.with(|l| l.is_empty());
+    let empty = move || ui.guide.list.with(|l| l.is_empty());
     let settings = computed(move || crate::menu_view::empty_group_settings_available(ui));
-    let message = move || match ui.list.with(|l| l.entry()) {
+    let message = move || match ui.guide.list.with(|l| l.entry()) {
         FAVORITES => tr(
             "No favorite channels yet. Hold OK (or press Menu) on a channel and choose “Add to favorites”, or star channels with “Manage favorites…”.",
         ),
@@ -285,7 +286,7 @@ fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
                     ui,
                     size,
                     move || tr("Group settings"),
-                    move || ui.focus.with(|f| f.pane == Pane::Guide),
+                    move || ui.guide.focus.with(|f| f.pane == Pane::Guide),
                     move || {
                         crate::menu_view::open_empty_group_settings(ui);
                     },
@@ -296,7 +297,7 @@ fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
 
 /// After a group was chosen: what the keys do here, until a key or Back.
 fn hint_card(ui: Ui) -> impl IntoElement {
-    let shown = move || ui.focus.with(|f| f.hint) && ui.keys_shown();
+    let shown = move || ui.guide.focus.with(|f| f.hint) && ui.keys_shown();
     view()
         .absolute()
         .right(px(16.0))
@@ -348,7 +349,7 @@ fn hint_lines() -> [&'static str; 4] {
 fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef, order_focus: Memo<Option<(usize, bool)>>) {
     effect(move || {
         ui.app.data_version.get();
-        ui.list.with(|_| ());
+        ui.guide.list.with(|_| ());
         if order_focus.get_untracked().is_none() {
             scroll_to_focused_row(ui, list);
         }
@@ -356,7 +357,7 @@ fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef, order_focus: Memo<Optio
 }
 
 fn scroll_to_focused_row(ui: Ui, list: ElementRef) {
-    let row = ui.focus.with_untracked(|f| f.channel);
+    let row = ui.guide.focus.with_untracked(|f| f.channel);
     list.scroll_to_index(
         row.saturating_sub(2) as u32,
         percentage(0.0),
@@ -373,10 +374,10 @@ type Geometry = (fn() -> f32, Pan, Scale);
 /// else (it plays nothing). Whether they were open. Elsewhere a tap or
 /// click keeps acting at once.
 pub(crate) fn closed_columns(ui: Ui) -> bool {
-    if !crate::IOS || ui.focus.with_untracked(|f| f.pane) == Pane::Guide {
+    if !crate::IOS || ui.guide.focus.with_untracked(|f| f.pane) == Pane::Guide {
         return false;
     }
-    ui.focus.update(|f| f.close_columns());
+    ui.guide.focus.update(|f| f.close_columns());
     true
 }
 
@@ -407,14 +408,15 @@ fn row(
     let lit = computed(move || focus.get().is_some());
     // Now, for the past cells the row cannot replay (a memo: keys move
     // the focus without the cells' dimming running again).
-    let now = computed(move || ui.focus.with(|f| f.now));
+    let now = computed(move || ui.guide.focus.with(|f| f.now));
     let selected = computed(move || {
         if organization_view::guide_order_open(ui) {
             return None;
         }
         ui.guide_data();
-        let view = crate::lists::view(ui);
-        ui.focus
+        let view = crate::lists::view(ui.guide);
+        ui.guide
+            .focus
             .with(|f| (f.channel == at.index()).then(|| f.program(&view).start))
     });
     let focus = RowFocus {

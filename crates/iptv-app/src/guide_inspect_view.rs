@@ -15,17 +15,17 @@ use nsh_core::{element::input, prelude::*};
 use std::time::Duration;
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.guide_inspect.with(|s| s.as_ref().map(f))
+    ui.screens.guide_inspect.with(|s| s.as_ref().map(f))
 }
 fn update(ui: Ui, f: impl FnOnce(&mut Screen)) {
-    ui.guide_inspect.update(|s| {
+    ui.screens.guide_inspect.update(|s| {
         if let Some(s) = s {
             f(s);
         }
     });
 }
 fn cancel(ui: Ui) {
-    ui.guide_inspect_cancel.with(|token| {
+    ui.screens.guide_inspect_cancel.with(|token| {
         if let Some(token) = token.take() {
             token.cancel();
         }
@@ -42,7 +42,8 @@ fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
         let id = s.begin();
         request = Some((s.clone(), id, control.clone()));
     });
-    ui.guide_inspect_cancel
+    ui.screens
+        .guide_inspect_cancel
         .with(|token| *token = Some(control.cancel.clone()));
     request
 }
@@ -70,15 +71,15 @@ pub fn open(ui: Ui, source: SourceId) {
     } else {
         screen.without_probes()
     };
-    ui.guide_inspect.set(Some(screen));
+    ui.screens.guide_inspect.set(Some(screen));
     audit(ui, false);
 }
 pub fn is_open(ui: Ui) -> bool {
-    ui.guide_inspect.with(Option::is_some)
+    ui.screens.guide_inspect.with(Option::is_some)
 }
 pub fn close(ui: Ui) {
     cancel(ui);
-    ui.guide_inspect.set(None);
+    ui.screens.guide_inspect.set(None);
     dismiss_keyboard();
 }
 pub fn back(ui: Ui) -> bool {

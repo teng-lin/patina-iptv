@@ -15,10 +15,10 @@ use nsh_core::prelude::*;
 use std::time::Duration;
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.guide_repair.with(|s| s.as_ref().map(f))
+    ui.screens.guide_repair.with(|s| s.as_ref().map(f))
 }
 fn update(ui: Ui, f: impl FnOnce(&mut Screen)) {
-    ui.guide_repair.update(|s| {
+    ui.screens.guide_repair.update(|s| {
         if let Some(s) = s {
             f(s);
         }
@@ -33,14 +33,14 @@ fn count(ui: Ui) {
         }
     })
     .unwrap_or(0);
-    ui.guide_inspect.update(|s| {
+    ui.screens.guide_inspect.update(|s| {
         if let Some(s) = s {
             s.set_pending_repairs(pending);
         }
     });
 }
 fn cancel(ui: Ui) {
-    ui.guide_repair_cancel.with(|token| {
+    ui.screens.guide_repair_cancel.with(|token| {
         if let Some(token) = token.take() {
             token.cancel();
         }
@@ -57,7 +57,8 @@ fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
         let generation = s.begin();
         accepted = Some((s.clone(), generation, control.clone()));
     });
-    ui.guide_repair_cancel
+    ui.screens
+        .guide_repair_cancel
         .with(|token| *token = Some(control.cancel.clone()));
     accepted
 }
@@ -108,7 +109,7 @@ pub fn back(ui: Ui) -> bool {
     true
 }
 fn dismiss_inspection_input(ui: Ui) {
-    ui.guide_inspect.update(|s| {
+    ui.screens.guide_inspect.update(|s| {
         if let Some(s) = s {
             s.typing = false;
         }
@@ -127,12 +128,12 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
     }
     // Concurrent selections share the current screen lifetime. Closing,
     // clearing, or starting a new operation cancels every old selection.
-    let cancel = ui.guide_repair_cancel.with(|token| {
+    let cancel = ui.screens.guide_repair_cancel.with(|token| {
         token
             .get_or_insert_with(iptv_import::CancelToken::new)
             .clone()
     });
-    let inspection = ui.guide_inspect_cancel.with(|token| token.clone());
+    let inspection = ui.screens.guide_inspect_cancel.with(|token| token.clone());
     let control = InspectionControl {
         cancel: cancel.clone(),
         ..Default::default()
@@ -169,7 +170,8 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         })
         .unwrap_or(true)
         {
-            ui.guide_repair
+            ui.screens
+                .guide_repair
                 .set(Some(Screen::new(channel.source, window)));
         }
         invalidate(ui);
@@ -189,7 +191,9 @@ pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
         reopen(ui);
         return;
     }
-    ui.guide_repair.set(Some(Screen::new(source, window)));
+    ui.screens
+        .guide_repair
+        .set(Some(Screen::new(source, window)));
     let Some((_, generation, control)) = begin(ui) else {
         return;
     };

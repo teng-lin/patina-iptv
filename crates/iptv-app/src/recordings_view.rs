@@ -12,7 +12,7 @@ mod rows;
 mod style;
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.recordings_open.get()
+    ui.screens.recordings_open.get()
 }
 pub fn open(ui: Ui) {
     // Not on a device that does not show the library (yet): its entries
@@ -20,20 +20,22 @@ pub fn open(ui: Ui) {
     if !crate::capabilities::recordings_library_untracked(ui) {
         return;
     }
-    ui.recordings.update(Screen::open);
+    ui.screens.recordings.update(Screen::open);
     reload(ui);
 }
 pub fn close(ui: Ui) {
-    ui.recordings.update(Screen::close);
+    ui.screens.recordings.update(Screen::close);
 }
 pub fn back(ui: Ui) -> bool {
-    ui.recordings.update(Screen::back);
+    ui.screens.recordings.update(Screen::back);
     true
 }
 fn reload(ui: Ui) {
     let owner = crate::runtime_owner::runtime();
     let mut generation = 0;
-    ui.recordings.update(|s| generation = s.begin_reload());
+    ui.screens
+        .recordings
+        .update(|s| generation = s.begin_reload());
     crate::tasks::spawn_in_app(async move {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
@@ -41,7 +43,7 @@ fn reload(ui: Ui) {
             .retired_recording_schedules()
             .await
             .unwrap_or_default();
-        ui.recordings.update(|s| {
+        ui.screens.recordings.update(|s| {
             s.finish_reload(
                 generation,
                 result.map_err(|_| "Recordings could not be loaded"),
@@ -67,14 +69,14 @@ fn announce_retired(ui: Ui) {
         }
     });
     effect(move || {
-        if ui.recordings_open.get() {
+        if ui.screens.recordings_open.get() {
             return;
         }
         untracked(|| {
-            if ui.recordings.with(|s| s.retired.is_empty()) {
+            if ui.screens.recordings.with(|s| s.retired.is_empty()) {
                 return;
             }
-            ui.recordings.update(Screen::dismiss_retired);
+            ui.screens.recordings.update(Screen::dismiss_retired);
             crate::tasks::spawn_in_app(async move {
                 // On failure the list stays stored and shows again next time.
                 if let Err(error) = crate::runtime_owner::runtime()
@@ -139,7 +141,7 @@ pub fn reserve_viewing(_ui: Ui, surface: usize, channel: usize, live: bool) -> b
 /// The guide's mark on a program being recorded: "● " while a capture of
 /// it is writing, otherwise nothing.
 pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static str {
-    if ui.recordings.with(|s| s.jobs.is_empty()) {
+    if ui.screens.recordings.with(|s| s.jobs.is_empty()) {
         return "";
     }
     let schedule = crate::runtime_owner::schedule();
@@ -153,7 +155,7 @@ pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static
         crate::guide::unix_of(&*schedule, program.start),
         crate::guide::unix_of(&*schedule, program.end),
     );
-    let recording = ui.recordings.with(|s| {
+    let recording = ui.screens.recordings.with(|s| {
         s.jobs.iter().any(|j| {
             j.status == Status::Recording
                 && j.bytes > 0
@@ -171,17 +173,17 @@ pub fn current(ui: Ui) {
     if !untracked(crate::capabilities::record_now).offered() {
         return;
     }
-    if ui.mode.get_untracked() == crate::ViewMode::Fullscreen {
+    if ui.chrome.mode.get_untracked() == crate::ViewMode::Fullscreen {
         toggle_current(ui);
         return;
     }
-    let Some(channel) = crate::lists::focused_channel(ui) else {
+    let Some(channel) = crate::lists::focused_channel(ui.guide) else {
         open(ui);
         return;
     };
     let origin = Origin {
         channel,
-        program_start: ui.focus.with_untracked(|f| f.cursor),
+        program_start: ui.guide.focus.with_untracked(|f| f.cursor),
     };
     // Record starts recording a program on now. A future or ended one is not
     // scheduled: recording future programs is retired (#273).
@@ -208,13 +210,13 @@ pub fn can_record_now(origin: Origin, now: i32) -> bool {
 /// clock itself, not the guide's cached minute: a program that has just ended
 /// must not fall back to recording the next hour under its title.
 pub fn record_details(ui: Ui, origin: Origin) {
-    if ui.player_surface != 0
+    if ui.playback.player_surface != 0
         || !details_button()
         || !can_record_now(origin, crate::clock::now_minute())
     {
         return;
     }
-    ui.description.set(None);
+    ui.screens.description.set(None);
     record_origin(ui, origin);
 }
 
@@ -226,10 +228,10 @@ pub fn details_button() -> bool {
 }
 
 fn playing_channel(ui: Ui) -> Option<(i64, String)> {
-    if ui.player_surface != 0 || ui.playback.get() != crate::Playback::Live {
+    if ui.playback.player_surface != 0 || ui.playback.playback.get() != crate::Playback::Live {
         return None;
     }
-    let channel = ui.playing.get()?;
+    let channel = ui.playback.playing.get()?;
     crate::runtime_owner::schedule()
         .channel_key(channel)
         .and_then(|key| crate::data::combined::owner(&crate::runtime_owner::runtime(), &key))
@@ -240,7 +242,7 @@ pub fn recording_active(ui: Ui) -> bool {
     let Some((source, channel)) = playing_channel(ui) else {
         return false;
     };
-    ui.recordings.with(|s| {
+    ui.screens.recordings.with(|s| {
         s.starting
             .as_ref()
             .is_some_and(|r| r.source == source && r.channel == channel)
@@ -251,6 +253,7 @@ pub fn recording_active(ui: Ui) -> bool {
 
 pub fn toggle_current(ui: Ui) {
     if ui
+        .screens
         .recordings
         .with_untracked(|s| s.busy || s.starting.is_some())
     {
@@ -259,7 +262,7 @@ pub fn toggle_current(ui: Ui) {
     let Some((source, channel)) = playing_channel(ui) else {
         return;
     };
-    let job = ui.recordings.with_untracked(|s| {
+    let job = ui.screens.recordings.with_untracked(|s| {
         s.active_on(source, &channel, crate::clock::wall_unix())
             .cloned()
     });
@@ -273,10 +276,12 @@ pub fn toggle_current(ui: Ui) {
 /// The play bar records its playing channel, independently of guide focus.
 /// It never replaces the player surface.
 pub fn record_now(ui: Ui) {
-    if ui.player_surface != 0 || ui.playback.get_untracked() != crate::Playback::Live {
+    if ui.playback.player_surface != 0
+        || ui.playback.playback.get_untracked() != crate::Playback::Live
+    {
         return;
     }
-    let Some(channel) = ui.playing.get_untracked() else {
+    let Some(channel) = ui.playback.playing.get_untracked() else {
         return;
     };
     start_origin(
@@ -293,14 +298,14 @@ pub fn record_origin(ui: Ui, origin: Origin) {
     start_origin(ui, origin, true);
 }
 fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
-    if ui.recordings.with_untracked(|s| s.busy)
+    if ui.screens.recordings.with_untracked(|s| s.busy)
         || !untracked(crate::capabilities::record_now).offered()
     {
         return;
     }
     let context = remembered
         .then(|| {
-            ui.recordings.with_untracked(|s| {
+            ui.screens.recordings.with_untracked(|s| {
                 s.context
                     .as_ref()
                     .filter(|(saved, _)| *saved == origin)
@@ -370,7 +375,7 @@ fn occurrence_job(request: &Request, jobs: Vec<Job>) -> Option<Job> {
 }
 
 fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
-    if ui.player_surface != 0 || !available(origin.channel) {
+    if ui.playback.player_surface != 0 || !available(origin.channel) {
         return None;
     }
     let schedule = crate::runtime_owner::schedule();
@@ -418,7 +423,8 @@ pub fn perform_channel_action(ui: Ui, origin: Origin, item: MenuItem) -> bool {
 
 pub fn remember(ui: Ui, origin: Origin) {
     let request = request(origin);
-    ui.recordings
+    ui.screens
+        .recordings
         .update(|s| s.remember_context(origin, request));
 }
 /// Starts recording `request` now, once the parental check has passed.
@@ -430,10 +436,12 @@ fn start(ui: Ui, mut request: Request) {
     if let Err(refusal) = request.validate(now) {
         let message = iptv_presentation::recording::request_refusal_message(refusal);
         crate::settings_view::notify(tr(message));
-        ui.recordings.update(|s| s.show_error(message));
+        ui.screens.recordings.update(|s| s.show_error(message));
         return;
     }
-    ui.recordings.update(|s| s.begin_start(request.clone()));
+    ui.screens
+        .recordings
+        .update(|s| s.begin_start(request.clone()));
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let result = owner.schedule_recording(request).await;
@@ -462,7 +470,9 @@ fn start(ui: Ui, mut request: Request) {
                 .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
                 .unwrap_or("Recording action failed")
         });
-        ui.recordings.update(|s| s.finish_start(jobs, error));
+        ui.screens
+            .recordings
+            .update(|s| s.finish_start(jobs, error));
         reload(ui);
     });
 }
@@ -479,36 +489,38 @@ fn error_message(error: &iptv_runtime::Error) -> Option<&'static str> {
         .or_else(|| error.unavailable_reason())
 }
 fn select_job(ui: Ui, id: JobId) {
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| s.select_job(id));
+    ui.screens.recordings.update(|s| s.select_job(id));
 }
 pub(super) fn return_to_player(ui: Ui) {
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
     close(ui);
-    ui.mode.apply(crate::mode::Action::EnterFullscreen);
+    ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
     crate::play_bar::tapped(ui);
 }
 
 fn activate_job(ui: Ui, id: JobId) {
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
     let job = ui
+        .screens
         .recordings
         .with_untracked(|s| s.jobs.iter().find(|j| j.id == id).cloned());
     let Some(job) = job else { return };
     if ui
+        .playback
         .player
         .recorded
         .with_untracked(|r| r.as_ref().is_some_and(|(playing, _)| playing.id == id))
     {
         return_to_player(ui);
     } else if matches!(job.status, Status::Completed | Status::Partial) && job.bytes > 0 {
-        ui.recordings.update(|s| s.focus_for_action(id));
+        ui.screens.recordings.update(|s| s.focus_for_action(id));
         perform(ui, 0);
     } else {
         select_job(ui, id);
@@ -516,27 +528,28 @@ fn activate_job(ui: Ui, id: JobId) {
 }
 
 fn row_action(ui: Ui, id: JobId, action: &'static str) {
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
     let job = ui
+        .screens
         .recordings
         .with_untracked(|s| s.jobs.iter().find(|j| j.id == id).cloned());
     if let Some(job) = job {
-        ui.recordings.update(|s| s.focus_for_action(id));
+        ui.screens.recordings.update(|s| s.focus_for_action(id));
         execute(ui, job, false, action);
     }
 }
 
 fn request_delete(ui: Ui, id: JobId) {
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| s.request_delete(id));
+    ui.screens.recordings.update(|s| s.request_delete(id));
 }
 
 fn confirm_delete(ui: Ui) {
-    let job = ui.recordings.with_untracked(|s| {
+    let job = ui.screens.recordings.with_untracked(|s| {
         if s.busy || !s.confirm_delete {
             None
         } else {
@@ -554,13 +567,14 @@ fn actions(ui: Ui, job: &Job) -> Vec<&'static str> {
         Status::Completed | Status::Partial if job.bytes > 0 => {
             vec![
                 if ui
+                    .playback
                     .player
                     .recorded
                     .with(|r| r.as_ref().is_some_and(|(playing, _)| playing.id == job.id))
                 {
                     "Stop playback"
                 } else {
-                    if ui.recordings.with(|s| {
+                    if ui.screens.recordings.with(|s| {
                         s.progress
                             .iter()
                             .any(|(id, p)| *id == job.id && p.resume_ms() > 0)
@@ -579,6 +593,7 @@ fn actions(ui: Ui, job: &Job) -> Vec<&'static str> {
 }
 fn perform(ui: Ui, index: usize) {
     let (job, confirm) = ui
+        .screens
         .recordings
         .with_untracked(|s| (s.focused().cloned(), s.confirm_delete));
     let Some(job) = job else {
@@ -607,10 +622,10 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
         request_delete(ui, job.id);
         return;
     }
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(Screen::begin_action);
+    ui.screens.recordings.update(Screen::begin_action);
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let plays = matches!(
@@ -623,14 +638,13 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
             match owner.open_recording(job.id).await {
                 Ok(source) => {
                     crate::player::play_recording(ui, job.clone(), source);
-                    ui.player
-                        .main()
-                        .resume_ms
-                        .set(Some(if action == "Play from beginning" {
+                    ui.playback.player.main().resume_ms.set(Some(
+                        if action == "Play from beginning" {
                             0
                         } else {
                             progress.resume_ms()
-                        }));
+                        },
+                    ));
                     Ok(())
                 }
                 Err(e) => Err(e),
@@ -638,6 +652,7 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
         } else if action == "Delete recording" {
             // Consent precedes stopping; deleting another file leaves playback alone.
             if ui
+                .playback
                 .player
                 .recorded
                 .with_untracked(|r| r.as_ref().is_some_and(|(playing, _)| playing.id == job.id))
@@ -664,7 +679,8 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
             ),
         };
         let mut failure_notice = false;
-        ui.recordings
+        ui.screens
+            .recordings
             .update(|s| failure_notice = s.finish_action(jobs, outcome));
         if failure_notice {
             crate::settings_view::notify(tr("Recording action failed"));
@@ -677,16 +693,16 @@ pub fn key(ui: Ui, action: Action) {
         back(ui);
         return;
     }
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    if ui.recordings.with_untracked(|s| s.confirm_delete) {
+    if ui.screens.recordings.with_untracked(|s| s.confirm_delete) {
         match action {
             Action::MoveLeft | Action::MoveRight | Action::MoveUp | Action::MoveDown => {
-                ui.recordings.update(Screen::toggle_delete_choice);
+                ui.screens.recordings.update(Screen::toggle_delete_choice);
             }
             Action::Select => {
-                if ui.recordings.with_untracked(|s| s.delete_selected) {
+                if ui.screens.recordings.with_untracked(|s| s.delete_selected) {
                     confirm_delete(ui);
                 } else {
                     back(ui);
@@ -696,27 +712,28 @@ pub fn key(ui: Ui, action: Action) {
         }
         return;
     }
-    if ui.recordings.with_untracked(|s| s.actions) {
+    if ui.screens.recordings.with_untracked(|s| s.actions) {
         let length = ui
+            .screens
             .recordings
             .with_untracked(|s| s.focused().map(|j| actions(ui, j)).map_or(0, |a| a.len()));
         match action {
-            Action::MoveUp => ui.recordings.update(Screen::previous_action),
-            Action::MoveDown => ui.recordings.update(|s| s.next_action(length)),
-            Action::Select => perform(ui, ui.recordings.with_untracked(|s| s.action)),
+            Action::MoveUp => ui.screens.recordings.update(Screen::previous_action),
+            Action::MoveDown => ui.screens.recordings.update(|s| s.next_action(length)),
+            Action::Select => perform(ui, ui.screens.recordings.with_untracked(|s| s.action)),
             _ => {}
         }
     } else {
         match action {
-            Action::MoveUp => ui.recordings.update(|s| s.move_focus(-1)),
-            Action::MoveDown => ui.recordings.update(|s| s.move_focus(1)),
+            Action::MoveUp => ui.screens.recordings.update(|s| s.move_focus(-1)),
+            Action::MoveDown => ui.screens.recordings.update(|s| s.move_focus(1)),
             Action::ShowMenu => {
-                if let Some(id) = ui.recordings.with_untracked(|s| s.focus) {
+                if let Some(id) = ui.screens.recordings.with_untracked(|s| s.focus) {
                     select_job(ui, id);
                 }
             }
             Action::Select => {
-                if let Some(id) = ui.recordings.with_untracked(|s| s.focus) {
+                if let Some(id) = ui.screens.recordings.with_untracked(|s| s.focus) {
                     activate_job(ui, id);
                 }
             }
@@ -740,7 +757,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
     view()
         .child(
             ui_kit::title(size, move || {
-                ui.recordings.with(|s| {
+                ui.screens.recordings.with(|s| {
                     s.focused()
                         .map(|j| j.request.title.clone())
                         .unwrap_or_default()
@@ -751,7 +768,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
         )
         .child(
             ui_kit::body(size, move || {
-                ui.recordings.with(|s| {
+                ui.screens.recordings.with(|s| {
                     s.focused()
                         .map(|j| {
                             let media =
@@ -775,7 +792,8 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
         .children((0..4).map(move |index| {
             when(
                 move || {
-                    ui.recordings
+                    ui.screens
+                        .recordings
                         .with(|s| s.focused().is_some_and(|j| index < actions(ui, j).len()))
                 },
                 move || {
@@ -783,14 +801,14 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
                         ui,
                         size,
                         move || {
-                            ui.recordings.with(|s| {
+                            ui.screens.recordings.with(|s| {
                                 s.focused()
                                     .and_then(|j| actions(ui, j).get(index).copied())
                                     .map(|name| tr(name).to_owned())
                                     .unwrap_or_default()
                             })
                         },
-                        move || ui.recordings.with(|s| s.action == index),
+                        move || ui.screens.recordings.with(|s| s.action == index),
                         move || perform(ui, index),
                     )
                 },
@@ -809,7 +827,7 @@ fn requirements() -> &'static str {
 }
 
 fn message(ui: Ui) -> String {
-    ui.recordings.with(|s| {
+    ui.screens.recordings.with(|s| {
         s.error
             .as_ref()
             .map(|message| tr(message).to_owned())
@@ -831,7 +849,7 @@ fn library_content(ui: Ui, size: Scale) -> View {
                 .px(move || size.px(24.0))
                 .min_h(move || size.px(72.0))
                 .child(when(
-                    move || ui.recordings.with(|s| !s.actions),
+                    move || ui.screens.recordings.with(|s| !s.actions),
                     move || style::action(ui, size, tr("Close"), || false, move || close(ui)),
                 ))
                 .child(view().flex_1())
@@ -839,7 +857,7 @@ fn library_content(ui: Ui, size: Scale) -> View {
         )
         .child(rows::now_playing(ui, size))
         .child(when(
-            move || ui.recordings.with(|s| !s.retired.is_empty()),
+            move || ui.screens.recordings.with(|s| !s.retired.is_empty()),
             move || retired_schedules(ui, size),
         ))
         .child(
@@ -848,7 +866,7 @@ fn library_content(ui: Ui, size: Scale) -> View {
                 .px(move || size.px(24.0)),
         )
         .child(when(
-            move || ui.recordings.with(|s| s.visible().next().is_none()),
+            move || ui.screens.recordings.with(|s| s.visible().next().is_none()),
             move || {
                 ui_kit::body(
                     size,
@@ -880,7 +898,7 @@ fn retired_schedules(ui: Ui, size: Scale) -> View {
             tr("These schedules were canceled. Recordings already made are kept."),
         ))
         .child(ui_kit::caption(size, move || {
-            ui.recordings.with(|s| {
+            ui.screens.recordings.with(|s| {
                 // A bounded list keeps the recordings below it in view.
                 let mut lines = s
                     .retired
@@ -921,11 +939,13 @@ fn library(ui: Ui, size: Scale) -> View {
         .inset_0()
         .child(
             library_content(ui, size).accessibility_elements_hidden(move || {
-                ui.recordings.with(|s| s.actions || s.confirm_delete)
+                ui.screens
+                    .recordings
+                    .with(|s| s.actions || s.confirm_delete)
             }),
         )
         .child(when(
-            move || ui.recordings.with(|s| s.actions),
+            move || ui.screens.recordings.with(|s| s.actions),
             move || {
                 view()
                     .absolute()
@@ -970,7 +990,8 @@ fn recording_list(ui: Ui, size: Scale) -> impl IntoElement {
     // A memo: the list follows the focus when it moves, not on every
     // reload (one a second), which would undo the wheel's scroll.
     let focused = computed(move || {
-        ui.recordings
+        ui.screens
+            .recordings
             .with(|s| s.visible().position(|j| Some(j.id) == s.focus))
     });
     effect(move || {
@@ -979,7 +1000,7 @@ fn recording_list(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     virtual_list(
-        move || ui.recordings.with(|s| s.visible().count()),
+        move || ui.screens.recordings.with(|s| s.visible().count()),
         move |at| rows::job_row(ui, size, at),
     )
     .element_ref(&rows)

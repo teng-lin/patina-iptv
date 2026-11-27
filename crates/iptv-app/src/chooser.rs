@@ -60,7 +60,7 @@ pub(super) fn open_more(
     if controls.is_empty() {
         return;
     }
-    ui.chooser.set(Some(Open {
+    ui.screens.chooser.set(Some(Open {
         kind: Kind::More,
         list: Chooser::new(controls.len(), 0),
         labels: Vec::new(),
@@ -98,7 +98,7 @@ pub(crate) fn show_receivers(ui: Ui, mut receivers: Vec<iptv_core::cast::Receive
         labels.push(tr("Choose a device").to_owned());
         values.push("native".into());
     }
-    let list = ui.chooser.with_untracked(|open| {
+    let list = ui.screens.chooser.with_untracked(|open| {
         if let Some(open) = open.as_ref().filter(|open| open.kind == Kind::Cast) {
             let mut list = open.list.clone();
             list.replace_actions(&open.values, &values);
@@ -107,7 +107,7 @@ pub(crate) fn show_receivers(ui: Ui, mut receivers: Vec<iptv_core::cast::Receive
             Chooser::new(labels.len(), 0)
         }
     });
-    ui.chooser.set(Some(Open {
+    ui.screens.chooser.set(Some(Open {
         kind: Kind::Cast,
         list,
         labels,
@@ -136,7 +136,7 @@ pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
     if surface == 0 && crate::on_demand::active(ui) {
         return None;
     }
-    let key = ui.player.stream(surface).key.get()?;
+    let key = ui.playback.player.stream(surface).key.get()?;
     let schedule = crate::runtime_owner::schedule();
     let channel = schedule.find_channel(&key)?;
     let identity = crate::runtime_owner::runtime().search_channel_identity(&*schedule, channel)?;
@@ -145,7 +145,7 @@ pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
 
 /// The current picture size's name (the control row shows it).
 pub fn picture_name(ui: Ui) -> &'static str {
-    let ch = picture_identity(ui, ui.player_surface);
+    let ch = picture_identity(ui, ui.playback.player_surface);
     picture_label(ui.app.picture.with(|p| p.for_channel(ch.as_deref())))
 }
 
@@ -168,14 +168,14 @@ fn title(kind: Kind) -> &'static str {
 }
 
 fn volume_index(ui: Ui) -> usize {
-    (usize::from(crate::media::audible_volume(ui)) + 5) / 10
+    (usize::from(crate::media::audible_volume(ui.playback)) + 5) / 10
 }
 
 /// The entries, what each sets, and the one in effect.
 fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
     match kind {
         Kind::Picture => {
-            let ch = picture_identity(ui, ui.player_surface);
+            let ch = picture_identity(ui, ui.playback.player_surface);
             let size = ui
                 .app
                 .picture
@@ -199,13 +199,14 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
                 }))
                 .collect();
             let at = ui
+                .playback
                 .sleep
                 .with_untracked(|t| t.minutes())
                 .and_then(|m| SLEEP_MINUTES.iter().position(|x| *x == m))
                 .map_or(0, |i| i + 1);
             (labels, Vec::new(), at)
         }
-        Kind::Track(k) => ui.player.main().tracks.with_untracked(|t| {
+        Kind::Track(k) => ui.playback.player.main().tracks.with_untracked(|t| {
             let labels = entries_in(t, k, crate::i18n::language());
             let values = (0..labels.len())
                 .map(|i| t.pick(k, i).unwrap_or_default())
@@ -213,7 +214,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             (labels, values, t.selected_entry(k))
         }),
         Kind::AudioDelay => {
-            let now = ui.media.delay_ms.get_untracked();
+            let now = ui.playback.media.delay_ms.get_untracked();
             let delays = audio_delays();
             let labels = delays
                 .iter()
@@ -231,7 +232,13 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
         ),
         Kind::CastEnded => (
             vec![tr("Play here").to_owned(), tr("Close").to_owned()],
-            ui.player.main().key.get_untracked().into_iter().collect(),
+            ui.playback
+                .player
+                .main()
+                .key
+                .get_untracked()
+                .into_iter()
+                .collect(),
             0,
         ),
         Kind::AirPlay if ui.cast.busy.get_untracked() => {
@@ -256,8 +263,8 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
 /// "12  Name ▶ · now". The focus starts on the one playing.
 fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
     let s = crate::runtime_owner::schedule();
-    let now = ui.focus.with_untracked(|f| f.now);
-    let h = crate::favorites::history(ui.playing.get_untracked());
+    let now = ui.guide.focus.with_untracked(|f| f.now);
+    let h = crate::favorites::history(ui.playback.playing.get_untracked());
     let labels = h
         .channels
         .iter()
@@ -267,7 +274,7 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
             let marker = if h.playing == Some(row) { "  ▶" } else { "" };
             format!(
                 "{}  {}{marker} · {}",
-                crate::lists::number(ui, ch),
+                crate::lists::number(ui.guide, ch),
                 s.channel_name(ch),
                 crate::listing_labels::listing(s.listing(ch, p))
             )
@@ -283,10 +290,10 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
 
 pub fn open(ui: Ui, kind: Kind) {
     if let Kind::Track(kind) = kind {
-        let tracks = ui.player.main().tracks.get_untracked();
+        let tracks = ui.playback.player.main().tracks.get_untracked();
         let open = Open::for_tracks(kind, tracks, crate::i18n::language());
         if !open.labels.is_empty() {
-            ui.chooser.set(Some(open));
+            ui.screens.chooser.set(Some(open));
         }
         return;
     }
@@ -294,7 +301,7 @@ pub fn open(ui: Ui, kind: Kind) {
     if labels.is_empty() {
         return;
     }
-    ui.chooser.set(Some(Open {
+    ui.screens.chooser.set(Some(Open {
         kind,
         list: Chooser::new(labels.len(), selected),
         labels,
@@ -308,12 +315,13 @@ pub fn open(ui: Ui, kind: Kind) {
 pub fn close(ui: Ui) {
     if ui.cast.busy.get_untracked()
         && ui
+            .screens
             .chooser
             .with_untracked(|open| open.as_ref().is_some_and(|open| open.kind == Kind::AirPlay))
     {
         crate::casting::play_here(ui);
     }
-    ui.chooser.set(None);
+    ui.screens.chooser.set(None);
 }
 
 /// Back at the top level, where the host asks before leaving: No or Yes,
@@ -324,13 +332,14 @@ pub(crate) fn ask_to_leave(ui: Ui) -> bool {
 }
 
 pub fn move_focus(ui: Ui, step: isize) {
-    ui.chooser
+    ui.screens
+        .chooser
         .update(|c| c.iter_mut().for_each(|c| c.list.move_focus(step)));
 }
 
 /// Left selects No and Right selects Yes without wrapping on repeats.
 pub(crate) fn focus_leave(ui: Ui, yes: bool) {
-    ui.chooser.update(|open| {
+    ui.screens.chooser.update(|open| {
         if let Some(open) = open.as_mut().filter(|open| open.kind == Kind::Leave) {
             open.list.focus = usize::from(yes);
         }
@@ -339,7 +348,7 @@ pub(crate) fn focus_leave(ui: Ui, yes: bool) {
 
 /// OK (or a tap) on entry `index`.
 pub fn pick(ui: Ui, index: usize) {
-    let Some(open) = ui.chooser.get_untracked() else {
+    let Some(open) = ui.screens.chooser.get_untracked() else {
         return;
     };
     let value = open.values.get(index).cloned().unwrap_or_default();
@@ -350,7 +359,7 @@ pub fn pick(ui: Ui, index: usize) {
     close(ui);
     match open.kind {
         Kind::Picture => {
-            let ch = picture_identity(ui, ui.player_surface);
+            let ch = picture_identity(ui, ui.playback.player_surface);
             match PictureSize::ALL.get(index) {
                 Some(size) => ui
                     .app
@@ -360,14 +369,14 @@ pub fn pick(ui: Ui, index: usize) {
             }
         }
         Kind::Sleep => match index.checked_sub(1).and_then(|i| SLEEP_MINUTES.get(i)) {
-            None => ui.sleep.update(|t| t.cancel()),
+            None => ui.playback.sleep.update(|t| t.cancel()),
             Some(minutes) => start_sleep(ui, *minutes),
         },
-        Kind::Track(k) if !value.is_empty() => crate::media::choose(ui, k, value),
+        Kind::Track(k) if !value.is_empty() => crate::media::choose(ui.playback, k, value),
         Kind::Track(_) => {}
         Kind::AudioDelay => {
             if let Some(ms) = audio_delays().get(index) {
-                ui.media.delay_ms.set(*ms);
+                ui.playback.media.delay_ms.set(*ms);
             }
         }
         Kind::Volume => {
@@ -406,7 +415,7 @@ pub fn pick(ui: Ui, index: usize) {
         }
         Kind::CastEnded => {
             if index == 0
-                && ui.playing.get_untracked().is_none()
+                && ui.playback.playing.get_untracked().is_none()
                 && let Some(channel) = crate::runtime_owner::schedule().find_channel(&value)
             {
                 ui.play(channel, Playback::Live);
@@ -427,11 +436,11 @@ fn play_recent(ui: Ui, key: &str) {
         return;
     };
     crate::lists::show_channel(ui, channel);
-    let live = ui.playback.get_untracked() == Playback::Live;
-    if ui.playing.get_untracked() != Some(channel) || !live {
+    let live = ui.playback.playback.get_untracked() == Playback::Live;
+    if ui.playback.playing.get_untracked() != Some(channel) || !live {
         ui.play(channel, Playback::Live);
     }
-    ui.mode.apply(crate::mode::Action::EnterFullscreen);
+    ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.update_panels(|p, now| {
         p.hide();
         p.show_banner(now);
@@ -441,11 +450,11 @@ fn play_recent(ui: Ui, key: &str) {
 /// Starts the sleep timer; when it fires, playback stops.
 fn start_sleep(ui: Ui, minutes: u32) {
     let now = ui.now_ms();
-    ui.sleep.update(|t| t.set(minutes, now));
+    ui.playback.sleep.update(|t| t.set(minutes, now));
     let _task = set_timeout(Duration::from_secs(u64::from(minutes) * 60), move || {
         let mut fired = false;
         let now = ui.now_ms();
-        ui.sleep.update(|t| fired = t.fire_if_due(now));
+        ui.playback.sleep.update(|t| fired = t.fire_if_due(now));
         if fired {
             log::info!("iptv sleep timer: stopping playback");
             crate::player_keys::stop_playback(ui);
@@ -457,7 +466,8 @@ fn start_sleep(ui: Ui, minutes: u32) {
 /// (`leave`, over every screen) or in the one of the others (over the
 /// video, under the play bar).
 pub(crate) fn is_open(ui: Ui, leave: bool) -> bool {
-    ui.chooser
+    ui.screens
+        .chooser
         .with(|c| c.as_ref().is_some_and(|c| (c.kind == Kind::Leave) == leave))
 }
 
@@ -473,7 +483,8 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
     let width = signal(None);
     if !leave {
         let more_open = computed(move || {
-            ui.chooser
+            ui.screens
+                .chooser
                 .with(|chooser| chooser.as_ref().is_some_and(|c| c.kind == Kind::More))
         });
         effect(move || {
@@ -486,13 +497,13 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
             let controls = crate::play_bar::overflow(ui, width);
             if controls.is_empty() {
                 close(ui);
-            } else if ui.chooser.with_untracked(|chooser| {
+            } else if ui.screens.chooser.with_untracked(|chooser| {
                 chooser
                     .as_ref()
                     .and_then(|c| c.more.as_ref())
                     .is_some_and(|more| more.controls != controls)
             }) {
-                ui.chooser.update(|chooser| {
+                ui.screens.chooser.update(|chooser| {
                     if let Some(open) = chooser
                         && let Some(more) = &mut open.more
                     {
@@ -505,7 +516,9 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
     }
     let count = move || {
         if open() {
-            ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len))
+            ui.screens
+                .chooser
+                .with(|c| c.as_ref().map_or(0, |c| c.list.len))
         } else {
             0
         }
@@ -514,7 +527,11 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
     let list = element_ref();
     let focus = computed(move || {
         open()
-            .then(|| ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)))
+            .then(|| {
+                ui.screens
+                    .chooser
+                    .with(|c| c.as_ref().map(|c| c.list.focus))
+            })
             .flatten()
     });
     effect(move || {
@@ -525,7 +542,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
     let row = move |at: Position| {
         // Cells are recycled while a long list scrolls: read `at` where used.
         let entry = move || {
-            ui.chooser.with(|c| {
+            ui.screens.chooser.with(|c| {
                 c.as_ref().and_then(|c| {
                     let index = at.index();
                     let label = match c.kind {
@@ -560,7 +577,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
         let selected = move || entry().is_some_and(|(_, checked, _)| checked);
         let mark = move || Mark::of(ui.keys_shown() && entry().is_some_and(|(_, _, f)| f), false);
         let action = move || {
-            ui.chooser.with(|c| {
+            ui.screens.chooser.with(|c| {
                 c.as_ref().is_some_and(|c| {
                     matches!(
                         c.kind,
@@ -605,7 +622,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
     };
     let kind = move || {
         open()
-            .then(|| ui.chooser.with(|c| c.as_ref().map(|c| c.kind)))
+            .then(|| ui.screens.chooser.with(|c| c.as_ref().map(|c| c.kind)))
             .flatten()
     };
     // Mounted while closed: nothing in it says `PointerEvents::Auto`
@@ -699,7 +716,9 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                         // Preserve a press across updates to the action list.
                         .keys(move || {
                             let len = count();
-                            ui.chooser.with(|chooser| row_keys(chooser.as_ref(), len))
+                            ui.screens
+                                .chooser
+                                .with(|chooser| row_keys(chooser.as_ref(), len))
                         })
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)

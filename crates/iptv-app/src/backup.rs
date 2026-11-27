@@ -373,7 +373,7 @@ mod android {
                         pickers.set(found);
                         // An open welcome screen follows.
                         let restore = available();
-                        ui.wizard.update(|open| {
+                        ui.screens.wizard.update(|open| {
                             if let Some(open) = open {
                                 open.wizard.set_restore(restore);
                             }

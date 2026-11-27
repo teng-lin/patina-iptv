@@ -23,7 +23,7 @@ pub fn open(ui: Ui, list: &ListId, channel: Option<usize>) {
     let Some(group) = list.resolve(&*catalog) else {
         return;
     };
-    let channels = ui.list.get_untracked();
+    let channels = ui.guide.list.get_untracked();
     let channels = if channels.entry() == group {
         channels
     } else {
@@ -36,15 +36,16 @@ pub fn open(ui: Ui, list: &ListId, channel: Option<usize>) {
     };
     let mut editor = FavoritesEditor::new(group, channels.channels().to_vec());
     editor.focus = channel.and_then(|ch| channels.row_of(ch)).unwrap_or(0);
-    ui.editor.set(Some(editor));
+    ui.screens.editor.set(Some(editor));
 }
 
 pub fn close(ui: Ui) {
-    ui.editor.set(None);
+    ui.screens.editor.set(None);
 }
 
 pub fn move_focus(ui: Ui, step: isize) {
-    ui.editor
+    ui.screens
+        .editor
         .update(|e| e.iter_mut().for_each(|e| e.move_focus(step)));
 }
 
@@ -52,7 +53,7 @@ fn with_favorites(
     ui: Ui,
     f: impl FnOnce(&FavoritesEditor, &mut std::collections::BTreeSet<usize>),
 ) {
-    if let Some(editor) = ui.editor.get() {
+    if let Some(editor) = ui.screens.editor.get() {
         crate::favorites::edit(ui, |fav| f(&editor, fav));
     }
 }
@@ -62,7 +63,7 @@ pub fn toggle(ui: Ui) {
 }
 
 pub fn request_clear(ui: Ui) {
-    ui.editor.update(|editor| {
+    ui.screens.editor.update(|editor| {
         if let Some(editor) = editor {
             editor.request_clear();
         }
@@ -70,25 +71,26 @@ pub fn request_clear(ui: Ui) {
 }
 
 fn resolve_clear(ui: Ui, confirmed: bool) {
-    if let Some(mut editor) = ui.editor.get_untracked() {
+    if let Some(mut editor) = ui.screens.editor.get_untracked() {
         if confirmed {
             crate::favorites::edit(ui, |fav| editor.resolve_clear(fav, true));
         } else {
             editor.clear_confirmation = None;
         }
-        ui.editor.set(Some(editor));
+        ui.screens.editor.set(Some(editor));
     }
 }
 
 pub fn key(ui: Ui, action: iptv_nav::Action) {
     use iptv_nav::Action;
-    let Some(editor) = ui.editor.get_untracked() else {
+    let Some(editor) = ui.screens.editor.get_untracked() else {
         return;
     };
     if let Some(remove) = editor.clear_confirmation {
         match action {
             Action::MoveUp | Action::MoveDown | Action::MoveLeft | Action::MoveRight => {
-                ui.editor
+                ui.screens
+                    .editor
                     .update(|e| e.as_mut().unwrap().clear_confirmation = Some(!remove));
             }
             Action::Select => resolve_clear(ui, remove),
@@ -103,10 +105,14 @@ pub fn key(ui: Ui, action: iptv_nav::Action) {
                 } else {
                     (control + 1).min(2)
                 };
-                ui.editor
+                ui.screens
+                    .editor
                     .update(|e| e.as_mut().unwrap().control = Some(next));
             }
-            Action::MoveDown => ui.editor.update(|e| e.as_mut().unwrap().control = None),
+            Action::MoveDown => ui
+                .screens
+                .editor
+                .update(|e| e.as_mut().unwrap().control = None),
             Action::Select => match control {
                 0 => set_group(ui),
                 1 => request_clear(ui),
@@ -118,7 +124,9 @@ pub fn key(ui: Ui, action: iptv_nav::Action) {
     } else {
         match action {
             Action::MoveUp if editor.focus == 0 => {
-                ui.editor.update(|e| e.as_mut().unwrap().control = Some(0));
+                ui.screens
+                    .editor
+                    .update(|e| e.as_mut().unwrap().control = Some(0));
             }
             Action::MoveUp => move_focus(ui, -1),
             Action::MoveDown => move_focus(ui, 1),
@@ -135,21 +143,22 @@ pub fn set_group(ui: Ui) {
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
-    let open = move || ui.editor.with(Option::is_some);
+    let open = move || ui.screens.editor.with(Option::is_some);
     let size = Scale::new();
     let list = element_ref();
-    let focus = computed(move || ui.editor.with(|e| e.as_ref().map(|e| e.focus)));
+    let focus = computed(move || ui.screens.editor.with(|e| e.as_ref().map(|e| e.focus)));
     effect(move || {
         if let Some(i) = focus.get() {
             list.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
     let count = move || {
-        ui.editor
+        ui.screens
+            .editor
             .with(|e| e.as_ref().map_or(0, FavoritesEditor::len))
     };
     let title = move || {
-        ui.editor.with(|e| {
+        ui.screens.editor.with(|e| {
             e.as_ref().map_or(String::new(), |e| {
                 let starred = ui.app.favorites.with(|f| e.starred(f));
                 let group = crate::lists::entry_name(e.group, &*crate::runtime_owner::schedule());
@@ -170,7 +179,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             size,
             move || tr(label),
             move || {
-                ui.editor.with(|e| {
+                ui.screens.editor.with(|e| {
                     e.as_ref().is_some_and(|e| {
                         e.control == Some(control) && e.clear_confirmation.is_none()
                     })
@@ -181,7 +190,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     };
     let row = move |at: Position| {
         let channel = move || {
-            ui.editor
+            ui.screens
+                .editor
                 .with(|e| e.as_ref().and_then(|e| e.channel(at.index())))
         };
         let starred =
@@ -189,7 +199,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         let focused = move || {
             ui.keys_shown()
                 && focus.get() == Some(at.index())
-                && ui.editor.with(|e| {
+                && ui.screens.editor.with(|e| {
                     e.as_ref()
                         .is_some_and(|e| e.control.is_none() && e.clear_confirmation.is_none())
                 })
@@ -211,7 +221,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .gap(px(16.0))
             .on_press(move || {
                 ui.touched();
-                ui.editor.update(|e| {
+                ui.screens.editor.update(|e| {
                     e.iter_mut().for_each(|e| {
                         e.focus = at.index();
                         e.control = None;
@@ -264,9 +274,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         })
         .child(
             view()
-                .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
+                .accessibility_elements_hidden(move || ui.screens.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
                 .pointer_events(move || {
-                    if ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_none())) {
+                    if ui.screens.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_none())) {
                         PointerEvents::Auto
                     } else {
                         PointerEvents::None
@@ -297,13 +307,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .font_family(SANS)
             .text_size(move || size.text_px(CAPTION))
             .text_color(Mark::Plain.secondary())
-            .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some()))),
+            .accessibility_elements_hidden(move || ui.screens.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some()))),
         )
         .child(
             virtual_list(count, row)
-                .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
+                .accessibility_elements_hidden(move || ui.screens.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
                 .pointer_events(move || {
-                    if ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_none())) {
+                    if ui.screens.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_none())) {
                         PointerEvents::Auto
                     } else {
                         PointerEvents::None
@@ -319,7 +329,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
     when(
         move || {
-            ui.editor
+            ui.screens
+                .editor
                 .with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some()))
         },
         move || {
@@ -339,7 +350,7 @@ fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                         size,
                         move || tr("Cancel"),
                         move || {
-                            ui.editor.with(|e| {
+                            ui.screens.editor.with(|e| {
                                 e.as_ref()
                                     .is_some_and(|e| e.clear_confirmation == Some(false))
                             })
@@ -351,7 +362,7 @@ fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                         size,
                         move || tr("Remove all"),
                         move || {
-                            ui.editor.with(|e| {
+                            ui.screens.editor.with(|e| {
                                 e.as_ref()
                                     .is_some_and(|e| e.clear_confirmation == Some(true))
                             })

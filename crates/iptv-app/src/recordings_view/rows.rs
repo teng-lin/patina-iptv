@@ -24,7 +24,7 @@ fn control(
                 .unwrap_or_default()
         })
         .accessibility_state(move || AccessibilityState {
-            disabled: ui.recordings.with(|s| s.busy),
+            disabled: ui.screens.recordings.with(|s| s.busy),
             ..Default::default()
         })
         .items_center()
@@ -51,10 +51,16 @@ fn control(
 }
 
 pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
-    let job = move || ui.recordings.with(|s| s.visible().nth(at.index()).cloned());
-    let focused = move || job().is_some_and(|j| ui.recordings.with(|s| s.focus == Some(j.id)));
+    let job = move || {
+        ui.screens
+            .recordings
+            .with(|s| s.visible().nth(at.index()).cloned())
+    };
+    let focused =
+        move || job().is_some_and(|j| ui.screens.recordings.with(|s| s.focus == Some(j.id)));
     let day = move || {
-        ui.recordings
+        ui.screens
+            .recordings
             .with(|s| {
                 let current = s.visible().nth(at.index())?;
                 let previous = at.index().checked_sub(1).and_then(|n| s.visible().nth(n));
@@ -218,7 +224,7 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
 
 pub(super) fn now_playing(ui: Ui, size: Scale) -> impl IntoElement {
     when(
-        move || ui.player.recorded.with(Option::is_some),
+        move || ui.playback.player.recorded.with(Option::is_some),
         move || {
             style::action(
                 ui,
@@ -239,7 +245,7 @@ pub(super) fn now_playing(ui: Ui, size: Scale) -> impl IntoElement {
             )
             .child(
                 ui_kit::body(size, move || {
-                    ui.player.recorded.with(|r| {
+                    ui.playback.player.recorded.with(|r| {
                         r.as_ref()
                             .map(|(job, _)| job.request.title.clone())
                             .unwrap_or_default()
@@ -253,7 +259,7 @@ pub(super) fn now_playing(ui: Ui, size: Scale) -> impl IntoElement {
 
 pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
     when(
-        move || ui.recordings.with(|s| s.confirm_delete),
+        move || ui.screens.recordings.with(|s| s.confirm_delete),
         move || {
             let (outer, card) = crate::wizard_view::entry::frame(ui, size);
             outer.test_id("recording-delete-confirmation").child(
@@ -262,7 +268,7 @@ pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                     tr("Delete this recording permanently?"),
                 ))
                 .child(ui_kit::body(size, move || {
-                    ui.recordings.with(|s| {
+                    ui.screens.recordings.with(|s| {
                         s.focused()
                             .map(|j| j.request.title.clone())
                             .unwrap_or_default()
@@ -270,9 +276,10 @@ pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                 }))
                 .child(when(
                     move || {
-                        ui.player.recorded.with(|r| {
-                            r.as_ref()
-                                .is_some_and(|(j, _)| ui.recordings.with(|s| s.focus == Some(j.id)))
+                        ui.playback.player.recorded.with(|r| {
+                            r.as_ref().is_some_and(|(j, _)| {
+                                ui.screens.recordings.with(|s| s.focus == Some(j.id))
+                            })
                         })
                     },
                     move || {
@@ -288,7 +295,7 @@ pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                             ui,
                             size,
                             tr("Cancel"),
-                            move || ui.recordings.with(|s| !s.delete_selected),
+                            move || ui.screens.recordings.with(|s| !s.delete_selected),
                             move || {
                                 back(ui);
                             },
@@ -297,7 +304,7 @@ pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                             ui,
                             size,
                             tr("Delete recording"),
-                            move || ui.recordings.with(|s| s.delete_selected),
+                            move || ui.screens.recordings.with(|s| s.delete_selected),
                             move || confirm_delete(ui),
                         )),
                 ),

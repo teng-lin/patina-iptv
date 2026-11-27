@@ -235,7 +235,7 @@ fn UpdateOverlap() -> impl IntoElement {
     ));
     let ui = crate::runtime_owner::with_runtime(application.clone(), || {
         let ui = Ui::new(crate::SharedUi::new(), crate::player::Player::new());
-        ui.update_ready.set(true);
+        ui.screens.update_ready.set(true);
         let release = |version: &str| ReleaseCheck {
             installed_version: "1.0.0".into(),
             status: ReleaseStatus::UpdateAvailable,
@@ -258,7 +258,7 @@ fn UpdateOverlap() -> impl IntoElement {
 
         // An accepted installation holds its displayed release stable across
         // manual, startup and timer checks until its guard completes.
-        ui.update_install_busy.set(true);
+        ui.screens.update_install_busy.set(true);
         let installation = InstallOperation::new(ui);
         for trigger in [Trigger::Manual, Trigger::Startup, Trigger::Automatic] {
             check(ui, trigger);
@@ -275,11 +275,11 @@ fn UpdateOverlap() -> impl IntoElement {
             .unwrap();
         download(ui);
         manual_download(ui);
-        ui.update_focus.set(1);
+        ui.screens.update_focus.set(1);
         key(ui, Action::Select);
-        ui.update_focus.set(5);
+        ui.screens.update_focus.set(5);
         key(ui, Action::Select);
-        assert!(!ui.update_install_busy.get_untracked());
+        assert!(!ui.screens.update_install_busy.get_untracked());
         assert!(application.app_update_snapshot().checking);
         assert!(application.finish_app_update_check(token, 4, Ok(release("3.0.0"))));
         assert_eq!(

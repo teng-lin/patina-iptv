@@ -13,7 +13,7 @@ use crate::scale::Scale;
 use crate::ui_kit;
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.search.with(|s| s.as_ref().map(f))
+    ui.screens.search.with(|s| s.as_ref().map(f))
 }
 
 /// A row's mark: the focus while the keys are shown.
@@ -24,9 +24,10 @@ fn mark(ui: Ui, focused: bool) -> Mark {
 pub fn layer(ui: Ui) -> impl IntoElement {
     // Back from playback (full screen left): the suspended screen returns.
     effect(move || {
-        let left = ui.mode.get() != ViewMode::Fullscreen;
+        let left = ui.chrome.mode.get() != ViewMode::Fullscreen;
         if left
             && ui
+                .screens
                 .search
                 .with_untracked(|s| s.as_ref().is_some_and(|s| s.suspended))
         {
@@ -36,7 +37,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     // New guide data while open: fresh indexes, the query searched again.
     effect(move || {
         ui.app.data_version.get();
-        if ui.search.with_untracked(Option::is_some) {
+        if ui.screens.search.with_untracked(Option::is_some) {
             prepare(ui);
             search_again(ui);
         }
@@ -404,7 +405,7 @@ fn result_row(
         Some((ResultId::Channel(id), _))
             if crate::runtime_owner::runtime()
                 .resolve_search_channel(&id, &*crate::runtime_owner::schedule())
-                .is_some_and(|c| ui.playing.get() == Some(c)) =>
+                .is_some_and(|c| ui.playback.playing.get() == Some(c)) =>
         {
             tr("Playing").to_owned()
         }

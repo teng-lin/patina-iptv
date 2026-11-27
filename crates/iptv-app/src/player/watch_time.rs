@@ -27,13 +27,13 @@ impl Session {
 }
 
 pub(crate) fn bind(ui: Ui) {
-    let stream = ui.player.main();
+    let stream = ui.playback.player.main();
     let eligible = computed(move || {
-        (ui.mode.get() == ViewMode::Fullscreen
+        (ui.chrome.mode.get() == ViewMode::Fullscreen
             && lifecycle() == Lifecycle::Active
-            && ui.playback.get() == Playback::Live
-            && ui.playing.get().is_some()
-            && !ui.paused.get()
+            && ui.playback.playback.get() == Playback::Live
+            && ui.playback.playing.get().is_some()
+            && !ui.playback.paused.get()
             && stream
                 .health
                 .with(|health| matches!(health.phase(), Phase::Playing)))
@@ -41,7 +41,7 @@ pub(crate) fn bind(ui: Ui) {
     });
     effect(move || {
         let token = eligible.get();
-        ui.player.watching.with(|watching| {
+        ui.playback.player.watching.with(|watching| {
             if watching
                 .as_ref()
                 .is_some_and(|session| Some(session.token) == token)
@@ -67,8 +67,8 @@ pub(crate) fn bind(ui: Ui) {
     });
 
     let guide = computed(move || {
-        (ui.mode.get() != ViewMode::Fullscreen)
-            .then(|| ui.focus.with(|focus| (focus.group, focus.pane)))
+        (ui.chrome.mode.get() != ViewMode::Fullscreen)
+            .then(|| ui.guide.focus.with(|focus| (focus.group, focus.pane)))
     });
     effect(move || {
         if guide.get().is_some() {
@@ -80,13 +80,13 @@ pub(crate) fn bind(ui: Ui) {
 }
 
 pub(crate) fn flush(ui: Ui) {
-    if let Some(mut session) = ui.player.watching.replace(None) {
+    if let Some(mut session) = ui.playback.player.watching.replace(None) {
         session.save();
     }
 }
 
 pub(crate) fn reset(ui: Ui) {
-    ui.player.watching.with(|watching| {
+    ui.playback.player.watching.with(|watching| {
         if let Some(session) = watching {
             session.time = WatchTime::default();
         }
@@ -94,10 +94,10 @@ pub(crate) fn reset(ui: Ui) {
 }
 
 pub(crate) fn observe(ui: Ui, surface: usize, position_ms: u64) {
-    if surface == 0 && ui.player_surface == 0 {
-        ui.player.watching.with(|watching| {
+    if surface == 0 && ui.playback.player_surface == 0 {
+        ui.playback.player.watching.with(|watching| {
             if let Some(session) = watching
-                && session.token == ui.player.main().token.get_untracked()
+                && session.token == ui.playback.player.main().token.get_untracked()
             {
                 session.time.sample(ui.now_ms(), position_ms);
                 if session.time.pending_ms() >= 15_000 {

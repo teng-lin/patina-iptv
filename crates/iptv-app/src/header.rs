@@ -61,8 +61,8 @@ fn left(now: i32, p: Program) -> String {
 fn preview(ui: Ui, size: Scale) -> impl IntoElement {
     // Transparent while something plays: the video layer sits under this
     // rectangle in guide mode. A tap opens full screen.
-    let idle = move || ui.playing.get().is_none() && !crate::on_demand::active(ui);
-    let focused = move || ui.keys_shown() && ui.focus.with(|f| f.pane == Pane::Preview);
+    let idle = move || ui.playback.playing.get().is_none() && !crate::on_demand::active(ui);
+    let focused = move || ui.keys_shown() && ui.guide.focus.with(|f| f.pane == Pane::Preview);
     view()
         .test_id("guide-preview")
         .role(AccessibilityRole::Button)
@@ -95,7 +95,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
         .on_press(move || {
             ui.touched();
             if !idle() {
-                ui.mode.apply(crate::mode::Action::EnterFullscreen);
+                ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
         })
@@ -120,8 +120,8 @@ fn preview_ring(ui: Ui) -> impl IntoElement {
         .rounded(px(PREVIEW_RADIUS + RING))
         .border_color(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .opacity(move || {
-            let shown = ui.mode.get() == ViewMode::Guide
-                && (ui.playing.get().is_some() || crate::on_demand::active(ui));
+            let shown = ui.chrome.mode.get() == ViewMode::Guide
+                && (ui.playback.playing.get().is_some() || crate::on_demand::active(ui));
             if shown { 1.0_f32 } else { 0.0 }
         })
         .pointer_events(PointerEvents::None)
@@ -400,7 +400,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
 fn key_stats(ui: Ui) -> Option<Text> {
     debug_overlay().then(|| {
         text(move || {
-            ui.stats
+            ui.chrome
+                .stats
                 .with(|s| format!("keys {} · {} µs (max {})", s.keys, s.last_us, s.max_us))
         })
         .absolute()
@@ -440,8 +441,8 @@ pub fn header(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let program = computed(move || {
         let version = ui.guide_data();
-        let view = crate::lists::view(ui);
-        ui.focus.with(|f| {
+        let view = crate::lists::view(ui.guide);
+        ui.guide.focus.with(|f| {
             let p = f.program(&view);
             view.channel(f.channel)
                 .map(|ch| (version, f.now, f.channel, ch, p))
@@ -490,8 +491,8 @@ pub fn header(ui: Ui) -> impl IntoElement {
 /// (the top of the chain) is open.
 fn corner_back_shown(ui: Ui) -> bool {
     ui.back_controls()
-        && ui.mode.get() != ViewMode::Fullscreen
-        && ui.focus.with(|f| f.layout_pane()) != Pane::Rail
+        && ui.chrome.mode.get() != ViewMode::Fullscreen
+        && ui.guide.focus.with(|f| f.layout_pane()) != Pane::Rail
 }
 
 /// The corner ‹'s distance from the header's left edge: 20 points into
@@ -508,7 +509,7 @@ fn corner_back_left(inset: f32, preview_w: f32) -> f32 {
 /// Back and Left walk, the guide to its groups, the groups to the rail
 /// with its names (Search, Settings).
 fn corner_back(ui: Ui) -> impl IntoElement {
-    let groups = move || ui.focus.with(|f| f.layout_pane()) == Pane::Guide;
+    let groups = move || ui.guide.focus.with(|f| f.layout_pane()) == Pane::Guide;
     view()
         .test_id("guide-corner-back")
         .absolute()

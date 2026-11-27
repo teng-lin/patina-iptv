@@ -126,20 +126,20 @@ fn title(channel: usize, p: crate::guide::Program) -> String {
 /// The full menu reached from the program header (in full screen, the
 /// playing channel's current program).
 pub fn open(ui: Ui) {
-    let now = ui.focus.with(|f| f.now);
-    let playing_context =
-        ui.mode.get_untracked() == ViewMode::Fullscreen && ui.playing.get_untracked().is_some();
-    let (channel, minute) = match (ui.mode.get(), ui.playing.get()) {
+    let now = ui.guide.focus.with(|f| f.now);
+    let playing_context = ui.chrome.mode.get_untracked() == ViewMode::Fullscreen
+        && ui.playback.playing.get_untracked().is_some();
+    let (channel, minute) = match (ui.chrome.mode.get(), ui.playback.playing.get()) {
         (ViewMode::Fullscreen, Some(ch)) => (ch, now),
         _ => {
-            let Some(ch) = crate::lists::focused_channel(ui) else {
+            let Some(ch) = crate::lists::focused_channel(ui.guide) else {
                 return; // an empty list
             };
-            (ch, ui.focus.with(|f| f.cursor))
+            (ch, ui.guide.focus.with(|f| f.cursor))
         }
     };
     open_for(ui, channel, minute);
-    ui.menu.update(|menu| {
+    ui.screens.menu.update(|menu| {
         if let Some(menu) = menu {
             menu.playing_context = playing_context;
         }
@@ -168,11 +168,11 @@ fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_co
     };
     let mut menu = Menu::new(rows, target, list);
     menu.playing_context = playing_context;
-    ui.menu.set(Some(menu));
+    ui.screens.menu.set(Some(menu));
 }
 
 fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &ListId) -> Vec<Row> {
-    let now = ui.focus.with(|focus| focus.now);
+    let now = ui.guide.focus.with(|focus| focus.now);
     let channel = origin.channel;
     let schedule = crate::runtime_owner::schedule();
     let scope = channel_scope(ui, list);
@@ -199,10 +199,10 @@ fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &L
                 .is_some_and(|(_, kind)| *kind != Kind::Favorites),
             MenuItem::CopyChannels => copy_scope(ui, list, scope.as_ref()).is_some(),
             MenuItem::CreateGroup => management_source(ui, list, scope.as_ref()).is_some(),
-            _ => implemented(item, ui.player_surface),
+            _ => implemented(item, ui.playback.player_surface),
         },
     );
-    let auxiliary = ui.player_surface != 0;
+    let auxiliary = ui.playback.player_surface != 0;
     if auxiliary {
         // Auxiliary player windows play live streams only.
         rows.retain(|row| {
@@ -275,12 +275,13 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_co
         list,
     );
     menu.playing_context = playing_context;
-    ui.menu.set(Some(menu));
+    ui.screens.menu.set(Some(menu));
 }
 
 fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row> {
     // Only the main window opens player windows.
-    let new_window = ((crate::host::LINUX || crate::host::MACOS) && ui.player_surface == 0)
+    let new_window = ((crate::host::LINUX || crate::host::MACOS)
+        && ui.playback.player_surface == 0)
         .then(|| crate::desktop::player_windows::can_open(ui, origin.channel));
     let scope = channel_scope(ui, list);
     let mut rows = channel_menu(
@@ -338,29 +339,31 @@ pub(crate) fn invalidate_shifted_context(
                     != crate::player::guide_offset(after, next)
             })
     };
-    if ui.menu.with_untracked(|menu| {
+    if ui.screens.menu.with_untracked(|menu| {
         menu.as_ref()
             .and_then(|menu| menu.target.channel_key())
             .and_then(|key| before.find_channel(key))
             .is_some_and(shifted)
     }) {
-        ui.menu.set(None);
+        ui.screens.menu.set(None);
     }
     if ui
+        .screens
         .description
         .get_untracked()
         .is_some_and(|origin| shifted(origin.channel))
     {
-        ui.description.set(None);
+        ui.screens.description.set(None);
     }
-    ui.recordings
+    ui.screens
+        .recordings
         .update(|state| state.invalidate_context(shifted));
 }
 
 /// Back from full options restores their compact context and its focus.
 pub fn back(ui: Ui) {
-    if let Some(parent) = ui.menu.with(|menu| menu.as_ref()?.parent.clone()) {
-        ui.menu.set(Some(*parent));
+    if let Some(parent) = ui.screens.menu.with(|menu| menu.as_ref()?.parent.clone()) {
+        ui.screens.menu.set(Some(*parent));
         return;
     }
     close(ui);
@@ -369,6 +372,7 @@ pub fn back(ui: Ui) {
 /// Dismisses the entire menu or popover, keeping its guide selection.
 pub fn close(ui: Ui) {
     let origin = ui
+        .screens
         .menu
         .with(|m| {
             let menu = m.as_ref().filter(|menu| menu.list == current_list(ui))?;
@@ -376,19 +380,23 @@ pub fn close(ui: Ui) {
                 .then(|| program_origin(&menu.target))
                 .flatten()
         })
-        .or_else(|| ui.description.get());
-    ui.menu.set(None);
-    ui.description.set(None);
+        .or_else(|| ui.screens.description.get());
+    ui.screens.menu.set(None);
+    ui.screens.description.set(None);
     if let Some(origin) = origin
-        && ui.mode.get() != ViewMode::Fullscreen
-        && ui.list.with(|list| list.row_of(origin.channel)).is_some()
+        && ui.chrome.mode.get() != ViewMode::Fullscreen
+        && ui
+            .guide
+            .list
+            .with(|list| list.row_of(origin.channel))
+            .is_some()
     {
         crate::lists::tap(ui, origin.channel, origin.program_start);
     }
 }
 
 pub fn perform(ui: Ui, item: MenuItem) {
-    let Some((target, list, offset, playing_context)) = ui.menu.with(|menu| {
+    let Some((target, list, offset, playing_context)) = ui.screens.menu.with(|menu| {
         let menu = menu.as_ref()?;
         menu.rows
             .contains(&Row::Action {
@@ -413,7 +421,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         _ => None,
     };
     if let Some(value) = playlist_order {
-        ui.menu.set(None);
+        ui.screens.menu.set(None);
         crate::settings_view::settings_guarded(ui, move || {
             if let Err(error) = crate::settings_view::save_setting(
                 iptv_settings::keys::PLAYLIST_SORT.as_str(),
@@ -432,7 +440,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         return;
     }
     if offset.is_some() && item != MenuItem::SaveEpgOffset {
-        ui.menu.update(|menu| {
+        ui.screens.menu.update(|menu| {
             if let Some(menu) = menu {
                 match item {
                     MenuItem::DecreaseEpgOffset => menu.step_group_offset(-1),
@@ -448,7 +456,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         item,
         MenuItem::ProgramActions | MenuItem::GroupSettings | MenuItem::GroupEpgOffset
     )
-    .then(|| ui.menu.get_untracked())
+    .then(|| ui.screens.menu.get_untracked())
     .flatten()
     .map(|mut parent| {
         // Touch and pointer activation do not move key focus first.
@@ -456,7 +464,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         parent.focus_on(item);
         parent
     });
-    ui.menu.set(None);
+    ui.screens.menu.set(None);
     let scope = list
         .resolve(&*crate::runtime_owner::schedule())
         .and_then(|_| channel_scope(ui, &list));
@@ -497,7 +505,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
             list,
             playing_context,
         );
-        ui.menu.update(|menu| {
+        ui.screens.menu.update(|menu| {
             if let Some(menu) = menu {
                 menu.parent = parent.map(Box::new);
             }
@@ -675,7 +683,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
             let minutes = list_preferences(&list).epg_offset_minutes;
             let mut menu = group_offset_menu(list, minutes);
             menu.parent = parent.map(Box::new);
-            ui.menu.set(Some(menu));
+            ui.screens.menu.set(Some(menu));
         }
         MenuItem::ReorderPlaylists => {
             let preferred = heading_playlist(&list);
@@ -751,7 +759,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
 }
 
 fn focus_item(ui: Ui, item: MenuItem) {
-    ui.menu.update(|menu| {
+    ui.screens.menu.update(|menu| {
         if let Some(menu) = menu {
             menu.focus_on(item);
         }
@@ -767,10 +775,10 @@ fn perform_program(ui: Ui, item: MenuItem, origin: Origin, list: ListId, playing
                 crate::recordings_view::perform_channel_action(ui, origin, item);
             }
         }
-        MenuItem::Description => ui.description.set(Some(origin)),
+        MenuItem::Description => ui.screens.description.set(Some(origin)),
         MenuItem::StartFromBeginning => {
             let schedule = crate::runtime_owner::schedule();
-            let now = ui.focus.with_untracked(|focus| focus.now);
+            let now = ui.guide.focus.with_untracked(|focus| focus.now);
             let program = origin_program(&*schedule, origin);
             if program.start != origin.program_start
                 || !program.can_replay(now, schedule.catchup_days(origin.channel))
@@ -854,7 +862,7 @@ fn copy_scope(
 
 fn current_list(ui: Ui) -> ListId {
     ListId::of(
-        ui.list.with_untracked(|list| list.entry()),
+        ui.guide.list.with_untracked(|list| list.entry()),
         &*crate::runtime_owner::schedule(),
     )
 }
@@ -952,7 +960,7 @@ pub(crate) fn open_playlist_order(ui: Ui, id: SourceId) {
         _ => MenuItem::PlaylistOrderManual,
     };
     menu.focus_on(current);
-    ui.menu.set(Some(menu));
+    ui.screens.menu.set(Some(menu));
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -981,13 +989,15 @@ fn show_group_options(ui: Ui, list: ListId, entry: GroupMenuEntry) -> bool {
             enabled: true,
         });
     }
-    ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
+    ui.screens
+        .menu
+        .set(Some(Menu::new(rows, Target::Group, list)));
     true
 }
 
 /// An empty named group cannot open preferences through a channel's menu.
 fn empty_group_list(ui: Ui) -> Option<ListId> {
-    if !ui.list.with(|list| list.is_empty()) {
+    if !ui.guide.list.with(|list| list.is_empty()) {
         return None;
     }
     ui.guide_data();
@@ -1030,7 +1040,7 @@ fn open_group_settings(ui: Ui, list: ListId, parent: Option<Menu>) {
     ];
     let mut menu = Menu::new(rows, Target::Group, list);
     menu.parent = parent.map(Box::new);
-    ui.menu.set(Some(menu));
+    ui.screens.menu.set(Some(menu));
 }
 
 fn group_option_rows(ui: Ui, list: &ListId) -> Option<Vec<Row>> {
@@ -1111,10 +1121,11 @@ fn is_playlist_menu(menu: &Menu) -> bool {
 /// stay open while their checkboxes update the guide.
 pub(crate) fn catalog_changed(ui: Ui) {
     if ui
+        .screens
         .menu
         .with_untracked(|menu| menu.as_ref().is_some_and(|menu| !is_playlist_menu(menu)))
     {
-        ui.menu.set(None);
+        ui.screens.menu.set(None);
     }
 }
 
@@ -1134,7 +1145,9 @@ pub(crate) fn offer_external_player_reset(ui: Ui, list: ListId) {
         item: MenuItem::StopExternalPlayer,
         enabled: true,
     }];
-    ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
+    ui.screens
+        .menu
+        .set(Some(Menu::new(rows, Target::Group, list)));
 }
 
 fn list_preferences(list: &ListId) -> GroupPreferences {
@@ -1176,7 +1189,7 @@ fn offset_label(minutes: i32) -> String {
 
 fn heading_text(ui: Ui, heading: Heading) -> String {
     ui.guide_data();
-    ui.menu.with(|menu| {
+    ui.screens.menu.with(|menu| {
         let Some(menu) = menu.as_ref() else {
             return String::new();
         };
@@ -1209,7 +1222,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
 
 fn action_detail(ui: Ui, item: MenuItem) -> String {
     ui.guide_data();
-    ui.menu.with(|menu| {
+    ui.screens.menu.with(|menu| {
         let Some(menu) = menu.as_ref() else {
             return String::new();
         };
@@ -1272,7 +1285,7 @@ pub(crate) fn group_order_label(list: &ListId) -> String {
 
 fn bind_live_rows(ui: Ui) {
     let target = computed(move || {
-        ui.menu.with(|menu| {
+        ui.screens.menu.with(|menu| {
             let menu = menu.as_ref()?;
             menu.target.channel_key()?;
             Some((menu.target.clone(), menu.list.clone()))
@@ -1284,12 +1297,12 @@ fn bind_live_rows(ui: Ui) {
         };
         ui.guide_data();
         let Some(origin) = program_origin(&target) else {
-            ui.menu.set(None);
+            ui.screens.menu.set(None);
             return;
         };
         // The runtime's recording snapshot is published to the UI when it
         // reloads. Recheck the current action for the occurrence already open.
-        ui.recordings.with(|_| ());
+        ui.screens.recordings.with(|_| ());
         let schedule = crate::runtime_owner::schedule();
         let program = origin_program(&*schedule, origin);
         let rows = match target {
@@ -1310,16 +1323,17 @@ fn bind_live_rows(ui: Ui) {
             Target::Program { .. } => {
                 // The catalog no longer has this occurrence. Leave the
                 // guide's current focus in place.
-                ui.menu.set(None);
+                ui.screens.menu.set(None);
                 return;
             }
             Target::Group => return,
         };
         if ui
+            .screens
             .menu
             .with_untracked(|menu| menu.as_ref().is_some_and(|menu| menu.rows != rows))
         {
-            ui.menu.update(|menu| {
+            ui.screens.menu.update(|menu| {
                 if let Some(menu) = menu {
                     menu.replace_rows(rows);
                 }
@@ -1331,7 +1345,7 @@ fn bind_live_rows(ui: Ui) {
 /// Keep the aggregate menu synchronized with the stored playlists.
 fn bind_playlist_rows(ui: Ui) {
     let list = computed(move || {
-        ui.menu.with(|menu| {
+        ui.screens.menu.with(|menu| {
             menu.as_ref()
                 .filter(|menu| is_playlist_menu(menu))
                 .map(|menu| menu.list.clone())
@@ -1343,11 +1357,11 @@ fn bind_playlist_rows(ui: Ui) {
         ui.app.library.version.get();
         ui.app.settings.get();
         let rows = group_option_rows(ui, &list);
-        if ui.menu.with_untracked(|open| {
+        if ui.screens.menu.with_untracked(|open| {
             open.as_ref()
                 .is_some_and(|menu| menu.list == list && rows.as_ref() != Some(&menu.rows))
         }) {
-            ui.menu.update(|open| match rows {
+            ui.screens.menu.update(|open| match rows {
                 Some(rows) => {
                     if let Some(menu) = open {
                         menu.replace_rows(rows);
@@ -1360,7 +1374,8 @@ fn bind_playlist_rows(ui: Ui) {
 }
 
 pub(crate) fn playlist_popup_open(ui: Ui) -> bool {
-    ui.menu
+    ui.screens
+        .menu
         .with(|menu| menu.as_ref().is_some_and(is_playlist_menu))
 }
 
@@ -1381,9 +1396,9 @@ pub(crate) fn playlist_layer(ui: Ui) -> impl IntoElement {
 }
 
 fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
-    let open = move || ui.menu.with(Option::is_some);
+    let open = move || ui.screens.menu.with(Option::is_some);
     let fixed_heading = move || {
-        ui.menu.with(|menu| {
+        ui.screens.menu.with(|menu| {
             let menu = menu.as_ref()?;
             if menu.rows.first() == Some(&Row::Heading(Heading::PlaylistOrder)) {
                 return None;
@@ -1395,10 +1410,14 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
             }
         })
     };
-    let count = move || ui.menu.with(|m| m.as_ref().map_or(0, |m| m.rows.len()));
+    let count = move || {
+        ui.screens
+            .menu
+            .with(|m| m.as_ref().map_or(0, |m| m.rows.len()))
+    };
     let list = element_ref();
     let size = Scale::new();
-    let focus = computed(move || ui.menu.with(|m| m.as_ref().map(|m| m.focus)));
+    let focus = computed(move || ui.screens.menu.with(|m| m.as_ref().map(|m| m.focus)));
     effect(move || {
         if let Some(i) = focus.get() {
             list.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
@@ -1407,6 +1426,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
     let playlists = computed(move || {
         ui.app.library.version.get();
         if ui
+            .screens
             .menu
             .with(|menu| menu.as_ref().is_some_and(is_playlist_menu))
         {
@@ -1417,7 +1437,8 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
     });
     let row = move |at: Position| {
         let row = move || {
-            ui.menu
+            ui.screens
+                .menu
                 .with(|m| m.as_ref().and_then(|m| m.rows.get(at.index()).copied()))
         };
         let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
@@ -1446,7 +1467,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
             }) => playlist().map(|(name, _)| name).unwrap_or_default(),
             Some(Row::Action { item, .. }) => {
                 ui.guide_data();
-                ui.menu.with(|menu| {
+                ui.screens.menu.with(|menu| {
                     let Some(menu) = menu.as_ref() else {
                         return String::new();
                     };
@@ -1558,7 +1579,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
         ))
         .on_press(move || {
             ui.touched();
-            let picked = ui.menu.with(|m| m.as_ref()?.action_at(at.index()));
+            let picked = ui.screens.menu.with(|m| m.as_ref()?.action_at(at.index()));
             if let Some(item) = picked {
                 perform(ui, item);
             }
@@ -1572,7 +1593,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
         // The description popover is in it and shows without the menu.
         .test_id("menu-layer")
         .accessibility_elements_hidden(move || {
-            (!open() && !ui.description.with(Option::is_some))
+            (!open() && !ui.screens.description.with(Option::is_some))
                 || if overlay == crate::overlays::Overlay::Menu {
                     crate::overlays::Overlay::Description.accessibility_covered(ui)
                 } else {
@@ -1580,7 +1601,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
                 }
         })
         .opacity(move || {
-            if open() || ui.description.with(Option::is_some) {
+            if open() || ui.screens.description.with(Option::is_some) {
                 1.0_f32
             } else {
                 0.0
@@ -1635,7 +1656,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
                 .child(
                     virtual_list(count, row)
                         .keys(move || {
-                            ui.menu.with(|menu| {
+                            ui.screens.menu.with(|menu| {
                                 menu.iter()
                                     .flat_map(|menu| &menu.rows)
                                     .map(|row| match *row {
@@ -1663,23 +1684,24 @@ fn origin_program(schedule: &dyn crate::guide::Schedule, origin: Origin) -> crat
 }
 
 pub(crate) fn scroll_description(ui: Ui, direction: f32) {
-    ui.description_scroll
+    ui.screens
+        .description_scroll
         .scroll_by(direction * crate::scale::now() * 96.0);
 }
 
 /// The description popover. Back or a tap closes it.
 fn description(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    let shown = move || ui.description.get().is_some();
-    let scrolling = ui.description_scroll;
+    let shown = move || ui.screens.description.get().is_some();
+    let scrolling = ui.screens.description_scroll;
     effect(move || {
-        if ui.description.get().is_some() {
+        if ui.screens.description.get().is_some() {
             scrolling.reset();
         }
     });
     let program = move || {
         ui.guide_data();
-        ui.description.get().map(|origin| {
+        ui.screens.description.get().map(|origin| {
             (
                 origin.channel,
                 origin_program(&*crate::runtime_owner::schedule(), origin),
@@ -1773,10 +1795,10 @@ fn description(ui: Ui) -> impl IntoElement {
                                 // Only a program on now records (Record now); a
                                 // future one is not scheduled (#273).
                                 ui.guide_data();
-                                let now = ui.focus.with(|focus| focus.now);
-                                ui.player_surface == 0
+                                let now = ui.guide.focus.with(|focus| focus.now);
+                                ui.playback.player_surface == 0
                                     && crate::recordings_view::details_button()
-                                    && ui.description.get().is_some_and(|origin| {
+                                    && ui.screens.description.get().is_some_and(|origin| {
                                         crate::recordings_view::can_record_now(origin, now)
                                     })
                             },
@@ -1787,7 +1809,8 @@ fn description(ui: Ui) -> impl IntoElement {
                                     tr("Record"),
                                     || true,
                                     move || {
-                                        if let Some(origin) = ui.description.get_untracked() {
+                                        if let Some(origin) = ui.screens.description.get_untracked()
+                                        {
                                             crate::recordings_view::record_details(ui, origin);
                                         }
                                     },
@@ -1802,10 +1825,10 @@ fn description(ui: Ui) -> impl IntoElement {
 pub fn open_at(ui: Ui, channel: usize) {
     ui.touched();
     batch(|| {
-        let minute = ui.focus.with_untracked(|focus| focus.cursor);
+        let minute = ui.guide.focus.with_untracked(|focus| focus.cursor);
         crate::lists::tap(ui, channel, minute);
         crate::browse_playback::hold(ui);
-        let minute = ui.focus.with_untracked(|focus| focus.cursor);
+        let minute = ui.guide.focus.with_untracked(|focus| focus.cursor);
         open_channel_at(ui, channel, minute, current_list(ui), false);
     });
 }
@@ -1815,8 +1838,8 @@ pub fn open_at(ui: Ui, channel: usize) {
 /// autoplay while opening the same compact channel actions on every device.
 pub fn open_timeline_context(ui: Ui) {
     crate::browse_playback::hold(ui);
-    if let Some(channel) = crate::lists::focused_channel(ui) {
-        let minute = ui.focus.with_untracked(|focus| focus.cursor);
+    if let Some(channel) = crate::lists::focused_channel(ui.guide) {
+        let minute = ui.guide.focus.with_untracked(|focus| focus.cursor);
         open_channel_at(ui, channel, minute, current_list(ui), false);
     } else {
         open_empty_group_settings(ui);

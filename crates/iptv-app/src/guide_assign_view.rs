@@ -39,11 +39,11 @@ pub fn open(ui: Ui, channel: usize) {
         .channel_key(channel)
         .and_then(|k| crate::data::combined::owner(&crate::runtime_owner::runtime(), &k))
     else {
-        ui.guide_assign.next_request();
+        ui.screens.guide_assign.next_request();
         crate::settings_view::notify(tr("No playlist on screen"));
         return;
     };
-    let request = ui.guide_assign.open(Picker::new(Subject {
+    let request = ui.screens.guide_assign.open(Picker::new(Subject {
         playlist,
         current: assign::Current::default(),
         name: schedule.channel_name(channel),
@@ -53,7 +53,7 @@ pub fn open(ui: Ui, channel: usize) {
     }));
     crate::tasks::spawn_in_app(async move {
         let mut channels = assign::guide_channels(&crate::runtime_owner::runtime(), playlist).await;
-        if !ui.guide_assign.is_current(request) {
+        if !ui.screens.guide_assign.is_current(request) {
             return;
         }
         if channels.is_empty() {
@@ -86,30 +86,31 @@ pub fn open(ui: Ui, channel: usize) {
             channels,
             feeds,
         };
-        if ui.guide_assign.is_current(request) {
-            ui.guide_assign
+        if ui.screens.guide_assign.is_current(request) {
+            ui.screens
+                .guide_assign
                 .update(|picker| *picker = Picker::new(subject));
         }
     });
 }
 
 pub fn close(ui: Ui) {
-    if ui.guide_assign.close() {
+    if ui.screens.guide_assign.close() {
         dismiss_keyboard();
     }
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.guide_assign.is_open()
+    ui.screens.guide_assign.is_open()
 }
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Picker) -> R) -> Option<R> {
-    ui.guide_assign.read(f)
+    ui.screens.guide_assign.read(f)
 }
 
 fn update(ui: Ui, f: impl FnOnce(&mut Picker) -> Option<Effect>) {
     let mut effect = None;
-    ui.guide_assign.update(|s| {
+    ui.screens.guide_assign.update(|s| {
         let subject = s.subject();
         let (playlist, key) = (subject.playlist, subject.key.clone());
         effect = f(s).map(|e| (playlist, key, e));
@@ -146,14 +147,14 @@ fn perform(ui: Ui, playlist: SourceId, key: String, effect: Effect) {
         Effect::Close => close(ui),
         Effect::Choose(choice) => {
             log::info!("iptv guide choice: {}", choice_name(&choice));
-            let request = ui.guide_assign.next_request();
+            let request = ui.screens.guide_assign.next_request();
             assign::choose(
                 &crate::runtime_owner::runtime(),
                 playlist,
                 key,
                 choice,
                 move |applied| {
-                    if ui.guide_assign.is_current(request) {
+                    if ui.screens.guide_assign.is_current(request) {
                         crate::settings_view::notify(applied_words(applied));
                         close(ui);
                     }

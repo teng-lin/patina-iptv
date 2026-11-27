@@ -67,14 +67,15 @@ impl Choice {
         let schedule = crate::runtime_owner::schedule();
         if !self.playing_context
             && ui
+                .guide
                 .list
                 .with_untracked(|list| ListId::of(list.entry(), &*schedule))
                 != self.list
         {
             return None;
         }
-        let now = ui.focus.with_untracked(|focus| focus.now);
-        let mut playing = ui.playing.get_untracked();
+        let now = ui.guide.focus.with_untracked(|focus| focus.now);
+        let mut playing = ui.playback.playing.get_untracked();
         if handoff
             && self.playing_context
             && playing.is_none()
@@ -114,7 +115,8 @@ impl Choice {
         let Some((channel, _)) = self.resolve(ui) else {
             return false;
         };
-        ui.list
+        ui.guide
+            .list
             .with_untracked(|list| ListId::of(list.entry(), &*schedule))
             == self.list
             && ChannelList::build(
@@ -173,6 +175,7 @@ pub(crate) fn select(
             return;
         };
         let session = ui
+            .playback
             .player
             .main()
             .health
@@ -185,19 +188,20 @@ pub(crate) fn select(
             },
         );
         if ui
+            .playback
             .player
             .main()
             .health
             .with_untracked(|health| health.session())
             != session
-            && ui.playing.get_untracked() == Some(channel)
-            && ui.playback.get_untracked()
+            && ui.playback.playing.get_untracked() == Some(channel)
+            && ui.playback.playback.get_untracked()
                 == (Playback::CatchUp {
                     start: program.start,
                     offset: 0,
                 })
         {
-            ui.mode.apply(crate::mode::Action::EnterFullscreen);
+            ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
             ui.show_playing();
             if let Some(list) = missing_handler {
                 crate::external_player::missing_handler(ui, list);

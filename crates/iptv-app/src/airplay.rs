@@ -29,7 +29,9 @@ pub(crate) fn button(ui: Ui, size: f32, id: &'static str) -> View {
 }
 
 pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View {
-    if ui.player_surface != 0 || crate::pip::in_window(ui) || runtime().native_cast_view().is_none()
+    if ui.playback.player_surface != 0
+        || crate::pip::in_window(ui)
+        || runtime().native_cast_view().is_none()
     {
         return view();
     }
@@ -57,7 +59,7 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                     "routes-open" => {
                         pending_choice.replace(Some((
                             runtime().cast_intent(),
-                            ui.player.main().key.get_untracked(),
+                            ui.playback.player.main().key.get_untracked(),
                         )));
                         ui.cast.state.update(|state| state.picker_open = true);
                         ui.touched();
@@ -72,7 +74,7 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                         let valid = pending_choice.take().is_some_and(|(ticket, channel)| {
                             runtime().cast_intent_current(ticket)
                                 && channel.is_some()
-                                && channel == ui.player.main().key.get_untracked()
+                                && channel == ui.playback.player.main().key.get_untracked()
                                 && crate::casting::available(ui)
                         });
                         let started = if valid && !ui.cast.busy.get_untracked() {

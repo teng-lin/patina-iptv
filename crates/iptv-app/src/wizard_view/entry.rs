@@ -30,7 +30,7 @@ pub struct Editing {
 }
 
 pub fn begin(ui: Ui, field: Field) {
-    ui.wizard.update(|w| {
+    ui.screens.wizard.update(|w| {
         if let Some(open) = w {
             let text = open.wizard.value(field).to_owned();
             open.editing = Some(Editing { field, text });
@@ -39,14 +39,16 @@ pub fn begin(ui: Ui, field: Field) {
 }
 
 pub fn is_editing(ui: Ui) -> bool {
-    ui.wizard
+    ui.screens
+        .wizard
         .with(|w| w.as_ref().is_some_and(|o| o.editing.is_some()))
 }
 
 /// Ends entry and gives the wizard the text.
 pub fn commit(ui: Ui) {
     let mut done = None;
-    ui.wizard
+    ui.screens
+        .wizard
         .update(|w| done = w.as_mut().and_then(|o| o.editing.take()));
     dismiss_keyboard();
     if let Some(Editing { field, text }) = done {
@@ -55,13 +57,14 @@ pub fn commit(ui: Ui) {
 }
 
 pub fn cancel(ui: Ui) {
-    ui.wizard
+    ui.screens
+        .wizard
         .update(|w| w.iter_mut().for_each(|o| o.editing = None));
     dismiss_keyboard();
 }
 
 fn set_text(ui: Ui, text: &str) {
-    ui.wizard.update(|w| {
+    ui.screens.wizard.update(|w| {
         if let Some(e) = w.as_mut().and_then(|o| o.editing.as_mut()) {
             e.text = text.to_owned();
         }
@@ -110,13 +113,14 @@ pub(crate) fn sheet_buttons(ui: Ui, size: Scale, cancel: fn(Ui), done: fn(Ui)) -
 /// The sheet; made when entry starts, so its input exists only then.
 pub fn sheet(ui: Ui) -> impl IntoElement {
     let Some(field) = ui
+        .screens
         .wizard
         .with_untracked(|w| w.as_ref().and_then(|o| o.editing.as_ref().map(|e| e.field)))
     else {
         return view();
     };
     let current = move || {
-        ui.wizard.with(|w| {
+        ui.screens.wizard.with(|w| {
             w.as_ref()
                 .and_then(|o| o.editing.as_ref().map(|e| e.text.clone()))
                 .unwrap_or_default()

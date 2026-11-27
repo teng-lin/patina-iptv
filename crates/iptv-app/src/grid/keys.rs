@@ -8,15 +8,15 @@ use iptv_presentation::guide::moves::{DAY, HOUR};
 use crate::Ui;
 
 pub(crate) fn apply(ui: Ui, action: Action) {
-    let view = crate::lists::view(ui);
-    let step = |minutes: i32| ui.focus.update(|f| f.step_time(minutes, &view));
+    let view = crate::lists::view(ui.guide);
+    let step = |minutes: i32| ui.guide.focus.update(|f| f.step_time(minutes, &view));
     match action {
-        Action::JumpToNow => ui.focus.update(|f| f.jump_to_now()),
+        Action::JumpToNow => ui.guide.focus.update(|f| f.jump_to_now()),
         Action::HourBack => step(-HOUR),
         Action::HourForward => step(HOUR),
         Action::DayBack => step(-DAY),
         Action::DayForward => step(DAY),
-        Action::ToggleGroups => ui.focus.update(|f| {
+        Action::ToggleGroups => ui.guide.focus.update(|f| {
             f.toggle_groups(&view);
         }),
         _ => {}

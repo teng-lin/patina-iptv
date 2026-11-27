@@ -201,7 +201,7 @@ pub(crate) fn load_saved_history(ui: Ui) {
 }
 
 pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output = ()> {
-    let revision = ui.search_history_revision.get_untracked();
+    let revision = ui.screens.search_history_revision.get_untracked();
     crate::runtime_owner::runtime().clear_loaded_search_history();
     let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
     let loaded =
@@ -214,11 +214,11 @@ pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output =
                 return;
             }
         };
-        if ui.search_history_revision.get_untracked() != revision {
+        if ui.screens.search_history_revision.get_untracked() != revision {
             return;
         }
         if options(&crate::settings::get()).show_history {
-            ui.search.update(|screen| {
+            ui.screens.search.update(|screen| {
                 if let Some(screen) = screen
                     && screen.state.history().is_empty()
                 {
@@ -233,13 +233,15 @@ pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output =
 
 /// Clears saved searches immediately and invalidates pending startup loads.
 pub(crate) fn clear_history(ui: Ui) {
-    ui.search_history_revision.update(|revision| *revision += 1);
+    ui.screens
+        .search_history_revision
+        .update(|revision| *revision += 1);
     let saved = crate::runtime::commands::clear_search_history(
         &crate::runtime_owner::runtime(),
         crate::data::data_dir().join(LEGACY_HISTORY_FILE),
     );
     crate::runtime_owner::runtime().install_search_history(Vec::new());
-    ui.search.update(|screen| {
+    ui.screens.search.update(|screen| {
         if let Some(screen) = screen {
             *screen.state.history_mut() = SearchHistory::default();
         }
@@ -261,6 +263,7 @@ fn save_history(ui: Ui) {
         return;
     }
     let Some(session) = ui
+        .screens
         .search
         .with_untracked(|s| s.as_ref().map(|s| s.state.history().clone()))
     else {
@@ -281,7 +284,7 @@ fn save_history(ui: Ui) {
 }
 
 fn set_programs(ui: Ui, status: ProgramSearch) {
-    ui.search.update(|s| {
+    ui.screens.search.update(|s| {
         if let Some(s) = s {
             s.programs = status;
         }
@@ -322,7 +325,7 @@ fn prepare(ui: Ui) {
         let t = Instant::now();
         program_index::build(&*schedule, schedule.channel_count(), move |index| {
             let current = crate::runtime_owner::runtime().finish_program_index(version);
-            if !current || ui.search.with_untracked(Option::is_none) {
+            if !current || ui.screens.search.with_untracked(Option::is_none) {
                 return;
             }
             let index = match index {
@@ -353,6 +356,7 @@ fn run_search(ui: Ui, query: &str) {
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);
     let past_without_replay = ui
+        .screens
         .search
         .with_untracked(|s| s.as_ref().is_some_and(|s| s.state.past_without_replay()));
     let mut channels = crate::runtime_owner::runtime().search_channels(
@@ -399,7 +403,7 @@ fn run_search(ui: Ui, query: &str) {
         hit.channel = channel;
         true
     });
-    ui.search.update(|s| {
+    ui.screens.search.update(|s| {
         if let Some(s) = s {
             s.state.set_results(query, channels, programs);
         }
@@ -408,7 +412,7 @@ fn run_search(ui: Ui, query: &str) {
 
 /// Searches the current query again (new data, program index ready).
 fn search_again(ui: Ui) {
-    let query = ui.search.with_untracked(|s| {
+    let query = ui.screens.search.with_untracked(|s| {
         s.as_ref()
             .filter(|s| s.state.phase() != Phase::Idle)
             .map(|s| s.state.query().to_owned())
@@ -438,13 +442,14 @@ fn debounce(ui: Ui, query: String) {
 /// playback comes back as it was.
 pub fn open(ui: Ui) {
     let suspended = ui
+        .screens
         .search
         .with_untracked(|s| s.as_ref().map(|s| s.suspended));
     match suspended {
         Some(true) => resume(ui),
         Some(false) => {}
         None => {
-            ui.search.set(Some(Screen {
+            ui.screens.search.set(Some(Screen {
                 state: SearchState::new(if options(&crate::settings::get()).show_history {
                     load_history()
                 } else {
@@ -458,13 +463,14 @@ pub fn open(ui: Ui) {
             prepare(ui);
         }
     }
-    if ui.mode.get_untracked() == ViewMode::Fullscreen {
-        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+    if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen {
+        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
 }
 
 pub fn close(ui: Ui) {
     let picking = ui
+        .screens
         .search
         .with_untracked(|s| s.as_ref().is_some_and(|s| s.pick));
     if picking {
@@ -472,18 +478,21 @@ pub fn close(ui: Ui) {
     }
     save_history(ui);
     crate::runtime_owner::runtime().release_program_index();
-    ui.search.set(None);
+    ui.screens.search.set(None);
     crate::input::dismiss_keyboard();
 }
 
 /// The screen is shown and takes the remote.
 pub fn is_open(ui: Ui) -> bool {
-    ui.search.with(|s| s.as_ref().is_some_and(|s| !s.suspended))
+    ui.screens
+        .search
+        .with(|s| s.as_ref().is_some_and(|s| !s.suspended))
 }
 
 /// A remote action while the screen is shown.
 pub fn key(ui: Ui, action: Action) {
     let mapped = ui
+        .screens
         .search
         .with_untracked(|s| s.as_ref().and_then(|s| key_action(&s.state, action)));
     if let Some(a) = mapped {
@@ -493,7 +502,7 @@ pub fn key(ui: Ui, action: Action) {
 
 pub fn apply(ui: Ui, action: SearchAction) {
     let mut effect = SearchEffect::None;
-    ui.search.update(|s| {
+    ui.screens.search.update(|s| {
         if let Some(s) = s {
             effect = s.state.apply(action);
         }
@@ -508,7 +517,7 @@ pub fn apply(ui: Ui, action: SearchAction) {
 
 fn resume(ui: Ui) {
     let mut effect = SearchEffect::None;
-    ui.search.update(|s| {
+    ui.screens.search.update(|s| {
         if let Some(s) = s {
             s.suspended = false;
             effect = s.state.resume();
@@ -524,7 +533,7 @@ fn choose(ui: Ui, id: ResultId) {
     if pick::choose(ui, &id) {
         return;
     }
-    let hit = ui.search.with_untracked(|s| {
+    let hit = ui.screens.search.with_untracked(|s| {
         s.as_ref().and_then(|s| {
             s.state
                 .programs()
@@ -547,7 +556,7 @@ fn choose(ui: Ui, id: ResultId) {
             let start = guide_minute(start, guide_epoch());
             watch(ui, channel, Playback::CatchUp { start, offset: 0 });
         }
-        Outcome::Details { channel, start } => ui.description.set(Some(Origin {
+        Outcome::Details { channel, start } => ui.screens.description.set(Some(Origin {
             channel,
             program_start: guide_minute(start, guide_epoch()),
         })),
@@ -558,13 +567,13 @@ fn choose(ui: Ui, id: ResultId) {
 /// Plays full screen; the screen waits until playback leaves full screen.
 fn watch(ui: Ui, channel: usize, playback: Playback) {
     save_history(ui);
-    let now = ui.focus.with(|f| f.now);
+    let now = ui.guide.focus.with(|f| f.now);
     crate::lists::tap(ui, channel, now);
     ui.play(channel, playback);
     // Full screen first: the resume effect ignores a suspended screen in full screen.
-    ui.mode.apply(crate::mode::Action::EnterFullscreen);
+    ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
-    ui.search.update(|s| {
+    ui.screens.search.update(|s| {
         if let Some(s) = s {
             s.suspended = true;
         }

@@ -65,7 +65,7 @@ pub(super) fn ruler(
         // The epoch comes with the data; now decides which day is "today".
         text(move || {
             ui.guide_data();
-            ui.focus.with(|f| f.now);
+            ui.guide.focus.with(|f| f.now);
             clock(first() + i * tick_step())
         })
         .absolute()
@@ -164,7 +164,7 @@ pub(super) fn ruler(
 fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
     text(move || {
         ui.guide_data();
-        let now = ui.focus.with(|f| f.now);
+        let now = ui.guide.focus.with(|f| f.now);
         let shown = pan.band().base + MARGIN + PAST;
         let unix = crate::guide::unix_of(&*crate::runtime_owner::schedule(), shown);
         format!(

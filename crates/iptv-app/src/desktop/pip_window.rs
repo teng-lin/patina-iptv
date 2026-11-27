@@ -54,7 +54,7 @@ pub fn window(ui: Ui) -> impl IntoElement {
 }
 
 fn open(ui: Ui) -> impl IntoElement {
-    let (w, h) = untracked(|| size_for(ui.player.main().size.get()));
+    let (w, h) = untracked(|| size_for(ui.playback.player.main().size.get()));
     let mut window = nsh_core::element::desktop::window()
         .id(ID)
         .title(TITLE)
@@ -230,7 +230,7 @@ fn clicked(ui: Ui, hover: Signal<Hover>, drags: Signal<bool>, clicks: u32) {
 /// Back to the app at the top left, close at the top right, play/pause in
 /// the middle.
 fn controls(ui: Ui) -> impl IntoElement {
-    let paused = move || ui.paused.get();
+    let paused = move || ui.playback.paused.get();
     view()
         .absolute()
         .inset_0()
@@ -297,7 +297,7 @@ fn controls(ui: Ui) -> impl IntoElement {
                     48.0,
                     move || {
                         ui.touched();
-                        ui.paused.update(|p| *p = !*p);
+                        ui.playback.paused.update(|p| *p = !*p);
                     },
                 )),
         )

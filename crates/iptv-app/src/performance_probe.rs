@@ -43,7 +43,7 @@ pub(crate) fn bind(ui: Ui) {
         }
         if !crate::startup::marked("guide frame")
             || ui.app.library.shown.get_untracked().is_none()
-            || ui.visible_rows.get_untracked().is_none()
+            || ui.guide.visible_rows.get_untracked().is_none()
         {
             return;
         }
@@ -51,15 +51,15 @@ pub(crate) fn bind(ui: Ui) {
         let path = path.clone();
         let _settle = set_timeout(Duration::from_millis(500), move || {
             assert!(
-                ui.playing.get_untracked().is_none(),
+                ui.playback.playing.get_untracked().is_none(),
                 "synthetic fixture must start without playback"
             );
-            ui.focus.update(|focus| {
+            ui.guide.focus.update(|focus| {
                 focus.pane = crate::guide::Pane::Guide;
                 focus.channel = 0;
             });
-            let expected = ui.player.main().token.get_untracked() + 1;
-            ui.performance.set(Some(Probe {
+            let expected = ui.playback.player.main().token.get_untracked() + 1;
+            ui.chrome.performance.set(Some(Probe {
                 started: Instant::now(),
                 reads: crate::store_reads(),
                 opens: crate::player_opens(0),
@@ -80,7 +80,7 @@ pub(crate) fn rendered(ui: Ui, surface: usize, token: u64) {
         return;
     }
     let mut first = false;
-    ui.performance.update(|probe| {
+    ui.chrome.performance.update(|probe| {
         if let Some(probe) = probe {
             first = probe.events.len() == 1;
             probe
@@ -93,7 +93,7 @@ pub(crate) fn rendered(ui: Ui, surface: usize, token: u64) {
         return;
     }
     let _observe = set_timeout(Duration::from_millis(500), move || {
-        ui.performance.with_untracked(|probe| {
+        ui.chrome.performance.with_untracked(|probe| {
             let probe = probe.as_ref().expect("active synthetic selection probe");
             let sample = json!({
                 "invocation": std::env::var("IPTV_PERF_INVOCATION").ok(),

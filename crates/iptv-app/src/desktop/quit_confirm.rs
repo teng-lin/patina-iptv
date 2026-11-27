@@ -21,21 +21,21 @@ pub(crate) enum Choice {
 /// Asks, the window shown and in front (on macOS it may be hidden).
 pub(crate) fn open(ui: Ui) {
     super::show_main();
-    ui.quit_confirm.set(Some(Choice::Keep));
+    ui.chrome.quit_confirm.set(Some(Choice::Keep));
 }
 
 pub(crate) fn is_open(ui: Ui) -> bool {
-    ui.quit_confirm.with(Option::is_some)
+    ui.chrome.quit_confirm.with(Option::is_some)
 }
 
 /// Back keeps recording.
 pub(crate) fn back(ui: Ui) -> bool {
-    ui.quit_confirm.set(None);
+    ui.chrome.quit_confirm.set(None);
     true
 }
 
 fn choose(ui: Ui, choice: Choice) {
-    ui.quit_confirm.set(None);
+    ui.chrome.quit_confirm.set(None);
     if choice == Choice::StopAndQuit {
         super::stop_recordings_and_quit(ui);
     }
@@ -43,10 +43,10 @@ fn choose(ui: Ui, choice: Choice) {
 
 pub(crate) fn key(ui: Ui, action: Action) {
     match action {
-        Action::MoveLeft | Action::MoveUp => ui.quit_confirm.set(Some(Choice::StopAndQuit)),
-        Action::MoveRight | Action::MoveDown => ui.quit_confirm.set(Some(Choice::Keep)),
+        Action::MoveLeft | Action::MoveUp => ui.chrome.quit_confirm.set(Some(Choice::StopAndQuit)),
+        Action::MoveRight | Action::MoveDown => ui.chrome.quit_confirm.set(Some(Choice::Keep)),
         Action::Select => {
-            if let Some(choice) = ui.quit_confirm.get_untracked() {
+            if let Some(choice) = ui.chrome.quit_confirm.get_untracked() {
                 choose(ui, choice);
             }
         }
@@ -63,7 +63,7 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
 
 fn sheet(ui: Ui) -> View {
     let size = crate::scale::Scale::new();
-    let focused = move |choice| move || ui.quit_confirm.get() == Some(choice);
+    let focused = move |choice| move || ui.chrome.quit_confirm.get() == Some(choice);
     view()
         .absolute()
         .inset_0()

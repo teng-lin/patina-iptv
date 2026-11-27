@@ -58,8 +58,8 @@ thread_local! {
 /// The archived program playing: its start and length in seconds and how
 /// far into it the archive can go now.
 fn program(ui: Ui) -> Option<(i32, i32, i32)> {
-    let channel = ui.playing.get_untracked()?;
-    let Playback::CatchUp { start, offset } = ui.playback.get_untracked() else {
+    let channel = ui.playback.playing.get_untracked()?;
+    let Playback::CatchUp { start, offset } = ui.playback.playback.get_untracked() else {
         return None;
     };
     let schedule = crate::runtime_owner::schedule();
@@ -74,20 +74,21 @@ fn program(ui: Ui) -> Option<(i32, i32, i32)> {
 /// the stream is. `None` unless a program plays from the archive.
 pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
     if crate::on_demand::active(ui) {
-        let t = ui.player.main().timeline.get();
+        let t = ui.playback.player.main().timeline.get();
         return Some((
             i32::try_from(t.position_ms / 1000).unwrap_or(i32::MAX),
             i32::try_from(t.duration_ms.unwrap_or(0) / 1000).unwrap_or(i32::MAX),
         ));
     }
-    let Playback::CatchUp { offset, start } = ui.playback.get() else {
+    let Playback::CatchUp { offset, start } = ui.playback.playback.get() else {
         return None;
     };
-    let channel = ui.playing.get()?;
+    let channel = ui.playback.playing.get()?;
     let p = crate::runtime_owner::schedule().program_at(channel, start);
     let length = (p.end - p.start) * 60;
-    let at = ui.seek_target.get().unwrap_or_else(|| {
-        let played = i32::try_from(ui.player.main().position_ms.get() / 1000).unwrap_or(i32::MAX);
+    let at = ui.playback.seek_target.get().unwrap_or_else(|| {
+        let played =
+            i32::try_from(ui.playback.player.main().position_ms.get() / 1000).unwrap_or(i32::MAX);
         offset.saturating_add(played)
     });
     Some((at.clamp(0, length), length))
@@ -106,13 +107,15 @@ pub fn step(ui: Ui, delta: i32) -> bool {
     let Some((offset, _, limit)) = program(ui) else {
         return false;
     };
-    let from = ui.seek_target.get_untracked().unwrap_or_else(|| {
-        let played =
-            i32::try_from(ui.player.main().position_ms.get_untracked() / 1000).unwrap_or(i32::MAX);
+    let from = ui.playback.seek_target.get_untracked().unwrap_or_else(|| {
+        let played = i32::try_from(ui.playback.player.main().position_ms.get_untracked() / 1000)
+            .unwrap_or(i32::MAX);
         offset.saturating_add(played)
     });
     crate::interruption::viewer_acted(ui);
-    ui.seek_target.set(Some((from + delta).clamp(0, limit)));
+    ui.playback
+        .seek_target
+        .set(Some((from + delta).clamp(0, limit)));
     show_info(ui);
     commit_later(ui, COMMIT_AFTER);
     true
@@ -136,14 +139,14 @@ pub fn key(ui: Ui, step: i32, repeat: bool) -> bool {
 
 /// A seek is being chosen (the archive has not reopened there yet).
 pub fn pending(ui: Ui) -> bool {
-    ui.seek_target.get_untracked().is_some()
+    ui.playback.seek_target.get_untracked().is_some()
 }
 
 /// Retires the old archive's draft whenever playback changes or stops.
 pub(crate) fn cancel(ui: Ui) {
     if pending(ui) {
         PRESSES.with(|p| p.set(p.get().wrapping_add(1)));
-        ui.seek_target.set(None);
+        ui.playback.seek_target.set(None);
     }
 }
 
@@ -176,7 +179,7 @@ pub fn to(ui: Ui, target: i32, commit_now: bool) {
         return;
     }
     crate::interruption::viewer_acted(ui);
-    ui.seek_target.set(Some(target.max(0)));
+    ui.playback.seek_target.set(Some(target.max(0)));
     commit_later(
         ui,
         if commit_now {
@@ -212,17 +215,18 @@ fn show_info(ui: Ui) {
 
 /// Opens the archive at the chosen target.
 fn commit(ui: Ui) {
-    let Some(target) = ui.seek_target.get_untracked() else {
+    let Some(target) = ui.playback.seek_target.get_untracked() else {
         return;
     };
-    let (Some(channel), Playback::CatchUp { start, .. }) =
-        (ui.playing.get_untracked(), ui.playback.get_untracked())
-    else {
-        ui.seek_target.set(None);
+    let (Some(channel), Playback::CatchUp { start, .. }) = (
+        ui.playback.playing.get_untracked(),
+        ui.playback.playback.get_untracked(),
+    ) else {
+        ui.playback.seek_target.set(None);
         return;
     };
     log::info!("iptv seek: catch-up to {target} s into the program");
-    ui.player.main().position_ms.set(0);
+    ui.playback.player.main().position_ms.set(0);
     ui.play(
         channel,
         Playback::CatchUp {
@@ -230,7 +234,7 @@ fn commit(ui: Ui) {
             offset: target,
         },
     );
-    ui.seek_target.set(None);
+    ui.playback.seek_target.set(None);
     show_info(ui);
 }
 

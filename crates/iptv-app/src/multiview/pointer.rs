@@ -76,11 +76,11 @@ pub fn toggle_enlarge(ui: Ui, index: usize) {
 /// Whether the pointer chrome (toolbar, tile buttons) shows: the grid
 /// with nothing over it, a pointer that moved or tapped lately.
 pub fn chrome_shows(ui: Ui) -> bool {
-    ui.mode.get() == ViewMode::Fullscreen
+    ui.chrome.mode.get() == ViewMode::Fullscreen
         && !ui.keys_shown()
-        && ui.play_bar.with(|b| b.shown)
+        && ui.playback.play_bar.with(|b| b.shown)
         && crate::play_bar::pointer_available()
-        && ui.multiview.with(|m| {
+        && ui.playback.multiview.with(|m| {
             m.as_ref()
                 .is_some_and(|m| m.detour().is_none() && m.dialog().is_none() && m.pick().is_none())
         })
@@ -102,6 +102,7 @@ fn used_chrome(ui: Ui) {
 /// closes; `false` with nothing open.
 pub fn dismiss(ui: Ui) -> bool {
     let open = ui
+        .playback
         .multiview
         .with_untracked(|m| m.as_ref().is_some_and(|m| m.dialog().is_some()));
     if open {

@@ -76,7 +76,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = computed(move || {
         let settings = crate::settings_wiring::read(ui);
         // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
-        ui.pip.with(|p| p.supported);
+        ui.playback.pip.with(|p| p.supported);
         state(ui, |s| {
             s.rows(&Ctx {
                 settings: &settings,
@@ -564,7 +564,7 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     let description = move || {
         let settings = crate::settings_wiring::read(ui);
         // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
-        ui.pip.with(|p| p.supported);
+        ui.playback.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
             offer: &crate::settings_offer::offer_now,

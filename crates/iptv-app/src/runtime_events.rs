@@ -10,10 +10,10 @@ use std::rc::Rc;
 pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ResumeChannel(channel) => {
-            if ui.playing.get_untracked().is_none() {
+            if ui.playback.playing.get_untracked().is_none() {
                 crate::parental_view::admitted(ui, channel, move || {
                     ui.play(channel, crate::Playback::Live);
-                    if ui.playing.get_untracked() == Some(channel) {
+                    if ui.playback.playing.get_untracked() == Some(channel) {
                         crate::lists::resumed(ui, channel);
                     }
                 });
@@ -83,15 +83,15 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             // A failed initial read left recent searches unloaded. Reload
             // before unblocking input so a new search cannot overwrite them.
             crate::search_view::refresh_saved_history(ui).await;
-            ui.store_startup_failure.set(None);
+            ui.chrome.store_startup_failure.set(None);
         }),
         RuntimeEvent::StoreStartupFailed { path, error } => {
             crate::startup_view::store_failed(ui, path, error)
         }
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
-            if ui.playing.get_untracked().is_some() {
-                ui.mode.apply(crate::mode::Action::EnterFullscreen);
+            if ui.playback.playing.get_untracked().is_some() {
+                ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
         }
@@ -120,6 +120,7 @@ fn schedule_changed(
         if let ScheduleCause::Catalog { has_vod, any_vod } = cause {
             crate::clock::mark_shown();
             if ui
+                .playback
                 .playing
                 .get_untracked()
                 .is_some_and(|ch| ch >= current.channel_count())
@@ -131,15 +132,15 @@ fn schedule_changed(
         }
         crate::lists::restore(ui, kept, current.clone());
         if catalog_changed {
-            let n = ui.list.with_untracked(|l| l.len());
-            let rows = ui.visible_rows.get_untracked();
+            let n = ui.guide.list.with_untracked(|l| l.len());
+            let rows = ui.guide.visible_rows.get_untracked();
             let clamped = rows.and_then(|(a, b)| (n > 0).then(|| (a.min(n - 1), b.min(n - 1))));
             if clamped != rows {
-                ui.visible_rows.set(clamped);
+                ui.guide.visible_rows.set(clamped);
             }
             crate::menu_view::catalog_changed(ui);
-            ui.description.set(None);
-            ui.editor.set(None);
+            ui.screens.description.set(None);
+            ui.screens.editor.set(None);
             ui.app.data_version.update(|version| *version += 1);
         }
         crate::player::enforce_guide_blocks(ui, &*current);
@@ -154,7 +155,7 @@ fn schedule_changed(
 
 /// UI context supplied to the runtime's foreground scheduling hint.
 pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
-    crate::lists::focused_channel(ui)
+    crate::lists::focused_channel(ui.guide)
 }
 
 /// The headless scenarios' stand-in for an import reporting the shown

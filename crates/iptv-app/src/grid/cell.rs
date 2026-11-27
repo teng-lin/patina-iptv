@@ -130,7 +130,7 @@ pub(super) fn cell(
         _ => false,
     });
     let colors = computed(move || {
-        let overlay = match ui.mode.get() {
+        let overlay = match ui.chrome.mode.get() {
             ViewMode::Overlay => Some(crate::theme::overlay_alpha(&crate::settings_wiring::read(
                 ui,
             ))),
@@ -156,12 +156,12 @@ pub(super) fn cell(
         None => false,
     };
     let focus_program = move |p: Program| {
-        let view = crate::lists::view(ui);
+        let view = crate::lists::view(ui.guide);
         let row = at.index();
         if p.end <= floor_of(&view, row, now.get_untracked()) {
             return false;
         }
-        ui.focus.update(|f| f.tap(row, p.start, &view));
+        ui.guide.focus.update(|f| f.tap(row, p.start, &view));
         true
     };
     let open_actions = move || {

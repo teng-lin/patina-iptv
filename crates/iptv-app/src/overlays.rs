@@ -127,7 +127,7 @@ impl Overlay {
         match self {
             Overlay::QuitConfirm => crate::desktop::quit_confirm::is_open(ui),
             Overlay::Leave => crate::chooser::is_open(ui, true),
-            Overlay::StoreStartupFailure => ui.store_startup_failure.with(Option::is_some),
+            Overlay::StoreStartupFailure => ui.chrome.store_startup_failure.with(Option::is_some),
             Overlay::Parental => crate::parental_view::is_open(ui),
             Overlay::CastPairing => crate::cast_pairing::is_open(ui),
             Overlay::RestoreReview => crate::backup::is_open(ui),
@@ -145,12 +145,12 @@ impl Overlay {
             Overlay::AppUpdateNotice => crate::settings_view::updates::notice_open(ui),
             Overlay::AppUpdate => crate::settings_view::updates::is_open(ui),
             Overlay::Settings => crate::settings_view::is_open(ui),
-            Overlay::FavoritesEditor => ui.editor.with(Option::is_some),
+            Overlay::FavoritesEditor => ui.screens.editor.with(Option::is_some),
             Overlay::Chooser => crate::chooser::is_open(ui, false),
-            Overlay::Description => ui.description.with(Option::is_some),
+            Overlay::Description => ui.screens.description.with(Option::is_some),
             Overlay::PlaylistMenu => crate::menu_view::playlist_popup_open(ui),
             Overlay::Menu => {
-                ui.menu.with(Option::is_some) && !crate::menu_view::playlist_popup_open(ui)
+                ui.screens.menu.with(Option::is_some) && !crate::menu_view::playlist_popup_open(ui)
             }
             Overlay::Search => crate::search_view::is_open(ui),
             Overlay::ChannelPicker => crate::multiview_picker::is_open(ui),

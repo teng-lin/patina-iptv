@@ -43,7 +43,7 @@ fn item_height(ui: Ui) -> f32 {
 
 /// The rail's width now (0 while the guide has the focus).
 pub fn width(ui: Ui) -> f32 {
-    match ui.focus.with(|f| f.layout_pane()) {
+    match ui.guide.focus.with(|f| f.layout_pane()) {
         Pane::Guide | Pane::Preview => 0.0,
         Pane::Groups => RAIL_W,
         Pane::Rail => RAIL_W + (RAIL_OPEN_W - RAIL_W) * crate::scale::now(),
@@ -97,12 +97,15 @@ pub(crate) fn icon(item: RailItem) -> ImageSrc {
 fn item_view(ui: Ui, size: Scale, item: RailItem) -> impl IntoElement {
     // Its place in the rail now (discovery shelves follow imported VOD).
     let index = move || crate::lists::rail(ui).iter().position(|&i| i == item);
-    let open = move || ui.focus.with(|f| f.layout_pane()) == Pane::Rail;
+    let open = move || ui.guide.focus.with(|f| f.layout_pane()) == Pane::Rail;
     let focused = move || {
         open()
             && ui.keys_shown()
             && index().is_some()
-            && ui.focus.with(|f| f.pane == Pane::Rail && f.rail == item)
+            && ui
+                .guide
+                .focus
+                .with(|f| f.pane == Pane::Rail && f.rail == item)
     };
     let color = move || {
         if focused() {
@@ -179,10 +182,11 @@ pub fn column(ui: Ui) -> impl IntoElement {
     effect(move || {
         let items = crate::lists::rail(ui);
         if ui
+            .guide
             .focus
             .with_untracked(|focus| !items.contains(&focus.rail))
         {
-            ui.focus.update(|focus| focus.retain_rail(&items));
+            ui.guide.focus.update(|focus| focus.retain_rail(&items));
         }
     });
     let part = move |bottom: bool| {

@@ -34,7 +34,7 @@ pub(crate) struct RestoreReview {
 
 pub(super) async fn confirm(ui: Ui, filename: Option<String>) -> bool {
     let (response, answer) = oneshot::channel();
-    ui.restore_review.set(Some(RestoreReview {
+    ui.screens.restore_review.set(Some(RestoreReview {
         filename,
         focus: Choice::Cancel,
         reveal: false,
@@ -45,20 +45,22 @@ pub(super) async fn confirm(ui: Ui, filename: Option<String>) -> bool {
 }
 
 pub(crate) fn is_open(ui: Ui) -> bool {
-    ui.restore_review.with(Option::is_some)
+    ui.screens.restore_review.with(Option::is_some)
 }
 
 fn focus(ui: Ui) -> Option<Choice> {
-    ui.restore_review
+    ui.screens
+        .restore_review
         .with(|review| review.as_ref().map(|review| review.focus))
 }
 
 fn finish(ui: Ui, choice: Choice) -> bool {
     let response = ui
+        .screens
         .restore_review
         .with_untracked(|review| review.as_ref().and_then(|review| review.response.take()));
     if let Some(response) = response {
-        ui.restore_review.set(None);
+        ui.screens.restore_review.set(None);
         let _ = response.send(choice);
         true
     } else {
@@ -94,7 +96,7 @@ pub(crate) fn key(ui: Ui, action: Action) {
         }
         _ => return,
     };
-    ui.restore_review.update(|review| {
+    ui.screens.restore_review.update(|review| {
         if let Some(review) = review {
             review.focus = choice;
             review.reveal = true;
@@ -104,7 +106,7 @@ pub(crate) fn key(ui: Ui, action: Action) {
 
 fn scroll(ui: Ui, direction: f32) {
     let mut scrolling = None;
-    ui.restore_review.update(|review| {
+    ui.screens.restore_review.update(|review| {
         if let Some(review) = review {
             review.reveal = false;
             scrolling = Some(review.scrolling);
@@ -122,6 +124,7 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
 fn screen(ui: Ui) -> View {
     let size = Scale::new();
     let scrolling = ui
+        .screens
         .restore_review
         .with_untracked(|review| review.as_ref().expect("an open restore review").scrolling);
     let schedule = move || focus(ui) == Some(Choice::Schedule);
@@ -129,6 +132,7 @@ fn screen(ui: Ui) -> View {
     let reveal = move || {
         ui.keys_shown()
             && ui
+                .screens
                 .restore_review
                 .with(|review| review.as_ref().is_some_and(|review| review.reveal))
     };
@@ -184,7 +188,8 @@ fn screen(ui: Ui) -> View {
 
 fn archive(ui: Ui, size: Scale) -> View {
     let filename = move || {
-        ui.restore_review
+        ui.screens
+            .restore_review
             .with(|review| review.as_ref().and_then(|review| review.filename.clone()))
     };
     let shown = move || filename().unwrap_or_else(|| tr("Patina backup").to_owned());

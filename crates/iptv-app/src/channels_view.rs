@@ -32,7 +32,7 @@ const LIST_W: f32 = 460.0;
 const PAGE: isize = 8;
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.channels.with(Option::is_some)
+    ui.playback.channels.with(Option::is_some)
 }
 
 /// Opens the list over (or beside) full-screen video.
@@ -44,19 +44,19 @@ pub fn open(ui: Ui, mode: ListMode) {
     } else {
         mode
     };
-    if ui.mode.get_untracked() != ViewMode::Fullscreen {
+    if ui.chrome.mode.get_untracked() != ViewMode::Fullscreen {
         return;
     }
-    ui.panels.update(|p| p.hide());
-    let list = ui.list.get_untracked();
+    ui.playback.panels.update(|p| p.hide());
+    let list = ui.guide.list.get_untracked();
     // Picking for multiview: from the active tile's channel.
-    let from = crate::multiview::pick_from(ui).or(ui.playing.get_untracked());
+    let from = crate::multiview::pick_from(ui).or(ui.playback.playing.get_untracked());
     let state = ChannelList::open(mode, from, &list);
-    ui.channels.set(Some(state));
+    ui.playback.channels.set(Some(state));
 }
 
 pub fn close(ui: Ui) {
-    ui.channels.set(None);
+    ui.playback.channels.set(None);
     crate::multiview::list_closed(ui);
 }
 
@@ -66,12 +66,13 @@ fn playing(ui: Ui) -> Option<usize> {
     if crate::multiview::picking(ui) {
         None
     } else {
-        ui.playing.get_untracked()
+        ui.playback.playing.get_untracked()
     }
 }
 
 fn groups_shown(ui: Ui) -> bool {
-    ui.channels
+    ui.playback
+        .channels
         .with(|c| c.is_some_and(|c| c.pane == ListPane::Groups))
 }
 
@@ -99,7 +100,7 @@ fn panel_now(ui: Ui) -> ListPanel {
 /// decides, whatever `guide.list_browse_mode` says (#281): the video goes
 /// beside the list wherever it has room.
 pub fn preview_rect(ui: Ui, width: f32, _height: f32) -> Option<(f32, f32, f32, f32)> {
-    let preview = ui.channels.with(|c| {
+    let preview = ui.playback.channels.with(|c| {
         c.is_some_and(|c| {
             c.mode == ListMode::Preview
                 || crate::device::window_class() == crate::layout::Class::Compact
@@ -120,10 +121,10 @@ fn over_video(ui: Ui) -> bool {
 /// Runs a step on the list's state with the guide's list and the groups
 /// column's length, then does what it asks.
 fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, VisibleEntries) -> Outcome) {
-    let list = ui.list.get_untracked();
+    let list = ui.guide.list.get_untracked();
     let entries = visible_entries(ui);
     let mut outcome = Outcome::Stay;
-    ui.channels.update(|c| {
+    ui.playback.channels.update(|c| {
         if let Some(c) = c.as_mut() {
             outcome = f(c, &list, entries);
         }
@@ -143,8 +144,9 @@ fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, VisibleEntries) -> Out
         }
         Outcome::Preview(entry) => {
             crate::lists::preview(ui, entry);
-            let list = ui.list.get_untracked();
-            ui.channels
+            let list = ui.guide.list.get_untracked();
+            ui.playback
+                .channels
                 .update(|c| c.iter_mut().for_each(|c| c.shown(&list)));
         }
     }
@@ -171,7 +173,7 @@ pub fn key(ui: Ui, action: Action) {
         }),
         Action::Select => update(ui, |c, l, _| c.select(playing, l)),
         Action::ShowMenu if !crate::multiview::picking(ui) => {
-            if let Some(list) = ui.channels.get_untracked() {
+            if let Some(list) = ui.playback.channels.get_untracked() {
                 match list.pane {
                     ListPane::Groups => {
                         crate::menu_view::open_group_options(ui, list.entry);
@@ -186,14 +188,14 @@ pub fn key(ui: Ui, action: Action) {
             if crate::multiview::picking(ui) => {}
         Action::ChannelUp | Action::ChannelDown => {
             crate::player_keys::zap(ui, if action == Action::ChannelUp { -1 } else { 1 });
-            if let Some(ch) = ui.playing.get_untracked() {
+            if let Some(ch) = ui.playback.playing.get_untracked() {
                 update(ui, |c, l, _| {
                     c.follow(ch, l);
                     Outcome::Stay
                 });
             }
         }
-        Action::PlayPause => ui.paused.update(|p| *p = !*p),
+        Action::PlayPause => ui.playback.paused.update(|p| *p = !*p),
         _ => {}
     }
 }
@@ -204,11 +206,11 @@ pub fn back(ui: Ui) {
 
 fn open_channel_menu(ui: Ui, row: usize) {
     if !crate::multiview::picking(ui)
-        && let Some(channel) = ui.list.with_untracked(|list| list.channel(row))
+        && let Some(channel) = ui.guide.list.with_untracked(|list| list.channel(row))
     {
         batch(|| {
-            ui.pending_zap.set(None);
-            ui.channels.update(|state| {
+            ui.playback.pending_zap.set(None);
+            ui.playback.channels.update(|state| {
                 if let Some(state) = state {
                     state.focus_row(row);
                 }
@@ -221,7 +223,7 @@ fn open_channel_menu(ui: Ui, row: usize) {
 
 /// What an empty list says.
 fn empty_text(ui: Ui) -> String {
-    match ui.list.with(|l| (l.is_empty(), l.entry())) {
+    match ui.guide.list.with(|l| (l.is_empty(), l.entry())) {
         (false, _) => String::new(),
         (true, FAVORITES) => tr("No favorites yet").to_owned(),
         (true, _) => tr("No channels here").to_owned(),
@@ -231,7 +233,7 @@ fn empty_text(ui: Ui) -> String {
 pub fn layer(ui: Ui) -> impl IntoElement {
     // The list belongs to full-screen playback and to the data it indexes.
     effect(move || {
-        if ui.mode.get() != ViewMode::Fullscreen && untracked(|| is_open(ui)) {
+        if ui.chrome.mode.get() != ViewMode::Fullscreen && untracked(|| is_open(ui)) {
             untracked(|| close(ui));
         }
     });
@@ -243,7 +245,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     let open = move || is_open(ui);
-    let state = move || ui.channels.get();
+    let state = move || ui.playback.channels.get();
     // Over the video in the overlay layout, and in the preview layout of a
     // window with no room for the video beside the list.
     let overlay = move || over_video(ui);
@@ -320,12 +322,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             }),
         )
         .child(when(
-            move || ui.list.with(|l| l.is_empty()),
+            move || ui.guide.list.with(|l| l.is_empty()),
             move || heading(Box::new(move || empty_text(ui))),
         ))
         .child(
             virtual_list(
-                move || ui.list.with(|l| l.len()),
+                move || ui.guide.list.with(|l| l.len()),
                 move |at| channel_row(ui, at, row_focus, size),
             )
             .estimated_item_size(list_rows::pitch(size, ROW_TWO))
@@ -381,7 +383,7 @@ fn entry_row(
 ) -> impl IntoElement {
     let visible = move || visible_entries(ui).entry(at.index());
     let entry = move || visible().unwrap_or(ALL);
-    let current = move || visible() == Some(ui.list.with(|l| l.entry()));
+    let current = move || visible() == Some(ui.guide.list.with(|l| l.entry()));
     let focused = move || {
         ui.keys_shown() && visible().is_some_and(|entry| focus.get() == Some((entry, true)))
     };
@@ -515,13 +517,13 @@ fn channel_row(
     focus: Memo<Option<(usize, bool)>>,
     size: Scale,
 ) -> impl IntoElement {
-    let channel = move || ui.list.with(|l| l.channel(at.index()));
+    let channel = move || ui.guide.list.with(|l| l.channel(at.index()));
     let entry = move || {
         ui.app.data_version.get();
         let ch = channel()?;
         let s = crate::runtime_owner::schedule();
-        let now = ui.focus.with(|f| f.now);
-        let playing = if ui.playing.get() == Some(ch) {
+        let now = ui.guide.focus.with(|f| f.now);
+        let playing = if ui.playback.playing.get() == Some(ch) {
             "  ▶"
         } else {
             ""
@@ -605,7 +607,8 @@ fn channel_row(
             move || {
                 let name = move || {
                     ui.app.data_version.get();
-                    ui.list
+                    ui.guide
+                        .list
                         .with(|l| l.channel(at.index()))
                         .map(crate::channel_name)
                         .unwrap_or_default()
@@ -659,10 +662,10 @@ fn more_room(ui: Ui) -> f32 {
 fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
     let info = move || {
         ui.app.data_version.get();
-        let row = ui.channels.get()?.row;
-        let ch = ui.list.with(|l| l.channel(row))?;
+        let row = ui.playback.channels.get()?.row;
+        let ch = ui.guide.list.with(|l| l.channel(row))?;
         let s = crate::runtime_owner::schedule();
-        let now = ui.focus.with(|f| f.now);
+        let now = ui.guide.focus.with(|f| f.now);
         let p = s.program_at(ch, now);
         Some((
             format!("{}  {}", Rows::number(row), s.channel_name(ch)),

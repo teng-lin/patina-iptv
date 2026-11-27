@@ -17,12 +17,12 @@ mod browser;
 mod empty;
 fn edit<R>(ui: Ui, f: impl FnOnce(&mut Screen) -> R) -> R {
     let mut result = None;
-    ui.vod.update(|s| result = Some(f(s)));
+    ui.screens.vod.update(|s| result = Some(f(s)));
     result.unwrap()
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.vod.with(|s| s.open)
+    ui.screens.vod.with(|s| s.open)
 }
 
 pub fn open(ui: Ui, kind: Kind) {
@@ -30,7 +30,7 @@ pub fn open(ui: Ui, kind: Kind) {
         iptv_settings::keys::VOD_SORT,
         &iptv_settings::Target::Global,
     ));
-    ui.vod.update(|s| {
+    ui.screens.vod.update(|s| {
         s.begin_sorted(kind, sort);
     });
     reload(ui, false);
@@ -75,19 +75,19 @@ fn cycle_sort(ui: Ui) {
 /// Opens a cross-source shelf from the rail: movies and series of every
 /// enabled playlist in one list. The guide stays underneath, unchanged.
 pub fn open_shelf(ui: Ui, shelf: Shelf) {
-    ui.vod.update(|s| {
+    ui.screens.vod.update(|s| {
         s.begin_shelf(shelf);
     });
     reload(ui, false);
 }
 
 pub fn close(ui: Ui) {
-    if ui.player.vod.with_untracked(Option::is_none) {
+    if ui.playback.player.vod.with_untracked(Option::is_none) {
         crate::runtime_owner::runtime().parental_content_closed();
     }
     // A shelf page or focus lookup still being read is no longer wanted.
     crate::runtime_owner::runtime().vod_discovery_cancel();
-    ui.vod.update(Screen::close);
+    ui.screens.vod.update(Screen::close);
 }
 
 /// Back from a movie or episode playing full screen: its details reopen
@@ -96,34 +96,42 @@ pub fn close(ui: Ui) {
 /// the title was chosen from, the title playing on in the preview. False
 /// when the title did not come from this screen.
 pub fn return_from_player(ui: Ui) -> bool {
-    let Some((details, played, saved)) = ui.player.vod.with_untracked(|p| {
+    let Some((details, played, saved)) = ui.playback.player.vod.with_untracked(|p| {
         p.as_ref()
             .map(|(p, _)| (p.details.clone(), p.key.clone(), p.last_saved_ms.is_some()))
     }) else {
         return false;
     };
-    if !ui.vod.with_untracked(|s| s.returns_to(&details.item.key)) {
+    if !ui
+        .screens
+        .vod
+        .with_untracked(|s| s.returns_to(&details.item.key))
+    {
         return false;
     }
-    ui.vod
+    ui.screens
+        .vod
         .update(|s| s.return_from_player(details, &played, saved));
-    ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+    ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
     true
 }
 
 /// Whether Back from the title playing full screen returns to its
 /// details, and to which library (the visible ‹'s label).
 pub fn returns_to(ui: Ui) -> Option<Kind> {
-    ui.player.vod.with(|p| {
+    ui.playback.player.vod.with(|p| {
         p.as_ref().and_then(|(p, _)| {
             let item = &p.details.item.key;
-            ui.vod.with(|s| s.returns_to(item)).then_some(item.kind)
+            ui.screens
+                .vod
+                .with(|s| s.returns_to(item))
+                .then_some(item.kind)
         })
     })
 }
 
 pub fn back(ui: Ui) -> bool {
-    if ui.player.vod.with_untracked(Option::is_none) {
+    if ui.playback.player.vod.with_untracked(Option::is_none) {
         crate::runtime_owner::runtime().parental_content_closed();
     }
     let outcome = edit(ui, Screen::back);
@@ -179,7 +187,11 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
     crate::tasks::spawn_in_app(async move {
         // A queued host task may first run after Back or another shelf.
         // Do not start work (or supersede the newer read's token) then.
-        if !ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
+        if !ui
+            .screens
+            .vod
+            .with_untracked(|s| s.accepts_reply(generation))
+        {
             return;
         }
         // A shelf reads one bounded page across every playlist; a
@@ -219,7 +231,7 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
                     },
                 ),
             };
-        ui.vod.update(|s| {
+        ui.screens.vod.update(|s| {
             if !s.accepts_reply(generation) {
                 return;
             }
@@ -261,13 +273,14 @@ fn load_previous(ui: Ui, step_up: bool) {
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         if !ui
+            .screens
             .vod
             .with_untracked(|s| s.accepts_reply(generation) && s.start == start)
         {
             return;
         }
         let result = owner.vod_discovery(query).await;
-        ui.vod.update(|s| {
+        ui.screens.vod.update(|s| {
             if !s.accepts_reply(generation) {
                 return;
             }
@@ -288,7 +301,7 @@ fn load_previous(ui: Ui, step_up: bool) {
 /// again) and resolves a fresh provider link for the same episode, from
 /// its start if that was asked.
 fn retry(ui: Ui) {
-    let Some(operation) = ui.vod.with_untracked(|s| s.retry_operation()) else {
+    let Some(operation) = ui.screens.vod.with_untracked(|s| s.retry_operation()) else {
         return;
     };
     match operation {
@@ -310,9 +323,13 @@ fn retry(ui: Ui) {
 /// its parental check is asked again (a PIN if the lock requires one now)
 /// without first closing the content as choosing another title does.
 fn retry_details(ui: Ui, key: Key) {
-    let generation = ui.vod.with_untracked(|s| s.generation);
+    let generation = ui.screens.vod.with_untracked(|s| s.generation);
     crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
-        if ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
+        if ui
+            .screens
+            .vod
+            .with_untracked(|s| s.accepts_reply(generation))
+        {
             select_authorized(ui, key);
         }
     });
@@ -324,9 +341,13 @@ fn retry_details(ui: Ui, key: Key) {
 /// was chosen from: a playlist deleted and added again, or edited, under
 /// the same id is refused, and its title must be chosen again.
 fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
-    let generation = ui.vod.with_untracked(|s| s.generation);
+    let generation = ui.screens.vod.with_untracked(|s| s.generation);
     crate::parental_view::request(ui, Runtime::vod_target(&item), move || {
-        if !ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
+        if !ui
+            .screens
+            .vod
+            .with_untracked(|s| s.accepts_reply(generation))
+        {
             return;
         }
         let generation = edit(ui, |s| s.begin_operation());
@@ -346,7 +367,7 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
                         .await
                 }
                 Ok(false) => {
-                    ui.vod.update(|s| {
+                    ui.screens.vod.update(|s| {
                         s.reject_replaced_playlist(
                             generation,
                             crate::i18n::key(
@@ -395,16 +416,20 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
 }
 
 fn select(ui: Ui, key: Key) {
-    let same = ui.player.vod.with_untracked(|p| {
+    let same = ui.playback.player.vod.with_untracked(|p| {
         p.as_ref()
             .is_some_and(|(p, _)| p.parent.as_ref().unwrap_or(&p.key) == &key)
     });
     if !same {
         crate::runtime_owner::runtime().parental_content_closed();
     }
-    let generation = ui.vod.with_untracked(|s| s.generation);
+    let generation = ui.screens.vod.with_untracked(|s| s.generation);
     crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
-        if ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
+        if ui
+            .screens
+            .vod
+            .with_untracked(|s| s.accepts_reply(generation))
+        {
             select_authorized(ui, key);
         }
     });
@@ -415,7 +440,7 @@ fn select_authorized(ui: Ui, key: Key) {
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let result = owner.vod_details(key.clone()).await;
-        ui.vod.update(|s| {
+        ui.screens.vod.update(|s| {
             if !s.finish_operation(generation) {
                 return;
             }
@@ -431,7 +456,7 @@ fn select_authorized(ui: Ui, key: Key) {
 }
 
 fn play(ui: Ui, restart: bool) {
-    let target = ui.vod.with_untracked(|s| {
+    let target = ui.screens.vod.with_untracked(|s| {
         s.details.clone().map(|d| {
             let key = if d.item.key.kind == Kind::Movie {
                 Some(d.item.key.clone())
@@ -453,7 +478,11 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
     let parent = (key.kind == Kind::Episode).then(|| details.item.key.clone());
     let run = move || {
         crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
-            if ui.vod.with_untracked(|s| s.generation == generation) {
+            if ui
+                .screens
+                .vod
+                .with_untracked(|s| s.generation == generation)
+            {
                 play_authorized(ui, details, key, restart, true, None);
             }
         })
@@ -500,13 +529,18 @@ fn play_authorized(
                 }
             }
         };
-        if ui.vod.with_untracked(|s| s.generation != generation) {
+        if ui
+            .screens
+            .vod
+            .with_untracked(|s| s.generation != generation)
+        {
             not_played();
             return;
         }
-        ui.vod.update(|s| s.busy = false);
+        ui.screens.vod.update(|s| s.busy = false);
         if let Some(ended) = &after {
             let held = ui
+                .playback
                 .player
                 .vod
                 .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| &p.key == ended));
@@ -523,7 +557,7 @@ fn play_authorized(
             Ok((playing, source)) => {
                 if !owner.reserve_viewing(0, iptv_library::SourceId(playing.key.source)) {
                     // Once a recording stops, Retry resolves a new link.
-                    ui.vod.update(|s| {
+                    ui.screens.vod.update(|s| {
                         s.fail(
                             crate::i18n::key(
                                 "No provider connection available while recording; stop a recording or check Streams at once",
@@ -540,11 +574,11 @@ fn play_authorized(
                     // The screen waits under the player: Back from the
                     // title returns to its details (`return_from_player`).
                     crate::runtime_owner::runtime().vod_discovery_cancel();
-                    ui.vod.update(|s| s.hand_to_player());
+                    ui.screens.vod.update(|s| s.hand_to_player());
                 }
             }
             Err(_) => {
-                ui.vod.update(|s| {
+                ui.screens.vod.update(|s| {
                     s.fail(
                         crate::i18n::key(
                             "Playback unavailable; refresh the playlist and try again",
@@ -561,6 +595,7 @@ fn play_authorized(
 /// Nothing plays any more if the player holds `ended`, ended.
 fn stop_ended(ui: Ui, ended: &Key) {
     if ui
+        .playback
         .player
         .vod
         .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.ended && &p.key == ended))
@@ -571,6 +606,7 @@ fn stop_ended(ui: Ui, ended: &Key) {
 
 fn toggle_block(ui: Ui) {
     if let Some(target) = ui
+        .screens
         .vod
         .with_untracked(|s| s.details.as_ref().map(|d| Runtime::vod_target(&d.item.key)))
     {
@@ -580,21 +616,21 @@ fn toggle_block(ui: Ui) {
 }
 
 fn cycle_source(ui: Ui) {
-    ui.vod.update(Screen::cycle_source);
+    ui.screens.vod.update(Screen::cycle_source);
     reload(ui, false);
 }
 
 fn cycle_category(ui: Ui) {
-    ui.vod.update(Screen::cycle_category);
+    ui.screens.vod.update(Screen::cycle_category);
     reload(ui, false);
 }
 
 fn activate(ui: Ui) {
-    let control = ui.vod.with_untracked(|s| s.control);
+    let control = ui.screens.vod.with_untracked(|s| s.control);
     match control {
         Control::Navigation => browser::activate_navigation(ui),
         Control::Catalog => {
-            if let Some(key) = ui.vod.with_untracked(|s| s.focused.clone()) {
+            if let Some(key) = ui.screens.vod.with_untracked(|s| s.focused.clone()) {
                 select(ui, key);
             } else {
                 empty::run(ui);
@@ -603,25 +639,27 @@ fn activate(ui: Ui) {
         Control::Source => cycle_source(ui),
         Control::Category
             if ui
+                .screens
                 .vod
                 .with_untracked(|s| !s.is_shelf() && s.details.is_none()) =>
         {
-            ui.vod.update(|s| s.enter_catalog());
+            ui.screens.vod.update(|s| s.enter_catalog());
         }
         Control::Category => cycle_category(ui),
         Control::Sort => cycle_sort(ui),
         Control::Continue => {
-            ui.vod
+            ui.screens
+                .vod
                 .update(|s| s.query.continue_watching = !s.query.continue_watching);
             reload(ui, false);
         }
         Control::Play | Control::Episodes => play(ui, false),
         Control::Restart => play(ui, true),
-        Control::Seasons => ui.vod.update(|s| s.cycle_season(1)),
+        Control::Seasons => ui.screens.vod.update(|s| s.cycle_season(1)),
         Control::Next => next(ui),
         Control::Block => toggle_block(ui),
         Control::Retry => retry(ui),
-        Control::Search => ui.vod.update(|s| s.open_search()),
+        Control::Search => ui.screens.vod.update(|s| s.open_search()),
     }
 }
 
@@ -630,16 +668,18 @@ pub fn key(ui: Ui, action: Action) {
         back(ui);
         return;
     }
-    if ui.vod.with_untracked(|s| s.busy) {
+    if ui.screens.vod.with_untracked(|s| s.busy) {
         return;
     }
-    let control = ui.vod.with_untracked(|s| s.control);
+    let control = ui.screens.vod.with_untracked(|s| s.control);
     if ui
+        .screens
         .vod
         .with_untracked(|s| !s.is_shelf() && s.details.is_none())
     {
         match action {
             Action::MoveLeft | Action::MoveRight => ui
+                .screens
                 .vod
                 .update(|s| s.browse_horizontal(if action == Action::MoveLeft { -1 } else { 1 })),
             Action::MoveUp | Action::MoveDown => {
@@ -648,7 +688,7 @@ pub fn key(ui: Ui, action: Action) {
                 });
                 if changed {
                     reload(ui, false);
-                } else if ui.vod.with_untracked(|s| {
+                } else if ui.screens.vod.with_untracked(|s| {
                     s.control == Control::Catalog
                         && s.has_more
                         && s.focused_index()
@@ -662,12 +702,14 @@ pub fn key(ui: Ui, action: Action) {
         }
         return;
     }
-    if ui.vod.with_untracked(|s| s.details.is_some()) {
+    if ui.screens.vod.with_untracked(|s| s.details.is_some()) {
         match action {
             Action::MoveLeft | Action::MoveRight => ui
+                .screens
                 .vod
                 .update(|s| s.detail_horizontal(if action == Action::MoveLeft { -1 } else { 1 })),
             Action::MoveUp | Action::MoveDown => ui
+                .screens
                 .vod
                 .update(|s| s.detail_vertical(if action == Action::MoveUp { -1 } else { 1 })),
             Action::Select => activate(ui),
@@ -676,7 +718,7 @@ pub fn key(ui: Ui, action: Action) {
         return;
     }
     match action {
-        Action::MoveLeft => ui.vod.update(|s| {
+        Action::MoveLeft => ui.screens.vod.update(|s| {
             if control == Control::Seasons {
                 s.cycle_season(-1)
             } else if control == Control::Episodes {
@@ -685,7 +727,7 @@ pub fn key(ui: Ui, action: Action) {
                 s.move_control(-1)
             }
         }),
-        Action::MoveRight => ui.vod.update(|s| {
+        Action::MoveRight => ui.screens.vod.update(|s| {
             if control == Control::Seasons {
                 s.cycle_season(1)
             } else if control == Control::Episodes {
@@ -695,7 +737,7 @@ pub fn key(ui: Ui, action: Action) {
             }
         }),
         Action::MoveUp => {
-            let at_top = ui.vod.with_untracked(|s| {
+            let at_top = ui.screens.vod.with_untracked(|s| {
                 control == Control::Catalog
                     && s.cards
                         .first()
@@ -703,11 +745,11 @@ pub fn key(ui: Ui, action: Action) {
             });
             // Up on a shelf window's first title reads the titles above it
             // and steps onto the one just above.
-            if at_top && ui.vod.with_untracked(|s| s.has_previous()) {
+            if at_top && ui.screens.vod.with_untracked(|s| s.has_previous()) {
                 load_previous(ui, true);
                 return;
             }
-            ui.vod.update(|s| match control {
+            ui.screens.vod.update(|s| match control {
                 Control::Catalog if s.cards.is_empty() => s.move_control(-1),
                 Control::Catalog if at_top => s.move_control(-1),
                 Control::Catalog => s.move_focus(-1),
@@ -716,13 +758,13 @@ pub fn key(ui: Ui, action: Action) {
             })
         }
         Action::MoveDown => {
-            ui.vod.update(|s| match control {
+            ui.screens.vod.update(|s| match control {
                 Control::Catalog if s.cards.is_empty() => s.move_control(1),
                 Control::Catalog => s.move_focus(1),
                 Control::Episodes => s.move_control(1),
                 _ => s.move_control(1),
             });
-            let more = ui.vod.with_untracked(|s| {
+            let more = ui.screens.vod.with_untracked(|s| {
                 s.control == Control::Catalog
                     && s.has_more
                     && s.cards
@@ -739,7 +781,8 @@ pub fn key(ui: Ui, action: Action) {
 }
 
 pub fn title(ui: Ui) -> Option<String> {
-    ui.player
+    ui.playback
+        .player
         .vod
         .with(|v| v.as_ref().map(|(p, _)| p.title.clone()))
 }
@@ -752,7 +795,7 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
     let mut write = None;
     let mut finished = None;
     let mut series_complete = None;
-    ui.player.vod.update(|value| {
+    ui.playback.player.vod.update(|value| {
         let Some((p, _)) = value else { return };
         let progress =
             Progress::observed(position_ms, duration_ms.or(p.progress.duration_ms), ended);
@@ -813,7 +856,9 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         // The episode's end was saved: its series' card shows it, also
         // when Back from the next episode comes before that one saves.
         let mut details = p.details.clone();
-        ui.vod.update(|s| s.watched(&mut details, &p.key, true));
+        ui.screens
+            .vod
+            .update(|s| s.watched(&mut details, &p.key, true));
         let autoplay = crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE);
         let (key, season) = (next.key.clone(), next.season);
         // The screen never changes on its own (#187).
@@ -840,11 +885,12 @@ fn where_watched(ui: Ui, series: &Key) -> Watched {
     use crate::overlays::Overlay;
     let details = ui.top_overlay() == Some(Overlay::Vod)
         && ui
+            .screens
             .vod
             .with_untracked(|s| s.details.as_ref().is_some_and(|d| &d.item.key == series));
     if details {
         Watched::Details
-    } else if ui.mode.get_untracked() == crate::ViewMode::Fullscreen
+    } else if ui.chrome.mode.get_untracked() == crate::ViewMode::Fullscreen
         && !ui.overlay_open(Overlay::covers_video)
     {
         Watched::FullScreen
@@ -858,7 +904,8 @@ fn where_watched(ui: Ui, series: &Key) -> Watched {
 /// Play.
 fn select_next(ui: Ui, details: Details, key: &Key, season: u32, ready: bool) {
     let notice = ready.then(|| crate::i18n::key("Ready for the next episode"));
-    ui.vod
+    ui.screens
+        .vod
         .update(|s| s.select_next_episode(details, key.clone(), season, notice));
 }
 
@@ -867,7 +914,7 @@ fn select_next(ui: Ui, details: Details, key: &Key, season: u32, ready: bool) {
 /// else playback stops, its series' card and Continue watching resuming it.
 fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u32) {
     match watched {
-        Watched::FullScreen => ui.vod.update(|s| {
+        Watched::FullScreen => ui.screens.vod.update(|s| {
             s.reopen_for_next_episode(
                 details,
                 key,
@@ -892,7 +939,7 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
     let series = details.item.key.clone();
     // The viewer acting on the screen meanwhile (`play_key` and Back
     // advance its generation) leaves the next episode waiting.
-    let generation = ui.vod.with_untracked(|s| s.generation);
+    let generation = ui.screens.vod.with_untracked(|s| s.generation);
     crate::tasks::spawn_in_app(async move {
         let owner = crate::runtime_owner::runtime();
         let allowed = owner
@@ -905,13 +952,14 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
                 .is_ok();
         // Something else plays (Stop included): the viewer's.
         if !ui
+            .playback
             .player
             .vod
             .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.key == ended))
         {
             return;
         }
-        let allowed = allowed && ui.vod.with_untracked(|s| s.generation) == generation;
+        let allowed = allowed && ui.screens.vod.with_untracked(|s| s.generation) == generation;
         match where_watched(ui, &series) {
             Watched::FullScreen if allowed => {
                 play_authorized(ui, details, key, false, true, Some(ended))
@@ -926,7 +974,7 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
 }
 
 fn next(ui: Ui) {
-    let target = ui.vod.with_untracked(|s| {
+    let target = ui.screens.vod.with_untracked(|s| {
         s.details.as_ref().and_then(|d| {
             s.episode
                 .as_ref()
@@ -950,14 +998,14 @@ fn button(
         ui,
         size,
         label,
-        move || ui.vod.with(|s| s.control == control),
+        move || ui.screens.vod.with(|s| s.control == control),
         move || {
-            ui.vod.update(|s| s.control = control);
+            ui.screens.vod.update(|s| s.control = control);
             callback();
         },
     )
     .accessibility_state(move || AccessibilityState {
-        selected: ui.vod.with(|s| s.control == control),
+        selected: ui.screens.vod.with(|s| s.control == control),
         ..Default::default()
     })
 }
@@ -998,8 +1046,8 @@ fn card_label(card: &iptv_core::vod::Card, kind: bool) -> String {
 }
 
 fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
-    let card = move || ui.vod.with(|s| s.cards.get(at.index()).cloned());
-    let mixed = move || ui.vod.with(|s| s.is_shelf());
+    let card = move || ui.screens.vod.with(|s| s.cards.get(at.index()).cloned());
+    let mixed = move || ui.screens.vod.with(|s| s.is_shelf());
     ui_kit::button(
         ui,
         size,
@@ -1011,7 +1059,8 @@ fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         },
         move || {
             card().is_some_and(|c| {
-                ui.vod
+                ui.screens
+                    .vod
                     .with(|s| s.control == Control::Catalog && s.focused.as_ref() == Some(&c.key))
             })
         },
@@ -1023,7 +1072,8 @@ fn card_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     )
     .test_id("vod-title")
     .accessibility_state(move || AccessibilityState {
-        selected: card().is_some_and(|c| ui.vod.with(|s| s.focused.as_ref() == Some(&c.key))),
+        selected: card()
+            .is_some_and(|c| ui.screens.vod.with(|s| s.focused.as_ref() == Some(&c.key))),
         ..Default::default()
     })
 }
@@ -1045,18 +1095,23 @@ impl StartingAt for VirtualList {
 fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     effect(move || {
-        if let Some(at) = ui.vod.with(|s| s.focused_index()) {
+        if let Some(at) = ui.screens.vod.with(|s| s.focused_index()) {
             rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
         }
     });
     let empty = when(
         move || {
-            ui.vod
+            ui.screens
+                .vod
                 .with(|s| s.cards.is_empty() && !s.busy && s.error.is_none())
         },
         move || {
             ui_kit::body(size, move || {
-                if ui.vod.with(|s| s.shelf == Some(Shelf::ContinueWatching)) {
+                if ui
+                    .screens
+                    .vod
+                    .with(|s| s.shelf == Some(Shelf::ContinueWatching))
+                {
                     tr("Nothing to continue yet. Titles you start on any playlist appear here.")
                 } else {
                     tr(
@@ -1067,14 +1122,14 @@ fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
         },
     );
     let titles = virtual_list(
-        move || ui.vod.with(|s| s.cards.len()),
+        move || ui.screens.vod.with(|s| s.cards.len()),
         move |at| card_row(ui, size, at),
     )
-    .starting_at(ui.vod.with_untracked(|s| s.focused_index()))
+    .starting_at(ui.screens.vod.with_untracked(|s| s.focused_index()))
     .element_ref(&rows)
     .flex_1();
     let more = when(
-        move || ui.vod.with(|s| s.has_more),
+        move || ui.screens.vod.with(|s| s.has_more),
         move || {
             ui_kit::button(
                 ui,
@@ -1082,7 +1137,7 @@ fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
                 tr("Load more"),
                 || false,
                 move || {
-                    if !ui.vod.with_untracked(|s| s.busy) {
+                    if !ui.screens.vod.with_untracked(|s| s.busy) {
                         reload(ui, true);
                     }
                 },
@@ -1093,7 +1148,11 @@ fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
     // titles above are a tap or click away (Up on the first title with a
     // remote). The focus stays where it is.
     let previous = when(
-        move || ui.vod.with(|s| s.has_previous() && s.details.is_none()),
+        move || {
+            ui.screens
+                .vod
+                .with(|s| s.has_previous() && s.details.is_none())
+        },
         move || {
             ui_kit::button(
                 ui,
@@ -1101,7 +1160,7 @@ fn shelf_catalog(ui: Ui, size: Scale) -> impl IntoElement {
                 tr("Load previous"),
                 || false,
                 move || {
-                    if !ui.vod.with_untracked(|s| s.busy) {
+                    if !ui.screens.vod.with_untracked(|s| s.busy) {
                         load_previous(ui, false);
                     }
                 },
@@ -1127,7 +1186,7 @@ fn episode_label(ep: &iptv_core::vod::Episode) -> String {
 }
 fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     let ep = move || {
-        ui.vod.with(|s| {
+        ui.screens.vod.with(|s| {
             s.details
                 .as_ref()
                 .and_then(|d| {
@@ -1143,10 +1202,10 @@ fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         ui,
         size,
         move || ep().as_ref().map(episode_label).unwrap_or_default(),
-        move || ep().is_some_and(|e| ui.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
+        move || ep().is_some_and(|e| ui.screens.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
         move || {
             if let Some(ep) = ep() {
-                ui.vod.update(|s| s.select_episode(ep.key));
+                ui.screens.vod.update(|s| s.select_episode(ep.key));
                 play(ui, false);
             }
         },
@@ -1157,14 +1216,14 @@ fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     .justify_end()
     .test_id("vod-episode")
     .accessibility_state(move || AccessibilityState {
-        selected: ep().is_some_and(|e| ui.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
+        selected: ep().is_some_and(|e| ui.screens.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
         ..Default::default()
     })
 }
 fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     let chosen = move || {
-        ui.vod.with(|s| {
+        ui.screens.vod.with(|s| {
             s.details.as_ref().and_then(|d| {
                 d.episodes
                     .iter()
@@ -1186,14 +1245,15 @@ fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
             format!(
                 "{} {}",
                 tr("Season"),
-                ui.vod.with(|s| s.season.unwrap_or(1))
+                ui.screens.vod.with(|s| s.season.unwrap_or(1))
             )
         },
-        move || ui.vod.update(|s| s.cycle_season(1)),
+        move || ui.screens.vod.update(|s| s.cycle_season(1)),
     );
     let empty = when(
         move || {
-            ui.vod
+            ui.screens
+                .vod
                 .with(|s| s.details.as_ref().is_some_and(|d| d.episodes.is_empty()))
         },
         move || {
@@ -1205,7 +1265,7 @@ fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
     );
     let list = virtual_list(
         move || {
-            ui.vod.with(|s| {
+            ui.screens.vod.with(|s| {
                 s.details
                     .as_ref()
                     .map(|d| {
@@ -1234,14 +1294,14 @@ fn episodes(ui: Ui, size: Scale) -> impl IntoElement {
 fn play_label(ui: Ui) -> &'static str {
     // A series resumes only its chosen episode: after a finished episode the
     // next one plays from its start.
-    if ui.vod.with(|s| s.resumes()) {
+    if ui.screens.vod.with(|s| s.resumes()) {
         tr("Resume")
     } else {
         tr("Play")
     }
 }
 fn has_next(ui: Ui) -> bool {
-    ui.vod.with(|s| {
+    ui.screens.vod.with(|s| {
         s.details.as_ref().is_some_and(|d| {
             s.episode
                 .as_ref()
@@ -1250,7 +1310,7 @@ fn has_next(ui: Ui) -> bool {
     })
 }
 fn block_label(ui: Ui) -> &'static str {
-    let blocked = ui.vod.with(|s| {
+    let blocked = ui.screens.vod.with(|s| {
         s.details.as_ref().is_some_and(|d| {
             crate::runtime_owner::runtime()
                 .parental_explicitly_blocked(&Runtime::vod_target(&d.item.key))
@@ -1291,7 +1351,7 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
         .flex_wrap()
         .gap(move || size.px(12.0))
         .child(when(
-            move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+            move || ui.screens.vod.with(|s| s.retry.is_some() && !s.busy),
             move || {
                 button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
                     .test_id("vod-retry")
@@ -1309,7 +1369,7 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
         ));
     let seasons = when(
         move || {
-            ui.vod.with(|s| {
+            ui.screens.vod.with(|s| {
                 s.details
                     .as_ref()
                     .is_some_and(|d| d.item.key.kind == Kind::Series)
@@ -1319,7 +1379,8 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
             page.control(
                 view().h(move || size.px(260.0)).child(episodes(ui, size)),
                 move || {
-                    ui.vod
+                    ui.screens
+                        .vod
                         .with(|s| matches!(s.control, Control::Seasons | Control::Episodes))
                 },
             )
@@ -1331,7 +1392,7 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
             .gap(move || size.px(12.0))
             .child(browser::hero(ui, size).h(move || px(window().height.0 * 0.75)))
             .child(page.control(actions, move || {
-                ui.vod.with(|s| {
+                ui.screens.vod.with(|s| {
                     matches!(
                         s.control,
                         Control::Retry
@@ -1346,7 +1407,7 @@ fn details(ui: Ui, size: Scale) -> impl IntoElement {
     )
 }
 fn status_message(ui: Ui) -> String {
-    ui.vod.with(|s| {
+    ui.screens.vod.with(|s| {
         if let Some(e) = &s.error {
             tr(e).to_owned()
         } else if s.busy {
@@ -1395,7 +1456,7 @@ fn library_screen(ui: Ui, size: Scale) -> View {
         ui,
         size,
         move || {
-            ui.vod.with(|s| match s.shelf {
+            ui.screens.vod.with(|s| match s.shelf {
                 Some(Shelf::ContinueWatching) => tr("Continue watching"),
                 Some(Shelf::RecentlyAdded) => tr("Recently added"),
                 None if s.query.kind == Kind::Series => tr("Shows"),
@@ -1405,7 +1466,7 @@ fn library_screen(ui: Ui, size: Scale) -> View {
         close,
     );
     let hint = ui_kit::caption(size, move || {
-        ui.vod.with(|s| match s.shelf {
+        ui.screens.vod.with(|s| match s.shelf {
                     Some(_) if s.details.is_some() => tr(
                         "Choose a title, then play or resume. Left/Right changes controls; Up/Down browses titles and episodes.",
                     ),
@@ -1423,13 +1484,13 @@ fn library_screen(ui: Ui, size: Scale) -> View {
     // Shown with a failed operation: OK, a tap or a click runs that
     // same operation again (see `retry`).
     let retry_button = when(
-        move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+        move || ui.screens.vod.with(|s| s.retry.is_some() && !s.busy),
         move || {
             button(ui, size, Control::Retry, tr("Retry"), move || retry(ui)).test_id("vod-retry")
         },
     );
     let error = ui_kit::body(size, move || {
-        ui.vod.with(|s| {
+        ui.screens.vod.with(|s| {
             s.error
                 .as_ref()
                 .map(|e| tr(e).to_owned())
@@ -1437,7 +1498,7 @@ fn library_screen(ui: Ui, size: Scale) -> View {
         })
     });
     let notice = ui_kit::caption(size, move || {
-        ui.vod.with(|s| {
+        ui.screens.vod.with(|s| {
             s.notice
                 .as_ref()
                 .map(|e| tr(e).to_owned())
@@ -1445,14 +1506,14 @@ fn library_screen(ui: Ui, size: Scale) -> View {
         })
     });
     let busy = ui_kit::caption(size, move || {
-        if ui.vod.with(|s| s.busy) {
+        if ui.screens.vod.with(|s| s.busy) {
             tr("Loading…")
         } else {
             ""
         }
     });
     let content = when(
-        move || ui.vod.with(|s| s.details.is_some()),
+        move || ui.screens.vod.with(|s| s.details.is_some()),
         move || details(ui, size),
     )
     .otherwise(move || shelf_catalog(ui, size));
@@ -1475,12 +1536,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         move || is_open(ui),
         move || {
             when(
-                move || ui.vod.with(|s| !s.is_shelf() && s.details.is_none()),
+                move || {
+                    ui.screens
+                        .vod
+                        .with(|s| !s.is_shelf() && s.details.is_none())
+                },
                 move || browser::screen(ui, size),
             )
             .otherwise(move || {
                 when(
-                    move || ui.vod.with(|s| s.details.is_some()),
+                    move || ui.screens.vod.with(|s| s.details.is_some()),
                     move || detail_screen(ui, size),
                 )
                 .otherwise(move || library_screen(ui, size))

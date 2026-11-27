@@ -106,8 +106,8 @@ pub(crate) struct Preview {
 /// applies to: not a replay, a recording or an on-demand title, and not
 /// multiview's tiles.
 pub(crate) fn live(ui: Ui) -> bool {
-    ui.mode.get() == ViewMode::Fullscreen
-        && ui.playing.get().is_some()
+    ui.chrome.mode.get() == ViewMode::Fullscreen
+        && ui.playback.playing.get().is_some()
         && changes_channel(ui)
         && !crate::multiview::is_open(ui)
 }
@@ -115,7 +115,7 @@ pub(crate) fn live(ui: Ui) -> bool {
 /// Whether what plays is a live channel, which Ch± changes (not a replay
 /// or an on-demand title): the video then has the channel actions.
 pub(crate) fn changes_channel(ui: Ui) -> bool {
-    ui.playback.get() == Playback::Live && !crate::on_demand::active(ui)
+    ui.playback.playback.get() == Playback::Live && !crate::on_demand::active(ui)
 }
 
 /// Whether a swipe on the video may change channel now: live video with
@@ -143,11 +143,11 @@ pub(crate) fn zap(ui: Ui, direction: Direction) {
     // The play bar stays usable over its popups (a chooser, the program's
     // details), which are about the channel it leaves: they go, so the
     // player owns input again and the pending zap tunes.
-    if ui.chooser.with_untracked(Option::is_some) {
+    if ui.screens.chooser.with_untracked(Option::is_some) {
         crate::chooser::close(ui);
     }
-    if ui.description.with_untracked(Option::is_some) {
-        ui.description.set(None);
+    if ui.screens.description.with_untracked(Option::is_some) {
+        ui.screens.description.set(None);
     }
     crate::browse_playback::zap_by(ui, to, true);
     if untracked(|| crate::play_bar::shows(ui)) {
@@ -162,7 +162,7 @@ pub(crate) fn zap(ui: Ui, direction: Direction) {
 /// it (a burst of swipes or presses skips channels).
 fn touched(ui: Ui) {
     crate::browse_playback::activity(ui);
-    ui.input.set(ui.last_press.get_untracked());
+    ui.chrome.input.set(ui.chrome.last_press.get_untracked());
 }
 
 /// The touches on `video` (the full-screen tap catcher): the first
@@ -179,8 +179,8 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, gesture: Gesture) -> E {
         if !takes_swipes(ui) {
             untracked(|| {
                 swipe.with(Swipe::reset);
-                if ui.swipe.get_untracked().is_some() {
-                    ui.swipe.set(None);
+                if ui.playback.swipe.get_untracked().is_some() {
+                    ui.playback.swipe.set(None);
                 }
             });
         }
@@ -190,8 +190,11 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, gesture: Gesture) -> E {
     cleanup(move || {
         swipe.with(Swipe::reset);
         swiped.with(|swiped| *swiped = false);
-        if untracked(|| ui.swipe.try_get()).flatten().is_some() {
-            ui.swipe.set(None);
+        if untracked(|| ui.playback.swipe.try_get())
+            .flatten()
+            .is_some()
+        {
+            ui.playback.swipe.set(None);
         }
     });
     video.on_touch(move |e: &nsh_core::TouchEvent| {
@@ -264,20 +267,20 @@ fn apply(ui: Ui, outcome: Outcome, y: f32) {
                         committing,
                     }
                 });
-            if ui.swipe.get_untracked() != preview {
-                ui.swipe.set(preview);
+            if ui.playback.swipe.get_untracked() != preview {
+                ui.playback.swipe.set(preview);
             }
         }
         Outcome::Commit(direction) => {
             log::info!("iptv swipe: {direction:?}");
-            ui.swipe.set(None);
+            ui.playback.swipe.set(None);
             touched(ui);
             haptic(Haptic::Impact(HapticImpact::Light));
             zap(ui, direction);
         }
         Outcome::Cancel => {
             log::info!("iptv swipe: cancelled");
-            ui.swipe.set(None);
+            ui.playback.swipe.set(None);
         }
     }
 }
@@ -365,7 +368,7 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
 pub(crate) fn layer(ui: Ui) -> impl IntoElement {
     // Only while the video takes swipes: one held as the video leaves full
     // screen (or a dialog opens over it) shows nothing until it ends.
-    let preview = computed(move || ui.swipe.get().filter(|_| takes_swipes(ui)));
+    let preview = computed(move || ui.playback.swipe.get().filter(|_| takes_swipes(ui)));
     when(
         move || preview.with(Option::is_some),
         move || {
@@ -408,7 +411,7 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
                                 let channel = channel();
                                 format!(
                                     "{}  {}",
-                                    crate::lists::number(ui, channel),
+                                    crate::lists::number(ui.guide, channel),
                                     channel_name(channel)
                                 )
                             })
@@ -423,7 +426,7 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
                                 ui.guide_data();
                                 let channel = channel();
                                 let schedule = crate::runtime_owner::schedule();
-                                let now = ui.focus.with(|f| f.now);
+                                let now = ui.guide.focus.with(|f| f.now);
                                 crate::listing_labels::listing(
                                     schedule.listing(channel, schedule.program_at(channel, now)),
                                 )

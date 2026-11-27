@@ -33,7 +33,7 @@ pub(super) fn act(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: 
     match route(key, press) {
         // The platform's Back steps back; it is still a key, so the app
         // leaves touch or pointer mode (a TV hides its visible Back again).
-        Route::Platform => ui.input.set(crate::Input::Keys),
+        Route::Platform => ui.chrome.input.set(crate::Input::Keys),
         Route::Apply => super::apply(ui, key, press, action, repeat),
         Route::ApplyAndSwallow => {
             arm_back_guard(ui);
@@ -50,13 +50,13 @@ pub(super) fn swallow_release(ui: Ui) {
 
 fn arm_back_guard(ui: Ui) {
     let now = ui.now_ms();
-    ui.back_guard.update(|g| g.long_back(now));
+    ui.chrome.back_guard.update(|g| g.long_back(now));
     let wait = Duration::from_millis(BackGuard::TIMEOUT_MS);
     let _task = set_timeout(wait, move || {
-        if ui.back_guard.with_untracked(BackGuard::armed) {
+        if ui.chrome.back_guard.with_untracked(BackGuard::armed) {
             let now = ui.now_ms();
             let mut expired = false;
-            ui.back_guard.update(|g| expired = g.expire(now));
+            ui.chrome.back_guard.update(|g| expired = g.expire(now));
             if expired {
                 log::info!("iptv long back: no release came");
             }
@@ -67,12 +67,12 @@ fn arm_back_guard(ui: Ui) {
 /// The platform's Back (`on_back_press`): `true` when it is the release of
 /// a Long Back that acted, which takes no step back.
 pub(crate) fn swallow_back(ui: Ui) -> bool {
-    if !ui.back_guard.with_untracked(BackGuard::armed) {
+    if !ui.chrome.back_guard.with_untracked(BackGuard::armed) {
         return false;
     }
     let now = ui.now_ms();
     let mut swallow = false;
-    ui.back_guard.update(|g| swallow = g.take(now));
+    ui.chrome.back_guard.update(|g| swallow = g.take(now));
     if swallow {
         log::info!("iptv back: released after a long back; no step back");
     }

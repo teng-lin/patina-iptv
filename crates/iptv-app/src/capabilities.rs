@@ -18,7 +18,7 @@ pub fn record_now() -> RecordNow {
 pub fn recordings_library(ui: Ui) -> bool {
     crate::host::HAS_WORKERS
         && iptv_presentation::capabilities::recordings_library(crate::device::host())
-            .shown(ui.recordings.with(|s| !s.jobs.is_empty()))
+            .shown(ui.screens.recordings.with(|s| !s.jobs.is_empty()))
 }
 
 /// [`recordings_library`], without subscribing.

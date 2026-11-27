@@ -32,8 +32,10 @@ pub(crate) fn remap(
     if !matches!(ctx, Context::Player | Context::Controls) {
         return action;
     }
-    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
-        || crate::on_demand::active(*ui);
+    let replay = matches!(
+        ui.playback.playback.get_untracked(),
+        Playback::CatchUp { .. }
+    ) || crate::on_demand::active(*ui);
     let action = if replay && ctx == Context::Player {
         seek_key(seek_scheme(), key, action)
     } else {
@@ -49,8 +51,10 @@ pub(crate) fn remap(
 /// Whether `key` seeks now (in a replay, under the panels' Player context):
 /// it then has no long press, so holding it repeats the step.
 pub(crate) fn seeks(ui: &Ui, ctx: Context, key: RemoteKey) -> bool {
-    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
-        || crate::on_demand::active(*ui);
+    let replay = matches!(
+        ui.playback.playback.get_untracked(),
+        Playback::CatchUp { .. }
+    ) || crate::on_demand::active(*ui);
     replay && ctx == Context::Player && seek_arrows(seek_scheme()).contains(&key)
 }
 
@@ -61,16 +65,18 @@ fn seek_scheme() -> &'static str {
 /// Seeking in a replay: whether OK plays and pauses (the arrows seek, as
 /// in a media player) instead of showing the card.
 fn ok_pauses(ui: Ui) -> bool {
-    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
-        || crate::on_demand::active(ui);
+    let replay = matches!(
+        ui.playback.playback.get_untracked(),
+        Playback::CatchUp { .. }
+    ) || crate::on_demand::active(ui);
     replay && !seek_arrows(seek_scheme()).is_empty()
 }
 
 /// The player's own actions (full screen and its panels); false for any
 /// other. `repeat`: the key's auto-repeat.
 pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) -> bool {
-    let fullscreen = ui.mode.get() == ViewMode::Fullscreen;
-    let buttons = fullscreen && ui.panels.with(|p| p.captures_input());
+    let fullscreen = ui.chrome.mode.get() == ViewMode::Fullscreen;
+    let buttons = fullscreen && ui.playback.panels.with(|p| p.captures_input());
     let seek = |step: i32| {
         crate::seek::key(ui, step, repeat);
     };
@@ -172,9 +178,9 @@ pub(crate) fn stopped_for_external(ui: Ui, target: &iptv_core::parental::Target)
 
 fn stop_to_guide(ui: Ui, stop: impl FnOnce(Ui)) {
     crate::multiview::close(ui);
-    ui.playing.set(None);
+    ui.playback.playing.set(None);
     stop(ui);
-    ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+    ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
 }
 
 /// Channel up/down: switches playback and keeps the focus on it. Wraps
@@ -191,19 +197,20 @@ pub(crate) fn zap(ui: Ui, step: isize) {
 /// The channel [`zap`] by `step` goes to, if any: also what a swipe over
 /// the video shows before it is released (`touch_zap.rs`).
 pub(crate) fn zap_target(ui: Ui, step: isize) -> Option<usize> {
-    let list = ui.list.get();
-    let playing = if ui.mode.get_untracked() != ViewMode::Fullscreen {
-        crate::lists::focused_channel(ui)
+    let list = ui.guide.list.get();
+    let playing = if ui.chrome.mode.get_untracked() != ViewMode::Fullscreen {
+        crate::lists::focused_channel(ui.guide)
     } else {
-        ui.pending_zap
+        ui.playback
+            .pending_zap
             .get_untracked()
             .and_then(|t| crate::favorites::channel_of(&t.key))
-            .or(ui.playing.get())
+            .or(ui.playback.playing.get())
     };
     let from = ZapOrigin::from_channel(
         playing,
         |channel| list.row_of(channel),
-        || ui.focus.with(|f| f.channel),
+        || ui.guide.focus.with(|f| f.channel),
     );
     let catalog = crate::runtime_owner::schedule();
     zap_from_list(&*catalog, &list, from, step, |channel| {
@@ -216,10 +223,10 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
     ui.update_panels(|p, now| p.touch(now));
     match action {
         QuickAction::Guide => {
-            if let Some(ch) = ui.playing.get() {
+            if let Some(ch) = ui.playback.playing.get() {
                 crate::lists::show_channel(ui, ch);
             }
-            ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+            ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
         }
         QuickAction::History => crate::chooser::open(ui, crate::chooser::Kind::History),
         QuickAction::Channels => crate::channels_view::open(ui, ListMode::Overlay),
@@ -258,7 +265,7 @@ pub fn press_control(ui: Ui, control: Control) {
         Control::AudioOffset => crate::chooser::open(ui, Kind::AudioDelay),
         Control::PictureInPicture => crate::pip::enter(ui),
         Control::Favorite => {
-            if let Some(ch) = ui.playing.get() {
+            if let Some(ch) = ui.playback.playing.get() {
                 crate::favorites::toggle(ui, ch);
             }
         }

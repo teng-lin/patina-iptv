@@ -54,31 +54,31 @@ use crate::{Ui, ViewMode};
 
 /// A channel plays full screen: what the window would show.
 pub(crate) fn playing(ui: Ui) -> bool {
-    ui.mode.get() == ViewMode::Fullscreen && ui.playing.get().is_some()
+    ui.chrome.mode.get() == ViewMode::Fullscreen && ui.playback.playing.get().is_some()
 }
 
 /// Whether the player shows in the desktops' window of its own now
 /// (reading subscribes).
 pub fn in_window(ui: Ui) -> bool {
-    ui.pip.with(|p| p.in_window())
+    ui.playback.pip.with(|p| p.in_window())
 }
 
 /// Whether Android's window is the app's own: it then shows only the
 /// video, filling it.
 pub fn fills_app(ui: Ui) -> bool {
-    ui.pip.with(|p| p.active && !p.separate)
+    ui.playback.pip.with(|p| p.active && !p.separate)
 }
 
 /// Whether the app's layers over the video show: not in Android's window.
 pub fn ui_shown(ui: Ui) -> bool {
-    ui.pip.with(|p| p.ui_shown())
+    ui.playback.pip.with(|p| p.ui_shown())
 }
 
 /// Whether this device has the window at all (reading subscribes): the
 /// play bar shows its button only then, and the control strip once the
 /// host reported (`player_panels::offered`).
 pub fn supported(ui: Ui) -> bool {
-    ui.pip.with(|p| p.supported)
+    ui.playback.pip.with(|p| p.supported)
 }
 
 /// Whether the control strip's button can open the window now.
@@ -87,7 +87,7 @@ pub fn can_enter(ui: Ui) -> bool {
         return false;
     }
     let playing = playing(ui);
-    ui.pip.with(|p| p.can_enter(playing))
+    ui.playback.pip.with(|p| p.can_enter(playing))
 }
 
 /// The desktops: their window can (Android's host reports its own), and
@@ -97,13 +97,13 @@ pub fn bind(ui: Ui) {
         // Android reports through its persistent player. Other hosts have no
         // native PiP implementation to acknowledge availability later.
         if !crate::host::ANDROID {
-            ui.pip.update(|p| {
+            ui.playback.pip.update(|p| {
                 p.report(false, false, false);
             });
         }
         return;
     }
-    ui.pip.update(|p| {
+    ui.playback.pip.update(|p| {
         p.separate = true;
         p.report(true, false, false);
     });
@@ -111,9 +111,9 @@ pub fn bind(ui: Ui) {
     // leaves to its tile.
     let was = std::cell::Cell::new(false);
     effect(move || {
-        let gone = ui.playing.get().is_none() || crate::multiview::is_open(ui);
+        let gone = ui.playback.playing.get().is_none() || crate::multiview::is_open(ui);
         let became = !was.replace(gone) && gone;
-        if became && ui.pip.with_untracked(|p| p.in_window()) {
+        if became && ui.playback.pip.with_untracked(|p| p.in_window()) {
             log::info!("iptv pip: nothing for the window to show");
             untracked(|| report(ui, false));
         }
@@ -129,9 +129,10 @@ pub fn enter(ui: Ui) {
     }
     let playing = untracked(|| playing(ui));
     let mut asked = false;
-    ui.pip.update(|p| asked = p.request(playing));
+    ui.playback.pip.update(|p| asked = p.request(playing));
     if !asked {
         if let Some(reason) = ui
+            .playback
             .pip
             .with_untracked(|p| iptv_presentation::capabilities::pip(p, playing).reason())
         {
@@ -148,17 +149,17 @@ pub fn enter(ui: Ui) {
 /// The desktops' window closes: back to the app (the video full screen in
 /// the main window) or closed (playback stops). False when none is open.
 pub fn exit(ui: Ui, how: Exit) -> bool {
-    if !ui.pip.with_untracked(|p| p.in_window()) {
+    if !ui.playback.pip.with_untracked(|p| p.in_window()) {
         return false;
     }
     log::info!("iptv pip: {how:?}");
-    if ui.player_surface != 0 {
+    if ui.playback.player_surface != 0 {
         // Auxiliary PiP is a presentation of its own player window. It
         // never returns to, focuses or stops the main player's surface.
         batch(|| {
             report(ui, false);
             if how == Exit::Close {
-                ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+                ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
             }
         });
         return true;
@@ -166,7 +167,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
     report(ui, false);
     match how {
         Exit::BackToApp => {
-            ui.mode.apply(crate::mode::Action::PipBackToApp);
+            ui.chrome.mode.apply(crate::mode::Action::PipBackToApp);
             crate::desktop::focus_main();
         }
         Exit::Close => crate::player_keys::stop_playback(ui),
@@ -190,6 +191,7 @@ pub fn prop(ui: Ui, surface: usize) -> Option<iptv_player_mpv::PipProps> {
     let on_leave = OnLeave::from_key(crate::settings::choice(PIP_ON_LEAVE));
     let playing = playing(ui);
     let (auto, enter, window) = ui
+        .playback
         .pip
         .with(|p| (p.auto_enter(on_leave, playing), p.requests, p.in_window()));
     Some(iptv_player_mpv::PipProps {
@@ -216,15 +218,15 @@ pub(crate) fn offers_on_leave(host: iptv_core::capabilities::Host) -> bool {
 
 /// The host's `pip` event.
 pub fn on_state(ui: Ui, supported: bool, tv: bool, active: bool) {
-    let mut next = ui.pip.get_untracked();
+    let mut next = ui.playback.pip.get_untracked();
     let change = next.report(supported, tv, active);
-    if next == ui.pip.get_untracked() {
+    if next == ui.playback.pip.get_untracked() {
         return;
     }
     // Before the signal changes: settings rows that read it then see the
     // setting `player.pip_on_leave` come or go with the window.
     set_supported(next.supported);
-    ui.pip.set(next);
+    ui.playback.pip.set(next);
     match change {
         Change::Entered => entered(ui),
         Change::Left => log::info!("iptv pip: left"),
@@ -235,12 +237,13 @@ pub fn on_state(ui: Ui, supported: bool, tv: bool, active: bool) {
 /// The window opened: one stream, the full-screen player's.
 fn entered(ui: Ui) {
     log::info!("iptv pip: entered");
-    ui.panels.update(|p| p.hide());
-    ui.play_bar
+    ui.playback.panels.update(|p| p.hide());
+    ui.playback
+        .play_bar
         .update(iptv_presentation::play_bar::PlayBar::hide);
     crate::chooser::close(ui);
     crate::menu_view::close(ui);
-    if ui.channels.with_untracked(Option::is_some) {
+    if ui.playback.channels.with_untracked(Option::is_some) {
         crate::channels_view::close(ui);
     }
     // The grid leaves to its active tile; a tile watched full screen ends
