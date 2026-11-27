@@ -8,7 +8,7 @@ pub(crate) mod pending;
 mod selection;
 pub mod state;
 mod trust;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, all(test, any(target_os = "linux", target_os = "macos"))))]
 mod verifier;
 #[cfg(windows)]
 mod windows;
