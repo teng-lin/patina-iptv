@@ -98,6 +98,31 @@ artifact hash and device/OS/configuration. Tests in `test-disposable-avd.py` use
 small generated image files; they verify path/ownership guards and interruption
 cleanup without starting an emulator.
 
+## Android casting platform test
+
+The optional casting instrumentation test uses a fresh copy of the handheld
+profile. It exercises the Android Keystore pairing store with synthetic
+records, LAN identity fencing, the Wi-Fi multicast lock, and the foreground
+service and media controls through Home, screen-off, and session replacement.
+The test uses synthetic playback state and performs no receiver discovery or
+connection.
+
+After preparing the native validation library with `tools/sync-host.sh`,
+build the app and test APKs together.
+
+```sh
+(cd hosts/android && IPTV_VALIDATION_APP_ID=com.hantekllc.iptvrs.validation \
+  ./gradlew assembleDebug assembleDebugAndroidTest)
+python3 tools/ci/disposable-avd.py "$HOME/.android/avd/tab36.avd" \
+  hosts/android/app/build/outputs/apk/debug/app-debug.apk \
+  --cast-platform-test hosts/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+```
+
+The runner verifies both APKs before launching the disposable profile. The
+run directory records the two APK hashes and the instrumentation result. For
+an app APK built with JaCoCo Android test coverage enabled, pass
+`--cast-platform-coverage` to save the execution data in that run directory.
+
 ## Physical-device acceptance
 
 Run the affected journey manually on a test tablet or TV with synthetic data.

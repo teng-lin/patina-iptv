@@ -38,6 +38,7 @@ android {
         applicationId = "com.hantekllc.iptvrs"
         minSdk = 26
         targetSdk = 36
+        testInstrumentationRunner = "com.hantekllc.iptvrs.host.CastPlatformInstrumentation"
         versionCode = System.getenv("IPTV_ANDROID_VERSION_CODE")?.toInt()
             ?: System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
         versionName = System.getenv("VERSION")

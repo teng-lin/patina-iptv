@@ -50,6 +50,20 @@ class Profiles(unittest.TestCase):
             with self.assertRaises(ValueError):
                 a.validate_apk(package, debug, release)
 
+    def test_cast_test_apk_targets_only_the_disposable_app(self):
+        valid = f"""
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{a.CAST_TEST_PACKAGE}">
+            <instrumentation android:name="{a.CAST_TEST_RUNNER}" android:targetPackage="{a.PACKAGE}" />
+        </manifest>"""
+        a.validate_cast_test(valid)
+        for manifest in (
+            valid.replace(f'package="{a.CAST_TEST_PACKAGE}"', 'package="other.test"'),
+            valid.replace(a.CAST_TEST_RUNNER, "OtherRunner"),
+            valid.replace(f'targetPackage="{a.PACKAGE}"', f'targetPackage="{a.RELEASE_PACKAGE}"'),
+        ):
+            with self.assertRaises(ValueError):
+                a.validate_cast_test(manifest)
+
     def test_release_startup_markers_cannot_replace_process_and_foreground_checks(self):
         component = a.RELEASE_PACKAGE + "/.host.TvActivity"
         with patch.dict(RELEASE["AVD"], {"adb": lambda *args: ""}):
