@@ -47,6 +47,9 @@ struct Client {
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(5);
 const DEFAULT_PORT: u16 = 49152;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+// Give the sender's bounded setup time to surface a timing diagnostic before
+// treating a missing HTTP request as a relay reachability problem.
+const AIRPLAY_FETCH_TIMEOUT: Duration = Duration::from_secs(35);
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn configured_relay_port(value: Option<&OsStr>) -> Result<u16, Error> {
@@ -121,15 +124,13 @@ impl Sender {
                 }
                 #[cfg(target_os = "linux")]
                 if let Some(config) = &self.airplay {
-                    match config.configure(Cast::builder()).await {
-                        Ok(builder) => {
-                            return Ok(Client {
-                                cast: builder.build().map_err(|error| map_error(&error))?,
-                                airplay: true,
-                            });
-                        }
-                        Err(error) => log::debug!("AirPlay sender configuration: {error:?}"),
-                    }
+                    return Ok(Client {
+                        cast: config
+                            .configure(Cast::builder())
+                            .build()
+                            .map_err(|error| map_error(&error))?,
+                        airplay: true,
+                    });
                 }
                 Ok(Client {
                     cast: Cast::builder().build().map_err(|error| map_error(&error))?,
@@ -177,7 +178,15 @@ impl Port for Sender {
                 .filter_map(|route| {
                     let protocol = match route.protocol().as_str() {
                         "googlecast" => NetworkProtocol::GoogleCast,
-                        "airplay" if client.airplay => NetworkProtocol::AirPlay,
+                        "airplay"
+                            if client.airplay
+                                && matches!(
+                                    route.availability(Feature::LoadVideoUrl),
+                                    Availability::Available | Availability::Unknown
+                                ) =>
+                        {
+                            NetworkProtocol::AirPlay
+                        }
                         _ => return None,
                     };
                     let id = route.id().as_str().to_owned();
@@ -199,6 +208,12 @@ impl Port for Sender {
         pairing_prompt: PairingPrompt,
     ) -> Task<'_, Box<dyn Prepared>> {
         Box::pin(async move {
+            #[cfg(target_os = "linux")]
+            if receiver.protocol == NetworkProtocol::AirPlay
+                && let Some(config) = &self.airplay
+            {
+                config.validate()?;
+            }
             let relay_port =
                 configured_relay_port(std::env::var_os("PATINA_CAST_RELAY_PORT").as_deref())?;
             #[cfg(feature = "test-support")]
@@ -237,14 +252,21 @@ impl Port for Sender {
                 connection.close().await;
                 return Err(Error::PairingIdentityChanged);
             }
-            let (mut listen, remote) = connection.control_addrs().ok_or(Error::Unavailable)?;
-            listen.set_port(relay_port);
+            let (local, remote) = connection.control_addrs().ok_or(Error::Unavailable)?;
+            let listen = match relay_listen_addr(local, relay_port) {
+                Ok(listen) => listen,
+                Err(error) => {
+                    connection.close().await;
+                    return Err(error);
+                }
+            };
             Ok(Box::new(Handoff {
                 ready: Some(Ready {
                     connection,
                     source,
                     listen,
                     remote,
+                    protocol: receiver.protocol,
                 }),
                 pending: None,
                 handle: Handle::current(),
@@ -254,11 +276,23 @@ impl Port for Sender {
     }
 }
 
+fn relay_listen_addr(mut local: SocketAddr, port: u16) -> Result<SocketAddr, Error> {
+    // An IPv6 interface zone belongs to the sender. The shared Media URL
+    // validator and the receiver cannot use a sender-local zone identifier.
+    if matches!(local, SocketAddr::V6(addr) if addr.scope_id() != 0 || addr.ip().is_unicast_link_local())
+    {
+        return Err(Error::AirPlayRelayAddress);
+    }
+    local.set_port(port);
+    Ok(local)
+}
+
 struct Ready {
     connection: Connection,
     source: PlaySource,
     listen: SocketAddr,
     remote: SocketAddr,
+    protocol: NetworkProtocol,
 }
 
 struct Pending {
@@ -342,6 +376,7 @@ impl Prepared for Handoff {
                 source,
                 listen,
                 remote,
+                protocol,
             } = self.ready.take().ok_or(Error::Unknown)?;
             // The old relay's listener is joined before the runtime calls load.
             let (relay, gate) = tokio::task::spawn_blocking(move || {
@@ -379,6 +414,11 @@ impl Prepared for Handoff {
                 &mut pending.gate,
                 &mut updates,
                 relay_port,
+                if protocol == NetworkProtocol::AirPlay {
+                    AIRPLAY_FETCH_TIMEOUT
+                } else {
+                    FETCH_TIMEOUT
+                },
                 self.guard.as_deref(),
             )
             .await;
@@ -447,10 +487,11 @@ async fn wait_for_request(
     gate: &mut ExternalAdmission,
     updates: &mut Updates,
     relay_port: u16,
+    budget: Duration,
     guard: Option<&(dyn Fn() -> bool + Send + Sync)>,
 ) -> Result<(), Error> {
     let no_request = Error::NoRequest { relay_port };
-    let deadline = Instant::now() + FETCH_TIMEOUT;
+    let deadline = Instant::now() + budget;
     tokio::select! {
         result = timeout_at(deadline, gate.connected()) => {
             if result == Ok(true) { Ok(()) } else { Err(no_request) }

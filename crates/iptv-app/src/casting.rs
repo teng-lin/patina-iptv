@@ -432,7 +432,7 @@ fn pending_local_current(ui: Ui) -> bool {
         .get_untracked()
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
-fn finish_pending_stop(ui: Ui) {
+pub(crate) fn finish_pending_stop(ui: Ui) {
     let stop_requested = pending_stop_current(ui);
     ui.cast_stop_pending.set(None);
     let local = pending_local_current(ui);
@@ -471,6 +471,12 @@ pub(crate) fn report(error: Error) {
             "AirPlay timing did not arrive. Allow UDP port {port} from the receiver.",
             &[("port", port.into())],
         )),
+        Error::AirPlayRelayAddress => {
+            notify(tr("Patina cannot relay through a link-local IPv6 address."))
+        }
+        Error::InvalidAirPlayTimingPort => {
+            notify(tr("Choose an AirPlay UDP timing port from 1 to 65535."))
+        }
         Error::PairingRejected => notify(tr(
             "AirPlay pairing was denied or the code expired. Try again.",
         )),

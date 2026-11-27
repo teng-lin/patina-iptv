@@ -25,24 +25,25 @@ impl Configuration {
         })
     }
 
-    pub(super) async fn configure(&self, builder: CastBuilder) -> Result<CastBuilder, Error> {
-        let port = timing_port(self.timing_port.as_deref())?;
-        let builder = builder.airplay_timing_port(port);
+    pub(super) fn configure(&self, builder: CastBuilder) -> CastBuilder {
+        // The timing configuration is checked when an AirPlay route is chosen
+        // so a bad value cannot prevent Chromecast discovery.
+        let builder = builder
+            .airplay_timing_port(timing_port(self.timing_port.as_deref()).unwrap_or_default());
         #[cfg(not(feature = "test-support"))]
         {
             use crate::host::native::credential_key::CastStore;
-            let directory = self.directory.clone();
-            let store = tokio::task::spawn_blocking(move || CastStore::open(&directory))
-                .await
-                .map_err(|_| Error::PairingStorage)?
-                .map_err(|_| Error::PairingStorage)?;
-            Ok(builder.credential_store(store))
+            builder.credential_store(CastStore::new(&self.directory))
         }
         #[cfg(feature = "test-support")]
         {
             let _ = &self.directory;
-            Ok(builder)
+            builder
         }
+    }
+
+    pub(super) fn validate(&self) -> Result<(), Error> {
+        timing_port(self.timing_port.as_deref()).map(drop)
     }
 }
 
@@ -52,7 +53,7 @@ fn timing_port(value: Option<&OsStr>) -> Result<Option<NonZeroU16>, Error> {
             value
                 .to_str()
                 .and_then(|port| port.parse().ok())
-                .ok_or(Error::Unavailable)
+                .ok_or(Error::InvalidAirPlayTimingPort)
         })
         .transpose()
 }
@@ -96,7 +97,7 @@ mod tests {
         assert_eq!(parse(None::<&str>), Ok(None));
         assert_eq!(parse(Some("47475")), Ok(NonZeroU16::new(47475)));
         for bad in ["", "0", "65536", "12x"] {
-            assert_eq!(parse(Some(bad)), Err(Error::Unavailable));
+            assert_eq!(parse(Some(bad)), Err(Error::InvalidAirPlayTimingPort));
         }
     }
 }

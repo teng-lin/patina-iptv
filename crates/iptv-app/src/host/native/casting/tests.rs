@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn a_sender_local_ipv6_zone_cannot_escape_into_the_receiver_url() {
+    for address in ["[fe80::1%3]:7000", "[fe80::1]:7000", "[fd12::1%5]:7000"] {
+        assert_eq!(
+            relay_listen_addr(address.parse().unwrap(), 49152),
+            Err(Error::AirPlayRelayAddress)
+        );
+    }
+    for (control, expected) in [
+        ("192.0.2.10:7000", "192.0.2.10:49152"),
+        ("[fd12::1]:7000", "[fd12::1]:49152"),
+    ] {
+        assert_eq!(
+            relay_listen_addr(control.parse().unwrap(), 49152).unwrap(),
+            expected.parse().unwrap()
+        );
+    }
+}
+
+#[test]
 fn cast_relay_uses_a_fixed_default_or_an_explicit_tcp_port() {
     assert_eq!(configured_relay_port(None), Ok(49152));
     assert_eq!(configured_relay_port(Some(OsStr::new("53317"))), Ok(53317));

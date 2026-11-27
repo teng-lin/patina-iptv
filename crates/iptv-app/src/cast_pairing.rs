@@ -89,9 +89,12 @@ fn submit(ui: Ui) {
         return;
     };
     let mut input = input.borrow_mut();
-    if input.pin.len() == 4
-        && let Some(request) = input.request.take()
-    {
+    if input.pin.len() != 4 {
+        drop(input);
+        crate::settings_view::notify(tr("Enter the four digits shown on the receiver."));
+        return;
+    }
+    if let Some(request) = input.request.take() {
         let pin = std::mem::take(&mut input.pin);
         drop(input);
         close(ui);
@@ -114,10 +117,11 @@ fn forget(ui: Ui) {
     ui.cast_busy.set(true);
     crate::tasks::spawn_in_app(async move {
         let result = runtime().forget_cast_pairing(receiver).await;
-        if ui.cast_busy.try_set(false)
-            && let Err(error) = result
-        {
-            crate::casting::report(error);
+        if ui.cast_busy.try_set(false) {
+            if let Err(error) = result {
+                crate::casting::report(error);
+            }
+            crate::casting::finish_pending_stop(ui);
         }
     });
 }

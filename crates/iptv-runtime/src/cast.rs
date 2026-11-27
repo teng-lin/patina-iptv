@@ -259,23 +259,24 @@ impl Runtime {
         let cancel = CancelOnDrop(CancelToken::new());
         let signal = cancel.0.clone();
         self.spawn_cast_worker(signal.clone(), async move {
-            let current = || {
-                generation.load(std::sync::atomic::Ordering::Acquire) == ticket
-                    && grant.is_current()
-                    && !signal.is_canceled()
+            let check = || {
+                if signal.is_canceled()
+                    || generation.load(std::sync::atomic::Ordering::Acquire) != ticket
+                {
+                    Err(Error::Cancelled)
+                } else if !grant.is_current() {
+                    Err(Error::Denied)
+                } else {
+                    Ok(())
+                }
             };
             let mut prepare = port.prepare(receiver, source, pairing);
             loop {
-                if !current() {
-                    return Err(Error::Cancelled);
-                }
+                check()?;
                 let deadline = crate::time::Instant::now() + std::time::Duration::from_millis(250);
                 if let Ok(result) = services.timeout_at(deadline, prepare.as_mut()).await {
-                    return if current() {
-                        result
-                    } else {
-                        Err(Error::Cancelled)
-                    };
+                    check()?;
+                    return result;
                 }
             }
         })
