@@ -8,8 +8,8 @@
 //! one writer thread in order, so a toggle never waits for the store (on a
 //! host without workers, a browser, to the store's writer lane in order,
 //! [`queue_on_writer`]). They are read when a source is shown, on the
-//! store's reader unless writes of this module are still queued
-//! when loading the guide. The synthetic guide keeps them in memory only.
+//! store's reader. Queued favorites edits flush before a writer-lane read.
+//! The synthetic guide keeps them in memory only.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, VecDeque};

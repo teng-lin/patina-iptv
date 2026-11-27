@@ -2087,15 +2087,13 @@ mod tests {
 
     #[test]
     fn application_database_opening_is_confined_to_the_service() {
-        fn inspect(directory: &std::path::Path) {
+        fn inspect(directory: &std::path::Path, service: &std::path::Path) {
             for entry in std::fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
-                    inspect(&path);
+                    inspect(&path, service);
                 } else if path.extension().is_some_and(|extension| extension == "rs")
-                    && path
-                        .file_name()
-                        .is_none_or(|name| name != "store_service.rs")
+                    && path != service
                 {
                     let source = std::fs::read_to_string(&path).unwrap();
                     assert!(
@@ -2106,6 +2104,7 @@ mod tests {
                 }
             }
         }
-        inspect(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"));
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        inspect(&source, &source.join("store_service/mod.rs"));
     }
 }
