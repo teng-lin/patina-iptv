@@ -30,7 +30,6 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/external_player.rs", "PLAYBACK"), // External playback outlives the foreground activity.
     ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
-    ("custom_groups.rs", "GENERATION"),             // Discard stale dialog replies.
     ("tasks.rs", "APP_OWNER"),                      // UI root owner for detached local tasks.
     ("desktop.rs", "WINDOW"),                       // Native window handle.
     ("desktop.rs", "POINTER"),                      // Pointer position within the window.
@@ -41,7 +40,6 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("device.rs", "ACCESSIBILITY"), // Reactive handle of the host's accessibility report.
     ("fonts.rs", "FITTED"),         // Font measurement cache.
     ("fonts.rs", "FONTS_IN"),       // Font registration flag.
-    ("guide_assign_view.rs", "REQUEST"), // Discard stale dialog replies.
     ("header.rs", "ON"),            // Debug overlay environment flag cache.
     ("i18n.rs", "SYSTEM"),          // System locale cache.
     ("i18n.rs", "WORDING_SETTINGS"), // cfg(test)-only scoped wording preferences.
