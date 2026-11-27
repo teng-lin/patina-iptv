@@ -1022,6 +1022,13 @@ pub fn target(key: &Key) -> iptv_core::parental::Target {
     }
 }
 
+impl Runtime {
+    /// Derives the parental authorization target of an on-demand identity.
+    pub fn vod_target(key: &Key) -> iptv_core::parental::Target {
+        target(key)
+    }
+}
+
 /// Opaque authority captured for one already-resolved on-demand selection.
 /// It retains the original credentials/incarnation rather than rebinding an
 /// edited source while a native handoff is pending.

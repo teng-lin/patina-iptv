@@ -539,6 +539,49 @@ pub fn long_press_ms(settings: &Settings) -> u64 {
     u64::try_from(duration_ms(settings, keys::LONG_PRESS)).unwrap_or(0)
 }
 
+impl crate::Runtime {
+    /// Reads a global boolean setting using the effective settings snapshot.
+    pub fn setting_flag(&self, key: BoolKey) -> bool {
+        flag(&self.settings(), key)
+    }
+
+    /// Reads a global choice setting using the effective settings snapshot.
+    pub fn setting_choice(&self, key: EnumKey) -> &'static str {
+        choice(&self.settings(), key)
+    }
+
+    /// Returns the configured remote long-press threshold in milliseconds.
+    pub fn long_press_ms(&self) -> u64 {
+        long_press_ms(&self.settings())
+    }
+
+    /// Returns the effective network settings for provider requests.
+    pub fn network_config(&self) -> NetworkConfig {
+        network_config(&self.settings())
+    }
+
+    /// Supplies the effective user agent unless a stream names its own.
+    pub fn apply_user_agent(&self, headers: &mut Vec<(String, String)>) {
+        add_user_agent(headers, user_agent(&self.settings()));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn the_user_agent_goes_where_none_is_named() {
+    let mut headers = Vec::new();
+    add_user_agent(&mut headers, None);
+    assert!(headers.is_empty());
+    add_user_agent(&mut headers, Some("SyntheticPlayer/1.0".into()));
+    assert_eq!(
+        headers,
+        [("User-Agent".to_owned(), "SyntheticPlayer/1.0".to_owned())]
+    );
+    let mut own = vec![("user-agent".to_owned(), "ChannelAgent".to_owned())];
+    add_user_agent(&mut own, Some("SyntheticPlayer/1.0".into()));
+    assert_eq!(own.len(), 1, "the channel's own agent wins");
+}
+
 #[cfg(all(test, feature = "native"))]
 mod persistence_tests {
     use super::*;

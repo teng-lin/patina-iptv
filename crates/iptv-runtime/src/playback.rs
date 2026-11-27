@@ -15,6 +15,21 @@ use iptv_import::SourceMeta;
 use iptv_library::SourceId;
 use iptv_providers::model::SourceConfig;
 use iptv_providers::xtream::StreamFormat;
+
+impl crate::Runtime {
+    /// Builds a playback context for a stored source before the first refresh.
+    pub fn stored_playback_context(config: &SourceConfig) -> Option<PlaybackContext> {
+        stored_context(config)
+    }
+
+    /// Captures the exact stored source identity and configuration for early playback.
+    pub fn stored_source_authority(
+        stored: &iptv_library::StoredSource,
+    ) -> iptv_guide::playback::SourceAuthority {
+        source_authority(stored)
+    }
+}
+
 pub fn context_for(config: &SourceConfig, meta: &SourceMeta) -> Option<PlaybackContext> {
     match (config, meta) {
         (SourceConfig::M3u(c), _) => Some(PlaybackContext::m3u(c)),

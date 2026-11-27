@@ -725,7 +725,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
             if let Ok(details) = owner.vod_preview(key, cancel).await {
                 // No await between the access check and UI publication: a
                 // revoked grant must not restore metadata after redaction.
-                if owner.parental_allowed(&iptv_runtime::vod::target(&details.item.key)) {
+                if owner.parental_allowed(&Runtime::vod_target(&details.item.key)) {
                     ui.vod.update(|s| {
                         s.publish_preview(generation, details);
                     });

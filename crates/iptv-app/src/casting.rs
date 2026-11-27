@@ -133,7 +133,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let resolution = epg.resolve(
         local,
         None,
-        crate::runtime::playback::clock(crate::clock::wall_unix(), None),
+        crate::runtime::time::playback_clock(crate::clock::wall_unix(), None),
     );
     let context = epg.shared_playback();
     let Some(target) = crate::parental_view::live_target(ui, channel) else {
@@ -210,7 +210,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 }
                 _ => return Err(Error::Unsupported),
             };
-            crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
+            owner.apply_user_agent(&mut source.headers);
             // Revalidate network identity while an existing cast still owns
             // its relay. Preparing this connection does not bind the new relay.
             let prepared = if let Target::Network(network) = &receiver {

@@ -137,7 +137,7 @@ const NOT_OFFERED: &[&str] = &[
 /// so stored values and backups from any device still load, and are never
 /// offered. `guide.stay_on_guide` and `guide.stay_on_list` are read once
 /// more when the settings load, into `guide.after_choosing` while that is
-/// not stored (`iptv_runtime::settings`); `guide.back_returns_to_now` is
+/// not stored (`iptv_runtime::Runtime::settings`); `guide.back_returns_to_now` is
 /// always on.
 const RETIRED: &[&str] = &[
     "guide.stay_on_guide",

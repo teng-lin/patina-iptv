@@ -23,7 +23,7 @@ use tokio::sync::mpsc::UnboundedSender as Sender;
 /// What is stored is pruned to the longest catch-up archive
 /// (`prune_before`), so a read finds no more than that.
 pub fn stored_past_days() -> u32 {
-    iptv_import::KEEP_PAST_MAX_DAYS
+    crate::model::MAX_STORED_GUIDE_PAST_DAYS
 }
 
 /// When finished programs stop being kept: [`iptv_import::keep_past_days`]
@@ -721,23 +721,7 @@ pub fn note_shown(owner: &super::Runtime, source: Option<SourceId>) {
     owner.shown.with(|s| s.set(source));
 }
 
-/// How the guide on screen was last updated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GuideStatus {
-    /// No playlist on screen.
-    NoSource,
-    Updating,
-    /// Nothing stored (not downloaded yet, or cleared).
-    Empty,
-    Updated {
-        at: UnixTime,
-        channels: u64,
-    },
-    Failed {
-        at: UnixTime,
-        kind: ImportErrorKind,
-    },
-}
+pub use crate::model::{GuideStatus, SourceLine};
 
 /// The status of the guide on screen (one indexed read of the store).
 pub fn guide_status(owner: &super::Runtime) -> GuideStatus {
@@ -851,8 +835,6 @@ pub fn end_update(
     });
 }
 
-pub use iptv_library::SourceLine;
-
 /// `source`'s guide sources in order, each with its last result (one
 /// short read of the store).
 pub fn source_lines(owner: &super::Runtime, source: SourceId) -> Vec<SourceLine> {
@@ -867,17 +849,7 @@ pub fn source_lines(owner: &super::Runtime, source: SourceId) -> Vec<SourceLine>
 }
 
 pub fn status_of(stored: Option<&iptv_library::GuideSnapshot>) -> GuideStatus {
-    let Some(g) = stored else {
-        return GuideStatus::Empty;
-    };
-    match (g.last_error, g.attempted_at, g.replaced_at) {
-        (Some(kind), Some(at), _) => GuideStatus::Failed { at, kind },
-        (_, _, Some(at)) => GuideStatus::Updated {
-            at,
-            channels: g.bound_channels,
-        },
-        _ => GuideStatus::Empty,
-    }
+    GuideStatus::from_snapshot(stored)
 }
 
 pub fn cached_guide_state(

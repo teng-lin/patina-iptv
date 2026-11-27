@@ -29,30 +29,20 @@ const SHELL_MAY_NAME: &[&str] = &[
     // Named library operations, each given the owner.
     "commands",
     "cast",
-    "inspection",
     // Import, library, combined-browser and guide orchestration.
     "data",
-    // Guide-source list edits (pure).
-    "guides",
     // Value types of the commands and events.
     "model",
     // The network port: the configuration of a client and the client a
     // host's adapter makes.
     "network",
-    // Converts the portable network policy for the native player transport.
-    "adapter_config",
     // The execution port, named only by the browser host, which supplies
     // the cooperative executor in its Ports.
     "execution",
-    // A stored source's playback context before its refresh (pure).
-    "playback",
     // Typed parental errors, on-demand identities, and native recorder lifecycle
     // entrypoints. OS startup can precede a UI Runtime; all other work is owned.
     "parental",
     "recordings",
-    "vod",
-    // Effective setting values.
-    "settings",
     // Private-directory protection, before any owner exists.
     "storage",
     // The browser host installs its clocks (the Worker has no other).
@@ -61,8 +51,6 @@ const SHELL_MAY_NAME: &[&str] = &[
     "store_host",
     // The browser host keeps the small files in IndexedDB (host/web).
     "file_host",
-    // The guide status and the lines of the guide sources screen.
-    "stored",
 ];
 
 fn sources(directory: &Path, files: &mut Vec<PathBuf>) {
@@ -146,6 +134,10 @@ fn named(code: &str) -> BTreeSet<String> {
 
 #[test]
 fn the_shell_names_only_the_listed_runtime_items() {
+    assert!(
+        SHELL_MAY_NAME.len() <= 24,
+        "the shell has grown beyond 24 first-segment runtime names"
+    );
     let mut found = BTreeSet::new();
     for (file, code) in shell_sources() {
         for item in named(&code) {

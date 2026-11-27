@@ -12,4 +12,4 @@ pub use crate::runtime::data::{
     clear_guide as clear, clear_source_guide as clear_source, update_guide_now as update_now,
     update_source_guide as update_source,
 };
-pub use crate::runtime::stored::{GuideStatus, SourceLine, status_of, stored_past_days};
+pub use crate::runtime::model::{GuideStatus, MAX_STORED_GUIDE_PAST_DAYS, SourceLine};

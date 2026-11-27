@@ -10,6 +10,8 @@
 
 use std::time::Duration;
 
+pub use crate::playback::clock as playback_clock;
+
 #[cfg(feature = "native")]
 pub use std::time::Instant;
 

@@ -35,6 +35,7 @@ fn consume(
         cancel: CancelToken::new(),
         timeout: Duration::from_secs(1),
     };
+    let _: iptv_runtime::model::InspectionControl = control.clone();
     let window = TimeWindow {
         from: 1_794_657_600,
         to: 1_794_664_800,
@@ -127,8 +128,9 @@ fn consume(
     ));
     repair::<Operation, _>(owner.guide_repair_operation("synthetic-commit".into()));
     let _: Result<(), RepairError> = owner.cancel_guide_repair_operation("synthetic-commit");
-    let _: Result<iptv_runtime::inspection::ProbeLease, InspectionError> =
+    let lease: Result<iptv_runtime::inspection::ProbeLease, InspectionError> =
         owner.lease_probe(&evidence);
+    let _: Result<iptv_runtime::model::ProbeLease, InspectionError> = lease;
     let _: Option<Commit> = None;
     let _: Vec<Capability> = owner.foundation_capabilities();
     let _: Result<bool, RepairError> = owner.release_guide_repair_plan("synthetic-plan", [0; 32]);

@@ -29,6 +29,13 @@ use iptv_providers::{HttpRequest, HttpResponse};
 
 use crate::threading::MaybeSend;
 
+/// Extra native trust anchors shared by the default provider and player transports.
+/// Player threads may read this policy before a runtime owner exists.
+#[cfg(feature = "native")]
+pub fn default_playback_trust_anchors() -> Vec<Vec<u8>> {
+    crate::native::network::adapter_config(&crate::settings::base_network_config()).extra_roots_der
+}
+
 /// A boxed future of an adapter: `Send` when the runtime is threaded.
 #[cfg(feature = "native")]
 pub type NetFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

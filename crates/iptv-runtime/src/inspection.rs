@@ -1,6 +1,9 @@
 //! UI-independent source queries and guide evidence inspection.
 //! All expensive reads run on a bounded analysis lane; probes use the owner's
 //! bounded worker pool and existing transport policy. No browser state is read.
+
+#![warn(missing_docs)]
+
 mod probe;
 use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
@@ -15,12 +18,15 @@ use std::{
     time::Duration,
 };
 
+/// Default and maximum end-to-end budget for an inspection query.
 pub const QUERY_DEADLINE: Duration = Duration::from_secs(3);
 #[cfg(feature = "test-support")]
 pub(crate) type ScanHook = Box<dyn FnMut() + Send>;
 
+/// Cancellation and deadline for one inspection call.
 #[derive(Clone, Debug)]
 pub struct InspectionControl {
+    /// Caller-controlled cancellation, independent of sibling operations.
     pub cancel: CancelToken,
     /// Requested end-to-end budget, capped by the operation's public maximum.
     pub timeout: Duration,
@@ -190,6 +196,7 @@ where
 }
 
 impl Runtime {
+    /// Looks up a single source-scoped channel under the current access policy.
     pub fn inspect_channel(
         &self,
         key: ChannelRef,
@@ -204,6 +211,7 @@ impl Runtime {
             |channel| vec![channel.key.clone()],
         )
     }
+    /// Queries a bounded page of channels in the explicitly requested source scope.
     pub fn query_channels(
         &self,
         mut request: Query,
@@ -237,6 +245,7 @@ impl Runtime {
             },
         )
     }
+    /// Queries a bounded page of programs in a half-open UTC interval.
     pub fn query_programs(
         &self,
         mut request: Query,
@@ -272,6 +281,7 @@ impl Runtime {
             },
         )
     }
+    /// Lists configured-feed alternatives and matching evidence for a channel.
     pub fn epg_candidates(
         &self,
         key: ChannelRef,
@@ -301,6 +311,7 @@ impl Runtime {
             move |_| vec![subject],
         )
     }
+    /// Reports guide coverage in a UTC interval for the requested channels.
     pub fn epg_audit(
         &self,
         mut request: Query,

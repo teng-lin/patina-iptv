@@ -15,6 +15,10 @@ start its services, supply task/event ports where orchestration requires them,
 and drain/retire that owner on shutdown. The credential port's opaque redacting
 `DatabaseKey` is an explicit construction input; it is not a query record.
 
+The application shell imports `InspectionControl`, `ProbeRequest`, `ProbeTarget`
+and `ProbeLease` through `iptv_runtime::model`. Their existing
+`iptv_runtime::inspection` paths remain supported by the v1 contract.
+
 The Android recorder installs a callback through `Ports::recording_failed`.
 It receives only the `RecordingFailure` category for a capture belonging to
 that runtime.

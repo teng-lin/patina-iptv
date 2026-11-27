@@ -1,5 +1,5 @@
 //! Batch guide repair inside the existing guide inspection workflow.
-use crate::runtime::inspection::InspectionControl;
+use crate::runtime::model::InspectionControl;
 use crate::{
     Ui,
     i18n::tr,

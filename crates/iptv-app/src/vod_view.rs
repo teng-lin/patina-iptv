@@ -4,6 +4,7 @@
 use crate::{
     Ui,
     i18n::{tr, trf},
+    runtime::Runtime,
     scale::Scale,
     ui_kit,
 };
@@ -310,7 +311,7 @@ fn retry(ui: Ui) {
 /// without first closing the content as choosing another title does.
 fn retry_details(ui: Ui, key: Key) {
     let generation = ui.vod.with_untracked(|s| s.generation);
-    crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
+    crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
         if ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
             select_authorized(ui, key);
         }
@@ -324,7 +325,7 @@ fn retry_details(ui: Ui, key: Key) {
 /// the same id is refused, and its title must be chosen again.
 fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
     let generation = ui.vod.with_untracked(|s| s.generation);
-    crate::parental_view::request(ui, iptv_runtime::vod::target(&item), move || {
+    crate::parental_view::request(ui, Runtime::vod_target(&item), move || {
         if !ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
             return;
         }
@@ -402,7 +403,7 @@ fn select(ui: Ui, key: Key) {
         crate::runtime_owner::runtime().parental_content_closed();
     }
     let generation = ui.vod.with_untracked(|s| s.generation);
-    crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
+    crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
         if ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
             select_authorized(ui, key);
         }
@@ -451,14 +452,14 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
     let generation = edit(ui, Screen::supersede_operation);
     let parent = (key.kind == Kind::Episode).then(|| details.item.key.clone());
     let run = move || {
-        crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
+        crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
             if ui.vod.with_untracked(|s| s.generation == generation) {
                 play_authorized(ui, details, key, restart, true, None);
             }
         })
     };
     if let Some(parent) = parent {
-        crate::parental_view::request(ui, iptv_runtime::vod::target(&parent), run);
+        crate::parental_view::request(ui, Runtime::vod_target(&parent), run);
     } else {
         run();
     }
@@ -569,11 +570,10 @@ fn stop_ended(ui: Ui, ended: &Key) {
 }
 
 fn toggle_block(ui: Ui) {
-    if let Some(target) = ui.vod.with_untracked(|s| {
-        s.details
-            .as_ref()
-            .map(|d| iptv_runtime::vod::target(&d.item.key))
-    }) {
+    if let Some(target) = ui
+        .vod
+        .with_untracked(|s| s.details.as_ref().map(|d| Runtime::vod_target(&d.item.key)))
+    {
         let blocked = !crate::runtime_owner::runtime().parental_explicitly_blocked(&target);
         crate::parental_view::block(ui, target, blocked);
     }
@@ -896,11 +896,11 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
     crate::tasks::spawn_in_app(async move {
         let owner = crate::runtime_owner::runtime();
         let allowed = owner
-            .parental_check(&iptv_runtime::vod::target(&series))
+            .parental_check(&Runtime::vod_target(&series))
             .await
             .is_ok()
             && owner
-                .parental_check(&iptv_runtime::vod::target(&key))
+                .parental_check(&Runtime::vod_target(&key))
                 .await
                 .is_ok();
         // Something else plays (Stop included): the viewer's.
@@ -1253,7 +1253,7 @@ fn block_label(ui: Ui) -> &'static str {
     let blocked = ui.vod.with(|s| {
         s.details.as_ref().is_some_and(|d| {
             crate::runtime_owner::runtime()
-                .parental_explicitly_blocked(&iptv_runtime::vod::target(&d.item.key))
+                .parental_explicitly_blocked(&Runtime::vod_target(&d.item.key))
         })
     });
     if blocked {
