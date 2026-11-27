@@ -9,8 +9,10 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
+type SavedSettings = Option<(u64, Arc<Settings>)>;
+
 pub(crate) struct State {
-    saved: crate::Slot<RefCell<Option<(u64, Arc<Settings>)>>>,
+    saved: crate::Slot<RefCell<SavedSettings>>,
     changed: crate::Slot<Cell<u64>>,
     read_only: Cell<Option<std::io::ErrorKind>>,
     session_only_noted: Cell<bool>,

@@ -8,6 +8,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
+type GuideUpdates = Vec<(SourceId, Rc<ImportWork>)>;
+
 pub(crate) struct State {
     pub(super) activity: RefCell<BTreeMap<SourceId, model::Activity>>,
     pub(super) generation: Slot<Cell<u64>>,
@@ -18,7 +20,7 @@ pub(crate) struct State {
     pub(super) resume: Slot<Cell<bool>>,
     pub(super) rebuild: Slot<Cell<u64>>,
     pub(super) epoch: Slot<Cell<i64>>,
-    pub(super) updating: Slot<RefCell<Vec<(SourceId, Rc<ImportWork>)>>>,
+    pub(super) updating: Slot<RefCell<GuideUpdates>>,
     pub(super) edits: Slot<RefCell<BTreeMap<SourceId, u64>>>,
     pub(super) status: Slot<RefCell<StatusSnapshot>>,
     pub(super) status_revision: Cell<u64>,
