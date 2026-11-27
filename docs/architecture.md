@@ -730,7 +730,9 @@ The Apple AirPlay adapter lives in `iptv-app/src/host/native/apple_airplay`.
 `iptv-runtime::cast` owns its authorization, stream claim and relay lifetime
 through a host `NativePort`; the portable core identifies the opaque AirPlay
 target without depending on Apple APIs. A runtime-scoped mailbox moves native
-commands onto the main thread. Its persistent route picker belongs to the
+commands onto the main thread. Native views use process-unique numeric IDs and a
+registry of weak references to find their runtime-owned mailbox. The registry
+cannot keep a player or stream alive. The persistent player host belongs to the
 chooser layer, so hiding the play bar cannot destroy the remote player. Native
 callbacks carry the owning generation; stale callbacks and queued commands are
 ignored after cancellation or replacement. Apple's receiver approval stays in

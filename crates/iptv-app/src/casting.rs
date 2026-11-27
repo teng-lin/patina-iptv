@@ -429,19 +429,17 @@ pub(crate) fn volume(ui: Ui, command: Command) -> bool {
 }
 fn report(error: Error) {
     log::debug!("cast operation result: {error:?}");
-    notify(tr(match error {
-        Error::NoRequest { relay_port } => {
-            return notify(&trf(
-                "The TV did not request the stream. Allow TCP port {port} from the TV in your firewall and check Wi-Fi client isolation.",
-                &[("port", relay_port.into())],
-            ));
-        }
-        Error::Cancelled => return,
+    match error {
+        Error::Cancelled => {}
+        Error::NoRequest { relay_port } => notify(&trf(
+            "The TV did not request the stream. Allow TCP port {port} from the TV in your firewall and check Wi-Fi client isolation.",
+            &[("port", relay_port.into())],
+        )),
         Error::Unavailable | Error::Refused | Error::Unknown => {
-            "Could not start playback on the selected device."
+            notify(tr("Could not start playback on the selected device."))
         }
-        Error::Busy => "No provider connection is available.",
-        Error::Denied => "Playback is no longer authorized.",
-        Error::Unsupported => "This channel cannot be cast.",
-    }));
+        Error::Busy => notify(tr("No provider connection is available.")),
+        Error::Denied => notify(tr("Playback is no longer authorized.")),
+        Error::Unsupported => notify(tr("This channel cannot be cast.")),
+    }
 }
