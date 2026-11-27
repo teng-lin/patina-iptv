@@ -44,7 +44,7 @@ impl Error {
     }
 
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_diagnostic(mut self, diagnostic: Diagnostic) -> Self {
@@ -172,7 +172,7 @@ pub(crate) struct Features([Availability; 9]);
 
 impl Features {
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with(mut self, feature: Feature, availability: Availability) -> Self {
@@ -363,7 +363,7 @@ impl Media {
     }
 
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn url(&self) -> &str {
@@ -540,7 +540,7 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_position(mut self, position: Option<Duration>) -> Self {
@@ -549,7 +549,7 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_duration(mut self, duration: Option<Duration>) -> Self {
@@ -558,7 +558,7 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_features(mut self, features: Features) -> Self {

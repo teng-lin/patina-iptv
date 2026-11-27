@@ -299,8 +299,8 @@ impl PinCode {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "AirPlay integration follows this contract")
+        not(any(test, feature = "airplay")),
+        expect(dead_code, reason = "used by the AirPlay backend")
     )]
     pub(crate) fn as_str(&self) -> &str {
         &self.0

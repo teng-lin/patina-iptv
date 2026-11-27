@@ -1,5 +1,7 @@
 //! Native discovery and control of casting receivers through [Cast].
 
+#[cfg(feature = "airplay")]
+mod airplay;
 #[cfg(feature = "googlecast")]
 #[doc(hidden)]
 pub mod discovery;

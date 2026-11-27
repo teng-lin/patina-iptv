@@ -26,7 +26,7 @@ pub struct ProtocolId(&'static str);
 
 impl ProtocolId {
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn new(value: &'static str) -> Self {
@@ -86,7 +86,7 @@ impl Route {
     }
 
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn payload<T: Any>(&self) -> Option<&T> {
@@ -111,7 +111,7 @@ pub(crate) struct Candidate {
 
 impl Candidate {
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn new(
@@ -156,7 +156,7 @@ impl ScanSink {
     }
 
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn push(&self, candidate: Candidate) {
@@ -174,8 +174,8 @@ impl ScanSink {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "airplay")),
+        expect(dead_code, reason = "used by the AirPlay backend")
     )]
     pub(crate) fn remove(&self, stable_id: &str) {
         if let Some(routes) = self.0.lock().unwrap().as_mut() {
@@ -238,6 +238,8 @@ pub enum Connect {
 
 pub struct CastBuilder {
     credentials: CredentialBook,
+    #[cfg(feature = "airplay")]
+    airplay_timing_port: Option<std::num::NonZeroU16>,
 }
 
 impl CastBuilder {
@@ -246,13 +248,21 @@ impl CastBuilder {
         self
     }
 
+    /// Use a fixed UDP timing port for AirPlay. By default the OS selects it.
+    #[cfg(feature = "airplay")]
+    pub fn airplay_timing_port(mut self, port: Option<std::num::NonZeroU16>) -> Self {
+        self.airplay_timing_port = port;
+        self
+    }
+
     /// Create a sender while entered in a live Tokio runtime with I/O and
-    /// time enabled. Until a production backend is registered, this returns
-    /// an unavailable configuration error.
+    /// time enabled. Returns an error when no protocol features are enabled.
     pub fn build(self) -> Result<Cast, Error> {
         let backends: Vec<Arc<dyn Backend>> = vec![
             #[cfg(feature = "googlecast")]
             Arc::new(crate::googlecast::adapter::GoogleCast::default()),
+            #[cfg(feature = "airplay")]
+            Arc::new(crate::airplay::AirPlay::new(self.airplay_timing_port)),
         ];
         self.build_with(backends)
     }
@@ -343,6 +353,8 @@ impl Cast {
     pub fn builder() -> CastBuilder {
         CastBuilder {
             credentials: CredentialBook::new(MemoryStore::default()),
+            #[cfg(feature = "airplay")]
+            airplay_timing_port: None,
         }
     }
 

@@ -60,9 +60,9 @@ async fn configuration_respects_the_enabled_protocol_features() {
             .with_content_type("application/vnd.apple.mpegurl")
             .is_ok()
     );
-    #[cfg(feature = "googlecast")]
+    #[cfg(any(feature = "googlecast", feature = "airplay"))]
     assert!(Cast::builder().build().is_ok());
-    #[cfg(not(feature = "googlecast"))]
+    #[cfg(not(any(feature = "googlecast", feature = "airplay")))]
     {
         let error = Cast::builder()
             .build()

@@ -60,12 +60,12 @@ pub(crate) trait Backend: Send + Sync {
 
 pub(crate) enum BackendConnect {
     #[cfg_attr(
-        not(any(test, feature = "googlecast")),
+        not(any(test, feature = "googlecast", feature = "airplay")),
         expect(dead_code, reason = "requires a backend")
     )]
     Ready(Box<dyn Driver>),
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "airplay")),
         expect(dead_code, reason = "requires an interactive pairing backend")
     )]
     PinRequired(Box<dyn PairDriver>),
