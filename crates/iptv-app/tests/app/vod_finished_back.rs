@@ -19,6 +19,16 @@ use std::time::Duration;
 #[test]
 fn the_back_button_answers_on_its_center_after_a_movie_ends_under_the_bar() {
     let Some(home) = isolated!() else { return };
+    finished_movie(home, false);
+}
+
+#[test]
+fn dedicated_pause_keeps_a_finished_movie_closed() {
+    let Some(home) = isolated!() else { return };
+    finished_movie(home, true);
+}
+
+fn finished_movie(home: crate::isolated::Home, pause_after_end: bool) {
     let server = Server::start(&[("/player_api.php", SERIES_INFO.into())]);
     let root = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&root).unwrap();
@@ -122,6 +132,16 @@ fn the_back_button_answers_on_its_center_after_a_movie_ends_under_the_bar() {
         "the bar shown before the end is still up"
     );
     let opens = iptv_app::player_opens(0);
+    if pause_after_end {
+        step(app.press_remote(nsh_tv::RemoteKey::Pause));
+        assert_eq!(
+            iptv_app::player_opens(0),
+            opens,
+            "Pause cannot restart a finished movie"
+        );
+        assert_eq!(props.lock().unwrap()["paused"], true);
+        return;
+    }
     // A press on the ‹'s center (its chevron), as a finger lands there:
     // nothing drawn over it takes the press, and Back leaves for the
     // movie's details.

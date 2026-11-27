@@ -14,7 +14,7 @@
 //! (held: faster, `seek.rs`), the card showing its seek bar.
 
 use iptv_core::tracks::Kind as Track;
-use iptv_nav::{Action, Context, RemoteKey, seek_arrows, seek_key, up_down_key};
+use iptv_nav::{Action, Context, Press, RemoteKey, seek_arrows, seek_key, up_down_key};
 use iptv_presentation::channel_list::ListMode;
 use iptv_presentation::panels::{Control, Pick, QuickAction};
 use iptv_presentation::zap::{ZapOrigin, zap_from_list};
@@ -68,7 +68,7 @@ fn ok_pauses(ui: Ui) -> bool {
 
 /// The player's own actions (full screen and its panels); false for any
 /// other. `repeat`: the key's auto-repeat.
-pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
+pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) -> bool {
     let fullscreen = ui.mode.get() == ViewMode::Fullscreen;
     let buttons = fullscreen && ui.panels.with(|p| p.captures_input());
     let seek = |step: i32| {
@@ -112,7 +112,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         Action::ShowControls => ui.update_panels(|p, now| p.show_controls(now)),
         Action::ShowInfo if fullscreen => ui.update_panels(|p, now| p.show_info(now)),
         Action::ShowHistory => crate::chooser::open(ui, crate::chooser::Kind::History),
-        Action::PlayPause => play_pause(ui, key),
+        Action::PlayPause => play_pause(ui, key, press),
         // Catch-up seeking (`seek.rs`); nothing to seek in a live stream.
         Action::SeekBack => seek(-crate::seek::steps().rewind),
         Action::SeekForward => seek(crate::seek::steps().forward),
@@ -132,9 +132,9 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 
 /// Android media keys and every other host share explicit play/pause semantics.
 /// Only the toggle key (and the play-bar button) reverses the current state.
-pub(crate) fn play_pause(ui: Ui, key: RemoteKey) {
+pub(crate) fn play_pause(ui: Ui, key: RemoteKey, press: Press) {
     // Keep an owner's explicit Play-or-pause remapping a toggle.
-    if crate::remote_editor::media_toggle_override(crate::input::context(&ui), key) {
+    if crate::remote_editor::media_toggle_override(crate::input::context(&ui), key, press) {
         crate::player::toggle_pause(ui);
         return;
     }

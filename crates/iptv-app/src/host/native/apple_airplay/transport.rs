@@ -71,6 +71,8 @@ pub(super) enum Message {
         generation: u64,
         disconnect: bool,
     },
+    /// Acknowledge all preceding main-thread player work.
+    Flushed(oneshot::Sender<()>),
 }
 pub(super) struct Bridge {
     id: u64,
@@ -85,6 +87,11 @@ impl Bridge {
     pub(super) fn detach(&self) {
         self.stop_current();
         self.attached.store(false, Ordering::Release);
+        // The departing view is invalidated on this same main-thread turn.
+        // Release waiters whose queued commands can no longer be delivered.
+        if let Ok(mut state) = self.inner.lock() {
+            state.commands.clear();
+        }
     }
     pub(super) fn drain(&self) -> Vec<Message> {
         self.inner
@@ -175,6 +182,20 @@ impl Bridge {
             });
         }
     }
+    fn flush(&self) -> Option<oneshot::Receiver<()>> {
+        let mut state = self.inner.lock().ok()?;
+        if !self.attached.load(Ordering::Acquire) {
+            return None;
+        }
+        let (send, receive) = oneshot::channel();
+        state.commands.push_back(Message::Flushed(send));
+        Some(receive)
+    }
+    async fn flush_main_thread(&self) {
+        if let Some(flushed) = self.flush() {
+            let _ = flushed.await;
+        }
+    }
     fn stop_current(&self) {
         let generation = self.inner.lock().map(|s| s.generation).unwrap_or(0);
         self.stop(generation, true);
@@ -195,6 +216,9 @@ impl NativePort for Sender {
         if let Some(generation) = generation {
             self.bridge.stop(generation, true);
         }
+    }
+    fn flush(&self) -> Retirement<'_> {
+        Box::pin(self.bridge.flush_main_thread())
     }
     fn prepare(&self, source: PlaySource) -> Task<'_, Box<dyn Prepared>> {
         Box::pin(async move {
@@ -276,7 +300,7 @@ impl Handoff {
             .then_some(())
             .ok_or(Error::Denied)
     }
-    async fn admit(&mut self) -> Result<(), Error> {
+    async fn admit(&mut self) -> Result<bool, Error> {
         self.check_guard()?;
         if self.bridge.state(self.generation)? == RemoteState::Ended {
             return Err(self.bridge.ended_error(self.generation));
@@ -288,7 +312,8 @@ impl Handoff {
         loop {
             self.check_guard()?;
             match self.bridge.state(self.generation)? {
-                RemoteState::Playing | RemoteState::Paused => return Ok(()),
+                RemoteState::Playing => return Ok(false),
+                RemoteState::Paused => return Ok(true),
                 RemoteState::Ended => return Err(self.bridge.ended_error(self.generation)),
                 RemoteState::Loading => {}
             }
@@ -307,6 +332,7 @@ impl Prepared for Handoff {
         Box::pin(async move {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
             loop {
+                self.check_guard()?;
                 if self.bridge.state(self.generation)? == RemoteState::Ended {
                     return Err(self.bridge.ended_error(self.generation));
                 }
@@ -323,20 +349,21 @@ impl Prepared for Handoff {
     }
     fn allow(mut self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted> {
         Box::pin(async move {
-            let result = authorization.while_current(self.admit()).await;
-            if let Err(error) = result {
-                self.bridge.stop(self.generation, true);
-                if let Some(relay) = self.relay.take() {
-                    relay.shutdown().await;
+            let paused = match authorization.while_current(self.admit()).await {
+                Ok(paused) => paused,
+                Err(error) => {
+                    self.bridge.stop(self.generation, true);
+                    if let Some(relay) = self.relay.take() {
+                        relay.shutdown().await;
+                    }
+                    return Err(error);
                 }
-                return Err(error);
-            }
+            };
             if let Ok(mut s) = self.bridge.inner.lock()
                 && s.generation == self.generation
             {
                 s.preparing = false;
             }
-            let paused = self.bridge.state(self.generation)? == RemoteState::Paused;
             self.committed = true;
             Ok(Admitted {
                 paused,
@@ -389,7 +416,7 @@ impl Remote for Playing {
     fn state(&self) -> Task<'_, RemoteState> {
         Box::pin(async move { self.bridge.state(self.generation) })
     }
-    fn stop(&self) -> Retirement<'_> {
+    fn retire(&self) -> Retirement<'_> {
         Box::pin(async move {
             self.bridge.stop(self.generation, true);
             if let Some(relay) = self.relay.lock().await.take() {
@@ -397,7 +424,15 @@ impl Remote for Playing {
             }
         })
     }
-    fn retire(&self) -> Retirement<'_> {
+    fn stop(&self) -> Retirement<'_> {
+        Box::pin(async move {
+            self.retire().await;
+            // In particular, let AVAudioSession deactivate before local mpv
+            // reopens the channel and acquires that same session.
+            self.bridge.flush_main_thread().await;
+        })
+    }
+    fn retire_for_replacement(&self) -> Retirement<'_> {
         Box::pin(async move {
             self.disconnect_on_drop.store(false, Ordering::Release);
             self.bridge.stop(self.generation, false);
@@ -484,7 +519,7 @@ mod tests {
             relay: tokio::sync::Mutex::new(None),
             disconnect_on_drop: AtomicBool::new(true),
         };
-        remote.retire().await;
+        remote.retire_for_replacement().await;
         drop(remote);
         let messages = sender.bridge.drain();
         assert_eq!(messages.len(), 1);
@@ -495,6 +530,59 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn abandoning_an_unpublished_native_session_disconnects_its_route() {
+        let sender = Sender::new();
+        sender.bridge.attached.store(true, Ordering::Release);
+        let generation = sender.bridge.begin().unwrap();
+        let remote = Playing {
+            bridge: sender.bridge.clone(),
+            generation,
+            relay: tokio::sync::Mutex::new(None),
+            disconnect_on_drop: AtomicBool::new(true),
+        };
+        remote.retire().await;
+        assert!(matches!(
+            sender.bridge.drain().as_slice(),
+            [Message::Stop {
+                disconnect: true,
+                ..
+            }]
+        ));
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_waits_for_the_main_thread_to_release_the_audio_session() {
+        let sender = Sender::new();
+        sender.bridge.attached.store(true, Ordering::Release);
+        let generation = sender.bridge.begin().unwrap();
+        let remote = Playing {
+            bridge: sender.bridge.clone(),
+            generation,
+            relay: tokio::sync::Mutex::new(None),
+            disconnect_on_drop: AtomicBool::new(true),
+        };
+        let mut stop = remote.stop();
+        tokio::select! {
+            biased;
+            () = &mut stop => panic!("stop completed before the player consumed disconnect"),
+            () = std::future::ready(()) => {}
+        }
+        let mut commands = sender.bridge.drain().into_iter();
+        assert!(matches!(
+            commands.next(),
+            Some(Message::Stop {
+                disconnect: true,
+                ..
+            })
+        ));
+        let Some(Message::Flushed(reply)) = commands.next() else {
+            panic!("missing disconnect acknowledgement")
+        };
+        reply.send(()).unwrap();
+        stop.await;
     }
 
     #[tokio::test]

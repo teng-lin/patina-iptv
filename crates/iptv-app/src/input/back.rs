@@ -34,10 +34,10 @@ pub(super) fn act(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: 
         // The platform's Back steps back; it is still a key, so the app
         // leaves touch or pointer mode (a TV hides its visible Back again).
         Route::Platform => ui.input.set(crate::Input::Keys),
-        Route::Apply => super::apply(ui, key, action, repeat),
+        Route::Apply => super::apply(ui, key, press, action, repeat),
         Route::ApplyAndSwallow => {
             arm_back_guard(ui);
-            super::apply(ui, key, action, repeat);
+            super::apply(ui, key, press, action, repeat);
         }
     }
 }

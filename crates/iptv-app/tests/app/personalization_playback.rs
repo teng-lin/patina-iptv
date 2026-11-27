@@ -1,6 +1,6 @@
 use crate::personalization;
 use iptv_settings::{Settings, Value};
-use nsh_core::{MountItem, ViewKind};
+use nsh_core::MountItem;
 use personalization::*;
 use std::{
     sync::{Arc, Mutex},
@@ -11,7 +11,7 @@ fn preview(app: &crate::headless::Headless) -> bool {
         .layout_nodes()
         .iter()
         // The player: not the device observer (`tv.device`), which has no size.
-        .find(|n| n.kind == ViewKind::Native && n.test_id.as_deref() != Some("device-signals"))
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .bounds
         .size

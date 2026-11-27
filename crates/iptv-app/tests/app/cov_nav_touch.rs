@@ -21,9 +21,7 @@ use iptv_epg::format_xmltv_time;
 use iptv_settings::{Settings, Value};
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::Idiom;
-use nsh_core::{
-    EventKind, EventPayload, ImageData, Point, Size, ViewKind, element::Root, prelude::*,
-};
+use nsh_core::{EventKind, EventPayload, ImageData, Point, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use serde_json::json;
 
@@ -469,7 +467,7 @@ fn player_event(app: &mut Headless, name: &str, event: &str, data: serde_json::V
         .bounds;
     let player = nodes
         .iter()
-        .find(|n| n.kind == ViewKind::Native && n.bounds == tile)
+        .find(|n| n.test_id.as_deref() == Some("video-player") && n.bounds == tile)
         .unwrap_or_else(|| panic!("the player under {name}'s tile"))
         .id;
     app.engine().control().dispatch_event(

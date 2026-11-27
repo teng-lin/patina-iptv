@@ -5,7 +5,7 @@ use crate::{
     support::Server,
 };
 use iptv_settings::{Settings, Value};
-use nsh_core::{MountItem, ViewKind, platform::Idiom};
+use nsh_core::{MountItem, platform::Idiom};
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -251,7 +251,7 @@ fn menu_replay(app: &mut Headless) {
 fn back_to_guide(app: &mut Headless) {
     for _ in 0..4 {
         if app.screen().layout_nodes().iter().any(|node| {
-            node.kind == ViewKind::Native
+            node.test_id.as_deref() == Some("video-player")
                 && !node.hidden
                 && (100.0..1900.0).contains(&node.bounds.size.width.0)
         }) {

@@ -24,6 +24,10 @@ pub trait NativePort: Send + Sync {
     fn view_id(&self) -> Option<u64>;
     fn prepare(&self, source: PlaySource) -> Task<'_, Box<dyn Prepared>>;
     fn cancel_pending(&self);
+    /// Join queued player cleanup before local audio resumes after a failed handoff.
+    fn flush(&self) -> Retirement<'_> {
+        Box::pin(std::future::ready(()))
+    }
 }
 pub trait Prepared: Send {
     /// Recheck policy and intent while a system picker waits for owner approval.
@@ -65,6 +69,10 @@ pub trait Remote: Send + Sync {
     fn state(&self) -> Task<'_, RemoteState>;
     /// Joins upstream retirement before the account claim can be released.
     fn retire(&self) -> Retirement<'_>;
+    /// A native receiver can keep its route for the immediately following channel.
+    fn retire_for_replacement(&self) -> Retirement<'_> {
+        self.retire()
+    }
     /// Revoke relay access even when the control connection has been lost.
     fn stop(&self) -> Retirement<'_> {
         Box::pin(async {
@@ -153,6 +161,11 @@ impl Runtime {
             port.cancel_pending();
         }
     }
+    pub async fn flush_native_cast(&self) {
+        if let Some(port) = &self.services().ports().native_cast {
+            port.flush().await;
+        }
+    }
     pub async fn cast_receivers(&self) -> Result<Vec<Receiver>, Error> {
         if self.services().ports().cast.is_none() && self.native_cast_available() {
             return Ok(Vec::new());
@@ -216,6 +229,10 @@ impl Runtime {
             {
                 return Err(Error::Denied);
             }
+            prepared.guard(Box::new(move || {
+                generation.load(std::sync::atomic::Ordering::Acquire) == ticket
+                    && grant.is_current()
+            }));
             prepared.load().await?;
             Ok(prepared)
         })
@@ -400,7 +417,7 @@ impl Runtime {
             .map(|active| active.remote.clone())
             .ok_or(Error::Unavailable)?;
         let worker = remote.clone();
-        self.spawn_network(async move { worker.retire().await })
+        self.spawn_network(async move { worker.retire_for_replacement().await })
             .await
             .map_err(|_| Error::Unknown)?;
         self.clear_cast(&remote);

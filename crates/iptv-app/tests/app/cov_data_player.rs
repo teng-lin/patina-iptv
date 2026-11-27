@@ -36,8 +36,7 @@ use nsh_core::picker::PickedFile;
 use nsh_core::platform::Idiom;
 use nsh_core::time::Clock;
 use nsh_core::{
-    EventKind, EventPayload, ImageData, MountItem, NodeId, Point, Size, ViewKind, element::Root,
-    prelude::*,
+    EventKind, EventPayload, ImageData, MountItem, NodeId, Point, Size, element::Root, prelude::*,
 };
 use nsh_engine::EngineConfig;
 use serde_json::{Value, json};
@@ -137,7 +136,7 @@ fn player(app: &Headless) -> NodeId {
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|n| n.kind == ViewKind::Native)
+        .filter(|n| n.test_id.as_deref() == Some("video-player"))
         .collect();
     assert_eq!(natives.len(), 1, "one player surface");
     natives[0].id
@@ -185,7 +184,7 @@ fn native_source(screen: &nsh_testing::Screen, props: &Props) -> Value {
     let id = screen
         .layout_nodes()
         .into_iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .expect("a native player")
         .id;
     props

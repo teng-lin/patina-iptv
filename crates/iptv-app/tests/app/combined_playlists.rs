@@ -1026,7 +1026,7 @@ fn playlist_order_options_apply_distinct_guide_orders_and_keep_the_custom_order(
 #[test]
 fn saving_a_playlist_order_draft_rechecks_settings_access() {
     use nsh_core::{
-        EventKind, EventPayload, ViewKind,
+        EventKind, EventPayload,
         platform::{Idiom, Os},
     };
 
@@ -1090,7 +1090,7 @@ fn saving_a_playlist_order_draft_rechecks_settings_access() {
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     app.engine().control().dispatch_event(

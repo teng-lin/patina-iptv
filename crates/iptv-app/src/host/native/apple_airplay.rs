@@ -113,6 +113,9 @@ extern "C" fn poll(context: *const c_void) {
                     }
                 }
             }
+            transport::Message::Flushed(reply) => {
+                let _ = reply.send(());
+            }
             _ => {}
         }
     }

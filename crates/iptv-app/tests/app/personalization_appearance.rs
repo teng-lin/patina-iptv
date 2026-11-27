@@ -201,7 +201,7 @@ fn changing_the_guide_layout_preference_retires_the_keyboard_override() {
         app.screen()
             .layout_nodes()
             .into_iter()
-            .find(|node| node.kind == nsh_core::ViewKind::Native)
+            .find(|node| node.test_id.as_deref() == Some("video-player"))
             .expect("persistent player")
     };
     let id = player(app).id;

@@ -753,7 +753,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.kind == nsh_core::ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     let opens = iptv_app::player_opens(0);
@@ -777,7 +777,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
         app.screen()
             .layout_nodes()
             .iter()
-            .any(|n| n.id == surface && n.kind == nsh_core::ViewKind::Native)
+            .any(|n| n.id == surface && n.test_id.as_deref() == Some("video-player"))
     );
     // The toggle acknowledges an active job before its capture owns any media.
     // Exercise Stop on a real capture, using the rest of the existing start budget.

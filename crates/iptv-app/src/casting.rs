@@ -32,9 +32,6 @@ pub(super) fn local_blocked(ui: Ui) -> bool {
 }
 
 pub(super) fn open(ui: Ui) {
-    if ui.cast_busy.get_untracked() {
-        return;
-    }
     discover(ui);
 }
 pub(super) fn discover(ui: Ui) {
@@ -72,11 +69,18 @@ pub(super) fn destination_selected(value: &str) -> bool {
 }
 pub(super) fn play_here(ui: Ui) {
     if ui.cast_busy.get_untracked() {
-        if ui.cast_remote.get_untracked() {
-            ui.cast_local_pending.set(true);
+        let owner = runtime();
+        let ticket = if ui.cast_remote.get_untracked() {
+            // Let an outstanding command finish on the current receiver.
+            owner.cast_intent()
         } else {
-            runtime().cancel_pending_native_cast();
-        }
+            // The native port may not have begun preparing a generation yet.
+            // Invalidate the runtime intent as well as any active native wait.
+            let ticket = owner.next_cast_intent();
+            owner.cancel_pending_native_cast();
+            ticket
+        };
+        ui.cast_local_pending.set(Some(ticket));
     } else if ui.cast_remote.get_untracked() {
         control(ui, Command::Stop, true);
     }
@@ -263,15 +267,21 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             Ok(())
         }
         .await;
+        if airplay && result.is_err() {
+            owner.flush_native_cast().await;
+        }
         ui.cast_busy.set(false);
         if let Err(e) = result {
-            report(e);
+            let returning_local = pending_local_current(ui);
+            if !returning_local {
+                report(e);
+            }
 
             if retired && pending_stop_current(ui) {
                 // The old receiver is already stopped. Preserve the viewer's Stop
                 // even when the switch failed after releasing its local surface.
                 ui.playing.set(None);
-            } else if current() {
+            } else if current() || returning_local {
                 ui.paused.set(old_paused);
                 if retired
                     && let Some(ch) = previous
@@ -387,11 +397,16 @@ fn pending_stop_current(ui: Ui) -> bool {
         .get_untracked()
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
+fn pending_local_current(ui: Ui) -> bool {
+    ui.cast_local_pending
+        .get_untracked()
+        .is_some_and(|ticket| runtime().cast_intent_current(ticket))
+}
 fn finish_pending_stop(ui: Ui) {
     let stop_requested = pending_stop_current(ui);
     ui.cast_stop_pending.set(None);
-    let local = ui.cast_local_pending.get_untracked();
-    ui.cast_local_pending.set(false);
+    let local = pending_local_current(ui);
+    ui.cast_local_pending.set(None);
     if ui.cast_remote.get_untracked() {
         if stop_requested {
             stop(ui);

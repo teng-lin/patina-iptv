@@ -70,7 +70,10 @@ static void PatinaBindRoutePickers(uint64_t owner);
     NSTimeInterval _routeSwitchDeadline;
     NSUInteger _routeChoiceSerial;
     NSTimeInterval _routeRecentlyClosed;
+    NSURL *_pickerFrameURL;
+    AVPlayerItem *_pickerFrame;
 #if !TARGET_OS_OSX
+    NSString *_pickerOpeningRoute;
     BOOL _audioSessionActive;
 #endif
 }
@@ -134,31 +137,82 @@ static void PatinaBindRoutePickers(uint64_t owner);
     PatinaBindRoutePickers(owner);
 }
 
+// AVKit may require a playable item on this specific player to negotiate a
+// video route. Keep the current channel on its present output while choosing.
+// One paused 16x16 black H.264 frame, generated locally from ffmpeg's color
+// source (one baseline frame, no audio, encoder SEI or source metadata).
+- (void)primeRoutePicker {
+    if (_source || _player.currentItem) return;
+    if (!_pickerFrameURL) {
+        NSData *frame = [[NSData alloc] initWithBase64EncodedString:
+            @"AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAALqbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAA"
+            @"A+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAA"
+            @"AAAAAAAAAAAAAAAAAAAAAgAAAjl0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAA"
+            @"AAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0"
+            @"AAAAAAAAAAEAAAPoAAAAAAABAAAAAAGxbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhk"
+            @"bHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABXG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAA"
+            @"AAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAARxzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhh"
+            @"dmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABDExhdmMgbGlieDI2NAAAAAAAAAAA"
+            @"AAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAVoy4PLIAAAABBw"
+            @"YXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAACQAAAAAAAAABhzdHRzAAAAAAAAAAEAAAABAABAAAAAABxzdHNjAAAA"
+            @"AAAAAAEAAAABAAAAAQAAAAEAAAAUc3RzegAAAAAAAAASAAAAAQAAABRzdGNvAAAAAAAAAAEAAAMaAAAAPXVkdGEA"
+            @"AAA1bWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAIaWxzdAAAAAhmcmVlAAAAGm1k"
+            @"YXQAAAAOZYiEBX///w9FAAFC34A="
+            options:0];
+        NSURL *file = [[NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES]
+            URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingPathExtension:@"mp4"]];
+        if (![frame writeToURL:file options:NSDataWritingWithoutOverwriting error:NULL]) return;
+        _pickerFrameURL = file;
+    }
+    _pickerFrame = [AVPlayerItem playerItemWithURL:_pickerFrameURL];
+    [_player replaceCurrentItemWithPlayerItem:_pickerFrame];
+}
+
+#if !TARGET_OS_OSX
+- (NSString *)airPlayOutput {
+    for (AVAudioSessionPortDescription *port in [AVAudioSession sharedInstance].currentRoute.outputs) {
+        if ([port.portType isEqualToString:AVAudioSessionPortAirPlay]) return port.UID;
+    }
+    return nil;
+}
+#endif
+
+- (void)expireRouteChoice {
+    _routeChoiceArmed = NO;
+    if (_pickerFrame && _player.currentItem == _pickerFrame) {
+        _handoffRequested = NO;
+        [self clearItem];
+    }
+    _pickerFrame = nil;
+}
+
 - (void)routesWillPresent {
     if (!_ownerID || !_emit) return;
     _routeUIOpen = YES;
-    _routeWasActive = _routeWasActive || (_player.currentItem && (_wasRouted || _player.externalPlaybackActive));
-    _routeSwitchDeadline = [NSDate timeIntervalSinceReferenceDate] + 90.0;
+    _routeWasActive = _routeWasActive || (_source && _player.currentItem && (_wasRouted || _player.externalPlaybackActive));
+    ++_routeChoiceSerial;
     _routeChoiceArmed = YES;
-    NSUInteger serial = ++_routeChoiceSerial;
-    __weak PatinaAirPlayPlayer *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        PatinaAirPlayPlayer *owner = weakSelf;
-        if (owner && owner->_routeChoiceSerial == serial) owner->_routeChoiceArmed = NO;
-    });
+#if TARGET_OS_OSX
+    [self primeRoutePicker];
+#else
+    _pickerOpeningRoute = [self airPlayOutput];
+#endif
     _emit(_context, false, 6);
 }
 
 - (void)routesDidEnd {
     _routeUIOpen = NO;
     _routeRecentlyClosed = [NSDate timeIntervalSinceReferenceDate];
+    _routeSwitchDeadline = _routeRecentlyClosed + 90.0;
     if (_ownerID && _emit) _emit(_context, false, 7);
     NSUInteger serial = _routeChoiceSerial;
     __weak PatinaAirPlayPlayer *weakSelf = self;
     for (NSNumber *delay in @[@0.5, @2.1, @90.0]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             PatinaAirPlayPlayer *owner = weakSelf;
-            if (owner && owner->_routeChoiceSerial == serial) [owner refresh];
+            if (!owner || owner->_routeChoiceSerial != serial) return;
+            if (delay.doubleValue == 90.0) [owner expireRouteChoice];
+            [owner refresh];
         });
     }
     [self scheduleRefresh];
@@ -205,29 +259,31 @@ static void PatinaBindRoutePickers(uint64_t owner);
     return _source && _player.status != AVPlayerStatusFailed && ![_failedSources containsObject:_source];
 }
 
-- (void)refresh {
-    if (!_emit) return;
-    BOOL external = _player.externalPlaybackActive;
-    BOOL routed = external;
-#if !TARGET_OS_OSX
-    routed = NO;
-    for (AVAudioSessionPortDescription *port in [AVAudioSession sharedInstance].currentRoute.outputs) {
-        if ([port.portType isEqualToString:AVAudioSessionPortAirPlay]) {
-            routed = YES;
-            break;
-        }
-    }
-    external = external && routed;
-#endif
-#if !TARGET_OS_OSX
-    // The system owns the device list. Start handoff only after an actual
-    // route choice, leaving local playback alone if the picker is dismissed.
-    if (_ownerID && _routeChoiceArmed && routed && _intent == ProbeStop && !_source) {
+// A pre-existing audio route or an audio-only destination cannot authorize
+// moving the live stream. Require external video on this player's local frame.
+- (void)confirmPickerRoute:(BOOL)changedRoute externalVideo:(BOOL)external {
+    if (_ownerID && _routeChoiceArmed && changedRoute && external && _intent == ProbeStop &&
+        !_source && _pickerFrame && _player.currentItem == _pickerFrame) {
         _routeChoiceArmed = NO;
         _handoffRequested = YES;
         _emit(_context, true, 8);
     }
+}
+
+- (void)refresh {
+    if (!_emit) return;
+    BOOL external = _player.externalPlaybackActive;
+    BOOL routed = external;
+    BOOL changedRoute = YES;
+#if !TARGET_OS_OSX
+    NSString *output = [self airPlayOutput];
+    routed = output != nil;
+    changedRoute = routed && ![output isEqualToString:_pickerOpeningRoute];
+    external = external && routed;
+    if (_routeChoiceArmed && changedRoute) [self primeRoutePicker];
 #endif
+    [self confirmPickerRoute:changedRoute externalVideo:external];
+#if !TARGET_OS_OSX
     if (_ownerID && _handoffRequested && !_routeUIOpen && !routed &&
         [NSDate timeIntervalSinceReferenceDate] - _routeRecentlyClosed < 2.0) {
         _handoffRequested = NO;
@@ -238,6 +294,7 @@ static void PatinaBindRoutePickers(uint64_t owner);
         [self publish:ProbeIdle external:NO];
         return;
     }
+#endif
     if (_ownerID && _routeWasActive) {
         NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
         if (_routeUIOpen && (!routed || !external)) {
@@ -299,6 +356,7 @@ static void PatinaBindRoutePickers(uint64_t owner);
         // On macOS the picker routes this specific AVPlayer. Prime its item
         // while paused so AVKit can negotiate video playback with the receiver.
         _loaded = _source;
+        _pickerFrame = nil;
         _playIssued = NO;
         [_player pause];
         [_player replaceCurrentItemWithPlayerItem:[AVPlayerItem playerItemWithURL:_source]];
@@ -404,6 +462,9 @@ static void PatinaBindRoutePickers(uint64_t owner);
             break;
         case ProbeStop:
             _routeWasActive = NO;
+            // The mailbox resets the previous item immediately before Prepare.
+            // Preserve the confirmed route until the actual item replaces this one.
+            if (_pickerFrame && _player.currentItem == _pickerFrame && _handoffRequested) break;
             [self stopWithState:ProbeIdle];
             break;
     }
@@ -420,8 +481,11 @@ static void PatinaBindRoutePickers(uint64_t owner);
 }
 
 - (void)disconnect {
+    ++_routeChoiceSerial;
     _routeWasActive = NO;
     _handoffRequested = NO;
+    _routeChoiceArmed = NO;
+    _pickerFrame = nil;
     [self stopWithState:ProbeIdle];
     _player.allowsExternalPlayback = NO;
 #if TARGET_OS_OSX
@@ -452,6 +516,9 @@ static void PatinaBindRoutePickers(uint64_t owner);
     [_timer invalidate]; _timer = nil; _poll = NULL;
     _emit = NULL;
     [self setObservedPlayer:nil];
+    if (_pickerFrameURL) [[NSFileManager defaultManager] removeItemAtURL:_pickerFrameURL error:NULL];
+    _pickerFrameURL = nil;
+    _pickerFrame = nil;
 #if !TARGET_OS_OSX
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self releaseAudioSession];

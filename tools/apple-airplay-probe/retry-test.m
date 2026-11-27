@@ -72,6 +72,43 @@ int main(void) {
         [host invalidate];
         NSCAssert(nextButton.player == nil, @"destroyed owners cannot keep routing through a stale player");
 
+        // Opening and dismissing the picker must not request a runtime handoff.
+        // A receiver may approve after the sheet closes. Only an external
+        // video KVO update on the primed player starts a handoff.
+        routeEvents = [NSMutableArray array];
+        PatinaAirPlayPlayer *choosing = [[PatinaAirPlayPlayer alloc] initWithContext:NULL emit:capture poll:NULL];
+        [choosing setOwnerID:43];
+        SyntheticRoutePlayer *standby = [SyntheticRoutePlayer new];
+        [choosing setObservedPlayer:standby];
+        [choosing routesWillPresent];
+        NSCAssert(standby.currentItem && standby.rate == 0, @"negotiate with a paused local frame");
+        NSURL *frameFile = [(AVURLAsset *)standby.currentItem.asset URL];
+        NSCAssert(frameFile.isFileURL && [[NSFileManager defaultManager] fileExistsAtPath:frameFile.path],
+                  @"the priming asset is local");
+        [choosing confirmPickerRoute:NO externalVideo:YES];
+        [choosing confirmPickerRoute:YES externalVideo:NO];
+        NSCAssert(![routeEvents containsObject:@8], @"existing routes and audio-only changes leave live video local");
+        [choosing routesDidEnd];
+        [choosing refresh];
+        NSCAssert(![routeEvents containsObject:@8], @"dismissal must preserve the current playback owner");
+        [choosing expireRouteChoice];
+        standby.syntheticExternal = YES;
+        [choosing refresh];
+        NSCAssert(!standby.currentItem && ![routeEvents containsObject:@8], @"expired picker cannot change playback");
+        standby.syntheticExternal = NO;
+        [choosing routesWillPresent];
+        AVPlayerItem *primed = standby.currentItem;
+        [choosing routesDidEnd];
+        standby.syntheticExternal = YES;
+        [choosing refresh];
+        [choosing refresh];
+        NSCAssert([routeEvents filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF == 8"]].count == 1,
+                  @"late approval starts exactly one handoff");
+        [choosing command:ProbeStop];
+        NSCAssert(standby.currentItem == primed, @"Prepare preserves the routing item until replacement");
+        [choosing invalidate];
+        NSCAssert(![[NSFileManager defaultManager] fileExistsAtPath:frameFile.path], @"remove temporary frame");
+
         // An external-video KVO update can precede the audio/local-route
         // update. It must not destroy the owned item while selection is open.
         routeEvents = [NSMutableArray array];

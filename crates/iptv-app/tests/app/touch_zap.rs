@@ -24,7 +24,7 @@ use nsh_core::picker::PickedFile;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{
     EventKind, EventPayload, ImageData, MountItem, NodeId, Point, ROOT_ID, Size, TouchEvent,
-    TouchPhase, TouchPoint, ViewKind, element::Root, prelude::*,
+    TouchPhase, TouchPoint, element::Root, prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_tv::RemoteKey;
@@ -210,9 +210,9 @@ fn full_screen(app: &mut Headless, tuned: &Tuned, n: usize) {
 fn wide(app: &mut Headless) {
     step(app.run_for(Duration::from_millis(200)));
     app.wait_until_fixed_clock("full screen", WAIT, |s| {
-        s.layout_nodes()
-            .iter()
-            .any(|node| node.kind == ViewKind::Native && node.bounds.size.width.0 >= SCREEN.0)
+        s.layout_nodes().iter().any(|node| {
+            node.test_id.as_deref() == Some("video-player") && node.bounds.size.width.0 >= SCREEN.0
+        })
     });
 }
 

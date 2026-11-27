@@ -21,7 +21,7 @@ use nsh_core::picker::PickedFile;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{
     EventKind, EventPayload, ImageData, MountItem, Point, ROOT_ID, Size, TouchEvent, TouchPhase,
-    TouchPoint, ViewKind, element::Root, prelude::*,
+    TouchPoint, element::Root, prelude::*,
 };
 use nsh_engine::EngineConfig;
 
@@ -165,7 +165,7 @@ fn video_width_of(screen: &nsh_testing::Screen) -> f32 {
     screen
         .layout_nodes()
         .iter()
-        .find(|n| n.kind == ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .expect("the player")
         .bounds
         .size

@@ -393,6 +393,7 @@ struct FakeNative {
     cast: FakeCast,
     cancel: Arc<tokio::sync::Notify>,
     wait_for_approval: bool,
+    prepare_gate: Option<Arc<tokio::sync::Notify>>,
 }
 impl iptv_runtime::cast::NativePort for FakeNative {
     fn view_id(&self) -> Option<u64> {
@@ -400,7 +401,13 @@ impl iptv_runtime::cast::NativePort for FakeNative {
     }
     fn prepare(&self, _source: PlaySource) -> Task<'_, Box<dyn Prepared>> {
         let prepared = self.clone();
-        Box::pin(async move { Ok(Box::new(prepared) as Box<dyn Prepared>) })
+        Box::pin(async move {
+            if let Some(gate) = &prepared.prepare_gate {
+                prepared.cast.events.lock().unwrap().push("preparing");
+                gate.notified().await;
+            }
+            Ok(Box::new(prepared) as Box<dyn Prepared>)
+        })
     }
     fn cancel_pending(&self) {
         self.cast
@@ -437,12 +444,29 @@ fn select_generated_airplay(
     home: crate::isolated::Home,
     wait_for_approval: bool,
 ) -> (personalization::Fixture, FakeCast) {
+    let (mut fixture, fake) = start_generated_airplay(home, wait_for_approval, None);
+    step(
+        fixture
+            .app
+            .wait_until("native handoff admission", Duration::from_secs(10), |_| {
+                fake.events.lock().unwrap().contains(&"native admission")
+            }),
+    );
+    (fixture, fake)
+}
+
+fn start_generated_airplay(
+    home: crate::isolated::Home,
+    wait_for_approval: bool,
+    prepare_gate: Option<Arc<tokio::sync::Notify>>,
+) -> (personalization::Fixture, FakeCast) {
     let fake = FakeCast::default();
     iptv_app::install_test_cast_port(Arc::new(fake.clone()));
     iptv_app::install_test_native_cast_port(Arc::new(FakeNative {
         cast: fake.clone(),
         cancel: Arc::default(),
         wait_for_approval,
+        prepare_gate,
     }));
     let mut settings = Settings::new();
     settings
@@ -465,14 +489,29 @@ fn select_generated_airplay(
             .app
             .press("id:chooser-items >> text:Choose a device"),
     );
+    (fixture, fake)
+}
+
+#[test]
+fn choosing_local_before_native_preparation_finishes_never_loads_the_receiver() {
+    let Some(home) = isolated!() else { return };
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let (mut fixture, fake) = start_generated_airplay(home, false, Some(gate.clone()));
     step(
         fixture
             .app
-            .wait_until("native handoff admission", Duration::from_secs(10), |_| {
-                fake.events.lock().unwrap().contains(&"native admission")
+            .wait_until("native preparation", Duration::from_secs(10), |_| {
+                fake.events.lock().unwrap().contains(&"preparing")
             }),
     );
-    (fixture, fake)
+    step(fixture.app.press("id:chooser-items >> text:Cancel"));
+    gate.notify_one();
+    ready_controls(&mut fixture.app);
+    assert!(iptv_app::player_has_source(0));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["preparing", "cancel native picker"]
+    );
 }
 
 #[test]

@@ -530,7 +530,7 @@ fn bar_now(ui: Ui) -> impl IntoElement {
 /// are resolved from the same stable identity on every input path.
 fn button(ui: Ui, control: Control, size: f32) -> View {
     if control == Control::Cast && crate::airplay::direct() {
-        return crate::airplay::button(ui, size);
+        return crate::airplay::button(ui, size, control_id(control));
     }
     let target_window = matches!(control, Control::More | Control::Fullscreen)
         .then(nsh_core::element::desktop::current_window);
@@ -539,7 +539,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .role(AccessibilityRole::Button)
         .accessible(true)
         .test_id(control_id(control))
-        .disabled(move || !shown(ui, control) || (control == Control::Cast && ui.cast_busy.get()))
+        .disabled(move || !shown(ui, control))
         .accessibility_state(move || AccessibilityState {
             busy: control == Control::Cast && ui.cast_busy.get(),
             selected: focused(ui, control),

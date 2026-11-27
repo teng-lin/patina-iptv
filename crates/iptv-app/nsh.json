@@ -28,6 +28,7 @@
   },
   "ios": {
     "infoPlist": {
+      "UIBackgroundModes": ["audio"],
       "UIDeviceFamily": [
         2
       ],

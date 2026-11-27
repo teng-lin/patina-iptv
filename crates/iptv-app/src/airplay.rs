@@ -8,10 +8,16 @@ pub(crate) fn direct() -> bool {
     runtime().native_cast_view().is_some() && !runtime().chromecast_available()
 }
 
-pub(crate) fn button(ui: Ui, size: f32) -> View {
+pub(crate) fn button(ui: Ui, size: f32, id: &'static str) -> View {
     view().w(px(size)).h(px(size)).child(
         native("tv.cast-picker")
-            .test_id("play-bar-cast")
+            .test_id(id)
+            .accessibility_state(move || AccessibilityState {
+                busy: ui.cast_busy.get(),
+                has_popup: true,
+                expanded: Some(ui.cast_picker_open.get()),
+                ..Default::default()
+            })
             .w(px(size))
             .h(px(size))
             .label(move || crate::i18n::tr("Cast to TV"))
@@ -27,6 +33,7 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
     {
         return view();
     }
+    let pending_choice = std::cell::RefCell::new(None);
     view()
         // This host is always mounted, including while the play bar disappears.
         .w(px(0.0))
@@ -40,14 +47,12 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                 .prop("owner", move || json!(runtime().native_cast_view()))
                 .on_native_event(move |event: &NativeEvent| match event.name.as_ref() {
                     "routes-open" => {
+                        pending_choice.replace(Some((
+                            runtime().cast_intent(),
+                            ui.player.main().key.get_untracked(),
+                        )));
                         ui.cast_picker_open.set(true);
                         ui.touched();
-                        // A Mac negotiates video on the AVPlayer before routing.
-                        // On iPad, local mpv already owns the shared audio session;
-                        // wait for the user to actually choose an external device.
-                        if cfg!(target_os = "macos") {
-                            crate::casting::select_airplay(ui);
-                        }
                     }
                     "routes-closed" => {
                         ui.cast_picker_open.set(false);
@@ -55,7 +60,16 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                             crate::chooser::close(ui);
                         }
                     }
-                    "route-selected" => crate::casting::select_airplay(ui),
+                    "route-selected" => {
+                        if pending_choice.take().is_some_and(|(ticket, channel)| {
+                            runtime().cast_intent_current(ticket)
+                                && channel.is_some()
+                                && channel == ui.player.main().key.get_untracked()
+                                && crate::casting::available(ui)
+                        }) {
+                            crate::casting::select_airplay(ui);
+                        }
+                    }
                     "local-selected" => crate::casting::play_here(ui),
                     _ => {}
                 }),

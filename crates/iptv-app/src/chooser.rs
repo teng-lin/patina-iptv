@@ -32,7 +32,6 @@ const MAX_ROWS: usize = 7;
 pub enum Kind {
     Picture,
     Cast,
-    CastRemote,
     AirPlay,
     CastEnded,
     More,
@@ -159,7 +158,6 @@ fn title(kind: Kind) -> &'static str {
         Kind::AudioDelay => tr("Audio delay"),
         Kind::History => tr("Recently watched"),
         Kind::Cast => tr("Cast to TV"),
-        Kind::CastRemote => tr("Casting through this device"),
         Kind::AirPlay => tr("Cast to TV"),
         Kind::CastEnded => tr("Casting ended."),
         Kind::Leave => tr("Close Patina?"),
@@ -236,7 +234,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
         Kind::AirPlay if ui.cast_busy.get_untracked() => {
             (vec![tr("Cancel").to_owned()], Vec::new(), 0)
         }
-        Kind::CastRemote | Kind::AirPlay => (
+        Kind::AirPlay => (
             vec![tr("This device").to_owned()],
             vec!["local".to_owned()],
             0,
@@ -333,7 +331,7 @@ pub fn close(ui: Ui) {
             .chooser
             .with_untracked(|open| open.as_ref().is_some_and(|open| open.kind == Kind::AirPlay))
     {
-        crate::runtime_owner::runtime().cancel_pending_native_cast();
+        crate::casting::play_here(ui);
     }
     ui.chooser.set(None);
 }
@@ -364,10 +362,6 @@ pub fn pick(ui: Ui, index: usize) {
     let Some(open) = ui.chooser.get_untracked() else {
         return;
     };
-    if open.kind == Kind::CastRemote && index == 2 && ui.cast_busy.get_untracked() {
-        crate::settings_view::notify(tr("Wait for the current cast request to finish."));
-        return;
-    }
     let value = open.values.get(index).cloned().unwrap_or_default();
     if open.kind == Kind::Cast && value == "local" && ui.cast_busy.get_untracked() {
         crate::casting::play_here(ui);
@@ -432,7 +426,6 @@ pub fn pick(ui: Ui, index: usize) {
                 crate::casting::play_here(ui);
             }
         }
-        Kind::CastRemote => crate::casting::play_here(ui),
         Kind::CastEnded => {
             if index == 0
                 && ui.playing.get_untracked().is_none()
@@ -575,7 +568,6 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                             .get(index)
                             .is_some_and(|value| crate::casting::destination_selected(value)),
                         Kind::History
-                        | Kind::CastRemote
                         | Kind::AirPlay
                         | Kind::CastEnded
                         | Kind::More
@@ -594,12 +586,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                 c.as_ref().is_some_and(|c| {
                     matches!(
                         c.kind,
-                        Kind::Cast
-                            | Kind::CastRemote
-                            | Kind::AirPlay
-                            | Kind::CastEnded
-                            | Kind::More
-                            | Kind::Leave
+                        Kind::Cast | Kind::AirPlay | Kind::CastEnded | Kind::More | Kind::Leave
                     )
                 })
             })
@@ -729,22 +716,6 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                 } else {
                     crate::airplay::picker(ui, move || kind() == Some(Kind::AirPlay))
                 })
-                .child(when(
-                    move || {
-                        !leave
-                            && kind() == Some(Kind::Cast)
-                            && crate::runtime_owner::runtime().native_cast_view().is_some()
-                    },
-                    move || {
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .px(px(16.0))
-                            .child(crate::airplay::button(ui, 48.0))
-                            .child(text(move || tr("Choose a device")))
-                    },
-                ))
                 .child(
                     virtual_list(count, row)
                         // A More row keeps its node when another control
@@ -783,7 +754,27 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                                 content
                             })
                         }),
-                ),
+                )
+                .child(when(
+                    move || {
+                        !leave
+                            && kind() == Some(Kind::Cast)
+                            && crate::runtime_owner::runtime().native_cast_view().is_some()
+                    },
+                    move || {
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.0))
+                            .px(px(16.0))
+                            .child(crate::airplay::button(
+                                ui,
+                                48.0,
+                                "chooser-native-device-picker",
+                            ))
+                            .child(text(move || tr("Choose a device")))
+                    },
+                )),
         )
 }
 

@@ -451,29 +451,25 @@ pub(crate) fn set_paused(ui: Ui, paused: bool) {
     crate::interruption::viewer_acted(ui);
     if ui.cast_remote.get_untracked() {
         crate::casting::set_paused(ui, paused);
-    } else if ui.paused.get_untracked() != paused
-        || (!paused && crate::on_demand::active(ui) && ui.player.main().finished.get_untracked())
-    {
-        toggle_pause(ui);
-    }
-}
-
-pub fn toggle_pause(ui: Ui) {
-    if ui.cast_remote.get_untracked() {
-        crate::casting::set_paused(ui, !ui.paused.get_untracked());
-        return;
-    }
-    crate::interruption::viewer_acted(ui);
-    if crate::on_demand::active(ui)
+    } else if !paused
+        && crate::on_demand::active(ui)
         && ui.player.main().finished.get_untracked()
         && ui.player.main().accepts_native(None)
     {
         ui.paused.set(false);
         retry_surface(ui, 0);
-    } else {
-        ui.paused.update(|p| *p = !*p);
+    } else if ui.paused.get_untracked() != paused {
+        ui.paused.set(paused);
         crate::on_demand::flush(ui, false);
     }
+}
+
+pub fn toggle_pause(ui: Ui) {
+    let replay = !ui.cast_remote.get_untracked()
+        && crate::on_demand::active(ui)
+        && ui.player.main().finished.get_untracked()
+        && ui.player.main().accepts_native(None);
+    set_paused(ui, !replay && !ui.paused.get_untracked());
 }
 
 /// Applies the guide's user-controlled playback block before any PIN check.
