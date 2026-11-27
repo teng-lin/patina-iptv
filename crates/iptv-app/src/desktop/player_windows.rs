@@ -385,6 +385,7 @@ fn player_content(
     let window = nsh_core::element::desktop::current_window();
     super::keep_reachable(window.clone());
     follow_lists(local);
+    crate::lists::bind_categories(local);
     let input = stored(Some(crate::input::bind(local)));
     crate::pip::bind(local);
     bind_pip(parent, local, id, window.clone(), back_action);

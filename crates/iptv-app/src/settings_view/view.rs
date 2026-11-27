@@ -38,15 +38,21 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 }
 
 pub(crate) fn notice_layer() -> impl IntoElement {
-    let notice = Notice::new();
-    NOTICE.with(|n| n.set(Some(notice)));
-    let text = notice.text;
+    let state = Notice::new();
+    NOTICE.with(|n| n.set(Some(state)));
+    notice("app-notice", move || state.text.get())
+}
+
+pub(crate) fn notice(
+    id: &'static str,
+    text: impl Fn() -> Option<String> + Copy + 'static,
+) -> impl IntoElement {
     let size = Scale::new();
     when(
-        move || text.with(Option::is_some),
+        move || text().is_some(),
         move || {
             view()
-                .test_id("app-notice")
+                .test_id(id)
                 .role(AccessibilityRole::Alert)
                 .absolute()
                 .left(px(0.0))
@@ -55,7 +61,7 @@ pub(crate) fn notice_layer() -> impl IntoElement {
                 .items_center()
                 .pointer_events(PointerEvents::None)
                 .child(
-                    ui_kit::body(size, move || text.get().unwrap_or_default())
+                    ui_kit::body(size, move || text().unwrap_or_default())
                         .px(move || size.px(18.0))
                         .py(move || size.px(12.0))
                         .rounded(px(RADIUS))

@@ -9,7 +9,7 @@ use iptv_core::guide::Schedule;
 use iptv_guide::combined::CombinedSchedule;
 use iptv_nav::Action;
 use iptv_presentation::channel_picker::{ChannelPicker, Pane};
-use iptv_presentation::lists::{Entry, ListId, entry_count};
+use iptv_presentation::lists::{Entry, ListId, VisibleEntries};
 use nsh_base::input;
 use nsh_core::prelude::*;
 use std::rc::Rc;
@@ -38,6 +38,10 @@ fn catalog(ui: Ui) -> Rc<dyn Schedule> {
     ui.channel_picker
         .with(|p| p.as_ref().map(|p| p.catalog.clone()))
         .unwrap_or_else(crate::schedule)
+}
+
+fn visible_entries(ui: Ui) -> VisibleEntries {
+    crate::lists::entries_in(ui, &*catalog(ui))
 }
 
 fn combined(catalog: &dyn Schedule) -> Option<&CombinedSchedule> {
@@ -80,7 +84,8 @@ fn refresh(ui: Ui) {
     let catalog = catalog(ui);
     let favorites = crate::favorites::favorite_channels();
     let recent = crate::favorites::recent_channels();
-    update(ui, |p| p.refresh(&*catalog, &favorites, &recent));
+    let entries = crate::lists::entries_in(ui, &*catalog);
+    update(ui, |p| p.refresh(&*catalog, &favorites, &recent, entries));
 }
 
 /// A new data generation keeps picker-local expansion by source identity.
@@ -151,13 +156,15 @@ pub fn key(ui: Ui, action: Action) {
             };
             let catalog = catalog(ui);
             let before = state(ui, |p| p.entry(&*catalog));
-            update(ui, |p| p.vertical(by, &*catalog));
+            let entries = crate::lists::entries_in(ui, &*catalog);
+            update(ui, |p| p.vertical(by, &*catalog, entries));
             if state(ui, |p| p.entry(&*catalog)) != before {
                 refresh(ui);
             }
         }
         Action::MoveLeft | Action::MoveRight => {
-            update(ui, |p| p.horizontal(action == Action::MoveRight));
+            let entries = visible_entries(ui);
+            update(ui, |p| p.horizontal(action == Action::MoveRight, entries));
         }
         Action::Select => match state(ui, |p| p.pane) {
             Some(Pane::Search) => update(ui, ChannelPicker::edit),
@@ -205,6 +212,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             untracked(|| refresh_catalog(ui));
         }
     });
+    let categories =
+        computed(move || crate::lists::category_preferences(&crate::settings_wiring::read(ui)));
+    effect(move || {
+        categories.get();
+        untracked(|| {
+            if is_open(ui) {
+                refresh(ui);
+            }
+        });
+    });
     effect(move || {
         let picking = ui
             .multiview
@@ -248,7 +265,9 @@ fn screen(ui: Ui) -> impl IntoElement {
         }
     });
     effect(move || {
-        groups.scroll_to_index(entry.get() as u32, percentage(0.5), px(0.0), false);
+        if let Some(position) = visible_entries(ui).position(entry.get()) {
+            groups.scroll_to_index(position as u32, percentage(0.5), px(0.0), false);
+        }
     });
     ui_kit::screen(ui, size)
         .accessibility_elements_hidden(move || {
@@ -270,7 +289,7 @@ fn screen(ui: Ui) -> impl IntoElement {
                         .child(ui_kit::heading(size, move || tr("Groups")))
                         .child(
                             virtual_list(
-                                move || { ui.app.data_version.get(); entry_count(&*catalog(ui)) },
+                                move || visible_entries(ui).len(),
                                 move |at| group_row(ui, at, size, entry),
                             ).element_ref(&groups).estimated_item_size(list_rows::pitch(size, ROW)).flex_1(),
                         ),
@@ -370,20 +389,20 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl IntoElement {
+    let visible = move || visible_entries(ui).entry(at.index());
+    let selected = move || visible() == Some(entry.get());
     let mark = move || {
         Mark::of(
-            ui.keys_shown() && focused(ui, Pane::Groups) && entry.get() == at.index(),
-            entry.get() == at.index(),
+            ui.keys_shown() && focused(ui, Pane::Groups) && selected(),
+            selected(),
         )
     };
     let name = move || {
-        ui.app.data_version.get();
-        crate::lists::browser_entry_name(at.index(), &*catalog(ui))
+        visible().map_or_else(String::new, |entry| {
+            crate::lists::browser_entry_name(entry, &*catalog(ui))
+        })
     };
-    let expanded = move || {
-        ui.app.data_version.get();
-        crate::lists::playlist_expanded(at.index(), &*catalog(ui))
-    };
+    let expanded = move || crate::lists::playlist_expanded(visible()?, &*catalog(ui));
     list_rows::row(size, ROW, mark)
         .flex_row()
         .items_center()
@@ -391,13 +410,15 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
         .role(AccessibilityRole::Tab)
         .label(move || name().trim_start().to_owned())
         .accessibility_state(move || AccessibilityState {
-            selected: entry.get() == at.index(),
+            selected: selected(),
             expanded: expanded(),
             ..Default::default()
         })
         .on_press(move || {
             ui.touched();
-            group(ui, at.index(), true);
+            if let Some(entry) = visible() {
+                group(ui, entry, true);
+            }
         })
         .child(
             list_rows::name(size, name)

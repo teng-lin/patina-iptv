@@ -19,7 +19,7 @@ use crate::organization_view;
 mod cell;
 mod channel;
 use cell::RowFocus;
-pub(crate) use channel::no_logo;
+pub(crate) use channel::{channel_logo, no_logo, show_channel_logos};
 pub(crate) mod keys;
 mod pan;
 mod ruler;

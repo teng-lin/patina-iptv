@@ -75,6 +75,12 @@ pub static GENERAL: &[Setting] = &[
     )
     .advanced()
     .depends(&[visible_if(&[when("general.confirm_exit", Test::IsTrue)])]),
+    general(
+        "startup",
+        "general.double_back_to_exit",
+        boolean(false),
+        key("At the main menu, press Back again while the exit message is shown."),
+    ),
     // default: observed (07)
     general(
         "language",
@@ -239,6 +245,12 @@ pub static CHANNELS: &[Setting] = &[
         "channels.show_favorites",
         boolean(true),
         key("Offer a category with the favorite channels."),
+    ),
+    channels(
+        "categories",
+        "channels.show_recent",
+        boolean(true),
+        key("Offer a category with recently watched channels."),
     ),
     // default: ours
     channels(

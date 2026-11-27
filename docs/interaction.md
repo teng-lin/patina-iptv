@@ -262,19 +262,18 @@ and focus on a live channel follows the clock to the program now on air.
   them again. Tablets and desktops always show them, keyboard users included.
   List editing keeps its host's model (dragging with Save and Cancel, or OK and
   the arrows) whichever input drives it.
-- **Now:** with nothing left to close at the top level, Back is the
-  platform's (`bind_back` in `crates/iptv-app/src/lib.rs` registers no
-  handler there). Android TV and Android phones and tablets leave in one
-  press, with the predictive back animation on Android 15 and later (on
-  Android 14 behind the developer option "Predictive back animations"). A
-  desktop window stays open: Escape at the top level does nothing, and the
-  window closes the operating system's way. Nothing asks for a second Back
-  (#277). A host that asks before leaving (`iptv_app::confirm_leaving`:
-  the Tizen NSH host, after Samsung's termination guide) keeps the handler
-  there instead, and Back opens a chooser, "Close Patina?", with No
-  focused and Yes; Back or No closes it, Yes has the host leave. It asks
-  wherever Back would otherwise leave (the first run's welcome screen
-  too) and shows over every other screen.
+- **Now:** at the top level, Android hands Back to the system by default.
+  Android TV viewers can enable **Press Back twice to leave** in **Settings
+  → General**. At the navigation rail, the first Back displays an exit
+  message. Pressing Back again while the message is visible returns to the
+  launcher. The message normally lasts two seconds and follows longer
+  Android accessibility timeouts. Android handhelds keep predictive back.
+  On desktop, Escape leaves the window open. On Samsung Tizen, Return at
+  the top level opens **Close Patina?**. Back or No dismisses the prompt.
+- **Now:** **Settings → Appearance → Categories** has separate switches
+  for Favorites, Recently watched, and All channels in the guide, player
+  channel list, and multiview picker. The player list follows the **Channel logos**
+  setting used in the guide.
 
 ## Secondary actions
 

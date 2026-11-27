@@ -24,7 +24,7 @@ mod words;
 
 pub(crate) use view::focused_playlist;
 pub use view::layer;
-pub(crate) use view::notice_layer;
+pub(crate) use view::{notice, notice_layer};
 pub(crate) use words::choice as choice_label;
 
 use std::cell::Cell;

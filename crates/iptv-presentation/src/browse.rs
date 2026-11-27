@@ -122,7 +122,7 @@ pub fn rail_search(items: &[RailItem]) -> RailItem {
 #[derive(Clone, Copy, Debug)]
 pub struct Columns<'a> {
     /// Entries in the groups column ([`crate::lists::entry_count`]).
-    pub entries: usize,
+    pub entries: crate::lists::VisibleEntries,
     pub rail: &'a [RailItem],
     /// Back on a past or future program returns to now before it goes
     /// to the groups (`guide.back_returns_to_now`).
@@ -221,7 +221,15 @@ impl Focus {
                 Outcome::Moved
             }
             (Pane::Groups, Move::Up | Move::Down) => {
-                self.select(m.wrap_vertical(self.group, cols.entries))
+                let position = cols.entries.position(self.group);
+                let next = match position {
+                    Some(position) => m.wrap_vertical(position, cols.entries.len()),
+                    None if m == Move::Up => cols.entries.len().saturating_sub(1),
+                    None => 0,
+                };
+                cols.entries
+                    .entry(next)
+                    .map_or(Outcome::None, |entry| self.select(entry))
             }
             (Pane::Groups, Move::Left) => {
                 self.pane = Pane::Rail;
@@ -326,7 +334,7 @@ impl Focus {
 
     /// A tap on a groups column entry: selects it as moving onto it does.
     pub fn tap_entry(&mut self, entry: usize, cols: &Columns) -> Outcome {
-        if entry >= cols.entries {
+        if cols.entries.position(entry).is_none() {
             return Outcome::None;
         }
         self.hint = false;
@@ -341,7 +349,7 @@ impl Focus {
     /// list): the guide shows its list from the first row, at now, with
     /// the columns as they were. Whether the selection changed.
     pub fn preview_list(&mut self, entry: usize, cols: &Columns) -> bool {
-        entry < cols.entries && self.select(entry) == Outcome::Preview
+        cols.entries.position(entry).is_some() && self.select(entry) == Outcome::Preview
     }
 
     /// A tap on a rail item.

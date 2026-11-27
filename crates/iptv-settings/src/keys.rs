@@ -62,6 +62,10 @@ pub const EPG_UPDATE: EnumKey = EnumKey("epg.update");
 pub const RESUME_LAST_CHANNEL: BoolKey = BoolKey("general.resume_last_channel");
 /// Whether the groups column offers the Favorites category.
 pub const SHOW_FAVORITES: BoolKey = BoolKey("channels.show_favorites");
+pub const SHOW_RECENT: BoolKey = BoolKey("channels.show_recent");
+pub const SHOW_ALL_CHANNELS: BoolKey = BoolKey("channels.show_all_channels");
+/// Opt-in on Android TV. The older confirm_exit settings remain retired.
+pub const DOUBLE_BACK_TO_EXIT: BoolKey = BoolKey("general.double_back_to_exit");
 pub const CONFIRM_EXIT: BoolKey = BoolKey("general.confirm_exit");
 pub const CONFIRM_EXIT_WINDOW: DurationKey = DurationKey("general.confirm_exit_window");
 
@@ -112,6 +116,9 @@ pub const ALL: &[(&str, &str)] = &[
     (EPG_UPDATE.0, "enum"),
     (RESUME_LAST_CHANNEL.0, "bool"),
     (SHOW_FAVORITES.0, "bool"),
+    (SHOW_RECENT.0, "bool"),
+    (SHOW_ALL_CHANNELS.0, "bool"),
+    (DOUBLE_BACK_TO_EXIT.0, "bool"),
     (CONFIRM_EXIT.0, "bool"),
     (CONFIRM_EXIT_WINDOW.0, "duration"),
     (UI_TRANSPARENCY.0, "integer"),

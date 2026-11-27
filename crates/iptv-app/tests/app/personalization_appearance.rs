@@ -270,3 +270,42 @@ fn changing_the_guide_layout_preference_retires_the_keyboard_override() {
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
     assert_eq!(player(app).id, id);
 }
+
+#[test]
+fn category_switches_remap_focus_to_the_same_channel_and_preserve_favorites() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), true);
+    let app = &mut fixture.app;
+    step(app.press_key("down"));
+    step(app.press_key("down"));
+
+    settings(app);
+    setting(app, "All channels category");
+    setting(app, "Favorites category");
+    setting(app, "Recently watched category");
+    close(app);
+    step(app.wait_for("role:grid[Sport]"));
+    step(app.wait_for("text:★ Local C"));
+
+    step(app.open_guide_groups());
+    for name in ["Favorites", "Recently watched", "All channels"] {
+        assert!(
+            !app.screen()
+                .matches(&format!("id:guide-groups >> text:{name}"))
+                .unwrap()
+        );
+    }
+    for name in ["News", "Sport"] {
+        step(app.wait_for(&format!("id:guide-groups >> text:{name}")));
+    }
+    let dir = fixture.path.parent().unwrap();
+    personalization::saved_settings(app, &dir.join("settings.json"), |settings| {
+        [
+            iptv_settings::keys::SHOW_ALL_CHANNELS,
+            iptv_settings::keys::SHOW_FAVORITES,
+            iptv_settings::keys::SHOW_RECENT,
+        ]
+        .into_iter()
+        .all(|key| !settings.bool(key, &iptv_settings::Target::Global))
+    });
+}

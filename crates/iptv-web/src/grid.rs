@@ -90,7 +90,7 @@ pub(crate) fn stored_title(listing: Option<Listing>) -> Option<String> {
 
 fn columns(entries: usize) -> Columns<'static> {
     Columns {
-        entries,
+        entries: iptv_presentation::lists::VisibleEntries::all(entries),
         rail: &RAIL,
         back_to_now: true,
     }

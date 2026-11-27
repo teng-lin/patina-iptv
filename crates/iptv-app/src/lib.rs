@@ -63,6 +63,7 @@ mod desktop;
 mod device;
 mod device_wiring;
 mod epg_sources_view;
+mod exit_confirmation;
 mod external_player;
 mod fav_editor;
 mod favorites;
@@ -433,6 +434,7 @@ pub struct Ui {
     /// A Long Back acted: the platform's Back on its release is swallowed
     /// (`input.rs`).
     pub back_guard: Signal<iptv_nav::BackGuard>,
+    exit_deadline: Signal<Option<u64>>,
 }
 
 impl SharedUi {
@@ -613,6 +615,7 @@ impl Ui {
             channel_picker: signal(None),
             pip: signal(Default::default()),
             back_guard: signal(iptv_nav::BackGuard::default()),
+            exit_deadline: signal(None),
         };
         player_panels::bind_auto_hide(ui);
         ui
@@ -875,8 +878,10 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     });
     // The groups column shows the selected group when it opens or moves.
     effect(move || {
-        if shown.get() {
-            groups.scroll_to_index(group.get() as u32, percentage(0.5), px(0.0), false);
+        if shown.get()
+            && let Some(position) = lists::visible_entries(ui).position(group.get())
+        {
+            groups.scroll_to_index(position as u32, percentage(0.5), px(0.0), false);
         }
     });
 
@@ -1035,6 +1040,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             move || chooser::layer(ui, true),
         ))
         .child(settings_view::notice_layer())
+        .child(exit_confirmation::layer(ui))
 }
 
 /// Full screen: a tap toggles the play bar (the panels where there is no
@@ -1184,18 +1190,10 @@ pub(crate) fn leave() {
     }
 }
 
-/// Back: dialogs close; a full screen window becomes a window again (the
-/// desktop's Escape); player panels or the play bar → hidden; full screen/overlay → guide;
-/// then the guide screen's chain (`browse.rs`): hint card → guide → groups →
-/// rail → leave the app. Where Back leaves no handler is registered, so
-/// the platform's Back takes it at once: Android leaves without a second
-/// press and its predictive back gesture shows the way home; a desktop
-/// window stays open (Escape does nothing there, and the window closes
-/// the operating system's way). A host that asks before leaving
-/// ([`confirm_leaving`]) keeps the handler there, and Back opens its
-/// prompt. The release of a Long Back that acted takes no step
-/// (`input::swallow_back`), so a handler stays while one is pending, even
-/// where Back would leave.
+/// Install the platform Back handler while there is an in-app step to take
+/// or an exit confirmation to handle. A pending Long Back release takes
+/// precedence over both. The default exit is delegated to the platform,
+/// so Android handhelds can preview the gesture back to their launcher.
 fn bind_back(ui: Ui) {
     let back_target = computed(move || {
         let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
@@ -1210,24 +1208,38 @@ fn bind_back(ui: Ui) {
         (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu)
     });
     effect(move || {
-        // Root screens leave through the platform: welcome, recovery without
-        // details, and the rail with no video to return to. A channel number
-        // being typed and a pending Long Back release are handled first.
-        let leaves = match ui.top_overlay() {
+        let top = ui.top_overlay();
+        let rail_root = top.is_none()
+            && !desktop::fullscreen()
+            && match back_target.get() {
+                (ViewMode::Guide, Pane::Rail, false) => true,
+                (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
+                _ => false,
+            };
+        let double_back = rail_root
+            && exit_confirmation::enabled(ui)
+            && lifecycle() == nsh_core::platform::Lifecycle::Active
+            && !ui.channel_number.with(|entry| entry.active());
+        if !double_back {
+            ui.exit_deadline.set(None);
+        }
+        let leaves = match top {
             Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui),
             Some(overlays::Overlay::StoreStartupFailure) => {
                 startup_view::store_failure_back_leaves(ui)
             }
-            None if !desktop::fullscreen() => match back_target.get() {
-                (ViewMode::Guide, Pane::Rail, false) => true,
-                (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
-                _ => false,
-            },
-            _ => false,
+            _ => rail_root,
         } && !ui.channel_number.with(|entry| entry.active())
             && !ui.back_guard.with(iptv_nav::BackGuard::armed);
-        if !leaves || asks_before_leaving() {
-            on_back_press(move || input::swallow_back(ui) || go_back(ui));
+        if !leaves || asks_before_leaving() || double_back {
+            on_back_press(move || {
+                input::swallow_back(ui)
+                    || if double_back && leaves {
+                        exit_confirmation::press(ui)
+                    } else {
+                        go_back(ui)
+                    }
+            });
         }
     });
 }
