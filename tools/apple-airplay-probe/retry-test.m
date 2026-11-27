@@ -85,6 +85,12 @@ int main(void) {
         NSURL *frameFile = [(AVURLAsset *)standby.currentItem.asset URL];
         NSCAssert(frameFile.isFileURL && [[NSFileManager defaultManager] fileExistsAtPath:frameFile.path],
                   @"the priming asset is local");
+        NSDate *readyBy = [NSDate dateWithTimeIntervalSinceNow:5];
+        while (standby.currentItem.status == AVPlayerItemStatusUnknown && readyBy.timeIntervalSinceNow > 0)
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        NSCAssert(standby.currentItem.status == AVPlayerItemStatusReadyToPlay &&
+                  standby.currentItem.presentationSize.width == 16,
+                  @"AVFoundation can actually decode the local video priming item");
         [choosing confirmPickerRoute:NO externalVideo:YES];
         [choosing confirmPickerRoute:YES externalVideo:NO];
         NSCAssert(![routeEvents containsObject:@8], @"existing routes and audio-only changes leave live video local");
