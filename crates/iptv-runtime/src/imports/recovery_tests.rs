@@ -94,6 +94,8 @@ https://media.example.test/incoming.ts\n";
                     Err(error) => panic!("generated server failed: {error}"),
                 }
             };
+            // Windows can inherit nonblocking mode from the listener.
+            stream.set_nonblocking(false).unwrap();
             stream.set_read_timeout(Some(LIMIT)).unwrap();
             stream.set_write_timeout(Some(LIMIT)).unwrap();
             let mut request = Vec::new();
