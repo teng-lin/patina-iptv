@@ -55,14 +55,15 @@ pub(crate) fn bind(ui: Ui) {
         }
         let resumed = !was_foreground.replace(foreground) && foreground;
         if resumed {
-            let trigger = if started.replace(true) {
+            let first = !started.replace(true);
+            let trigger = if !first {
                 Trigger::Automatic
+            } else if ui.update_dialog_open.get_untracked() {
+                Trigger::Manual
             } else {
                 Trigger::Startup
             };
-            if ui.update_dialog_open.get_untracked() {
-                check(ui, Trigger::Manual);
-            } else if scheduled_enabled() {
+            if trigger == Trigger::Manual || scheduled_enabled() {
                 check(ui, trigger);
             }
         }

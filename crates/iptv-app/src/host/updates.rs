@@ -333,35 +333,6 @@ fn metadata_ready_for(
         })
 }
 
-#[cfg(all(
-    test,
-    any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    )
-))]
-mod metadata_tests {
-    use super::*;
-    use iptv_core::capabilities::Platform;
-
-    #[test]
-    fn android_discovery_waits_for_the_channel_and_direct_package_identity() {
-        let mut report = crate::device::Report::default();
-        assert!(!metadata_ready_for(Platform::Android, None));
-        assert!(!metadata_ready_for(Platform::Android, Some(report)));
-        assert!(metadata_ready_for(Platform::Macos, None));
-        report.direct_apk = Some(true);
-        assert!(!metadata_ready_for(Platform::Android, Some(report)));
-        report.direct_android_build = Some((42, 36));
-        assert!(metadata_ready_for(Platform::Android, Some(report)));
-        report.direct_apk = Some(false);
-        report.direct_android_build = None;
-        assert!(metadata_ready_for(Platform::Android, Some(report)));
-    }
-}
-
 #[cfg(any(
     target_os = "android",
     target_os = "linux",
@@ -498,24 +469,15 @@ pub(crate) fn automatic_install_supported() -> bool {
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(
+    target_os = "linux",
+    all(
+        test,
+        any(target_os = "android", target_os = "windows", target_os = "macos")
+    )
+))]
 fn appimage_install_enabled(handoff: Option<&str>, format: Option<&str>) -> bool {
     handoff == Some("1") && format.is_some_and(|format| format.trim() == "appimage")
-}
-
-#[cfg(test)]
-mod package_policy_tests {
-    use super::appimage_install_enabled;
-
-    #[test]
-    fn a_shared_linux_binary_only_installs_from_an_appimage_package() {
-        assert!(appimage_install_enabled(Some("1"), Some("appimage\n")));
-        for format in [None, Some("deb"), Some("rpm"), Some("pacman")] {
-            assert!(!appimage_install_enabled(Some("1"), format));
-        }
-        assert!(!appimage_install_enabled(None, Some("appimage")));
-        assert!(!appimage_install_enabled(Some("0"), Some("appimage")));
-    }
 }
 
 #[cfg(any(
@@ -533,5 +495,44 @@ pub(crate) async fn open_download_url(url: &str) {
             .cancel("close", crate::i18n::tr("Close"))
             .show()
             .await;
+    }
+}
+
+#[cfg(all(
+    test,
+    any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    )
+))]
+mod tests {
+    use super::*;
+    use iptv_core::capabilities::Platform;
+
+    #[test]
+    fn android_discovery_waits_for_the_channel_and_direct_package_identity() {
+        let mut report = crate::device::Report::default();
+        assert!(!metadata_ready_for(Platform::Android, None));
+        assert!(!metadata_ready_for(Platform::Android, Some(report)));
+        assert!(metadata_ready_for(Platform::Macos, None));
+        report.direct_apk = Some(true);
+        assert!(!metadata_ready_for(Platform::Android, Some(report)));
+        report.direct_android_build = Some((42, 36));
+        assert!(metadata_ready_for(Platform::Android, Some(report)));
+        report.direct_apk = Some(false);
+        report.direct_android_build = None;
+        assert!(metadata_ready_for(Platform::Android, Some(report)));
+    }
+
+    #[test]
+    fn a_shared_linux_binary_only_installs_from_an_appimage_package() {
+        assert!(appimage_install_enabled(Some("1"), Some("appimage\n")));
+        for format in [None, Some("deb"), Some("rpm"), Some("pacman")] {
+            assert!(!appimage_install_enabled(Some("1"), format));
+        }
+        assert!(!appimage_install_enabled(None, Some("appimage")));
+        assert!(!appimage_install_enabled(Some("0"), Some("appimage")));
     }
 }
