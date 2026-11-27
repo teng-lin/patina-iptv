@@ -82,12 +82,14 @@ impl AirPlay {
         let record = records
             .resolve_unique(identity)
             .map_err(|kind| failure(kind, Stage::Connect))?;
-        self.connect_addresses(&record.addresses, credential).await
+        self.connect_addresses(&record.addresses, record.pin_hint, credential)
+            .await
     }
 
     async fn connect_addresses(
         &self,
         addresses: &[SocketAddr],
+        pin_hint: PinHint,
         credential: Option<Credential>,
     ) -> Result<BackendConnect, Error> {
         let keys = credential
@@ -109,21 +111,31 @@ impl AirPlay {
             )?)));
         }
 
-        match hap::transient_on_wire(wire).await {
-            Ok(secure) => {
-                return Ok(BackendConnect::Ready(Box::new(AirDriver::new(
-                    secure,
-                    self.timing_port,
-                )?)));
+        let pairing = if pin_hint == PinHint::Required {
+            hap::start_pairing_on_wire(wire).await
+        } else {
+            match hap::transient_on_wire(wire).await {
+                Ok(secure) => {
+                    return Ok(BackendConnect::Ready(Box::new(AirDriver::new(
+                        secure,
+                        self.timing_port,
+                    )?)));
+                }
+                Err(AuthFailure(AuthFault::ApprovalDenied, Delivery::Acknowledged)) => {
+                    if pin_hint == PinHint::Suppressed {
+                        return Err(Error::new(
+                            ErrorKind::ReceiverRefused,
+                            Stage::Connect,
+                            Delivery::Acknowledged,
+                        ));
+                    }
+                    // Restart approval only at the chosen endpoint that asked for it.
+                    hap::start_pairing(address).await
+                }
+                Err(fault) => return Err(auth_error(fault, Stage::Connect)),
             }
-            Err(AuthFailure(AuthFault::ApprovalDenied, Delivery::Acknowledged)) => {}
-            Err(fault) => return Err(auth_error(fault, Stage::Connect)),
-        }
-        // Only an explicit rejection of guest access can request PIN approval.
-        // Open a fresh connection to the same endpoint that refused guest access.
-        let wire = hap::start_pairing(address)
-            .await
-            .map_err(|fault| auth_error(fault, Stage::Pair))?;
+        };
+        let wire = pairing.map_err(|fault| auth_error(fault, Stage::Pair))?;
         let expires = Instant::now() + APPROVAL_WINDOW;
         let challenge = tokio::spawn(Challenge::receive(wire, address, expires));
         Ok(BackendConnect::PinRequired(Box::new(AirPairing {
@@ -167,11 +179,60 @@ impl Backend for AirPlay {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PinHint {
+    Unspecified,
+    Required,
+    Suppressed,
+}
+
+impl PinHint {
+    fn from_service(info: &ResolvedService) -> Self {
+        const PIN_REQUIRED: u32 = 0x8;
+        const PASSWORD_REQUIRED: u32 = 0x80;
+        let flags = ["sf", "flags"].map(|name| {
+            let value = info.get_property_val_str(name)?;
+            let digits = value
+                .strip_prefix("0x")
+                .or_else(|| value.strip_prefix("0X"))
+                .unwrap_or(value);
+            if digits.len() > 8 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return None;
+            }
+            u32::from_str_radix(digits, 16).ok()
+        });
+        // TXT access hints only choose the on-screen flow. Authentication
+        // still depends on the handshake on the selected connection.
+        if info.get_property_val_str("act") == Some("2")
+            || info.get_property_val_str("acl") == Some("1")
+            || info
+                .get_property_val_str("pw")
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+            || flags
+                .iter()
+                .flatten()
+                .any(|value| value & PASSWORD_REQUIRED != 0)
+        {
+            Self::Suppressed
+        } else if flags.iter().any(Option::is_some)
+            && flags
+                .iter()
+                .flatten()
+                .all(|value| value & PIN_REQUIRED != 0)
+        {
+            Self::Required
+        } else {
+            Self::Unspecified
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Record {
     identity: Option<String>,
     name: String,
     addresses: Vec<SocketAddr>,
+    pin_hint: PinHint,
 }
 
 impl Record {
@@ -232,6 +293,7 @@ impl Record {
                 name
             },
             addresses,
+            pin_hint: PinHint::from_service(info),
         })
     }
 

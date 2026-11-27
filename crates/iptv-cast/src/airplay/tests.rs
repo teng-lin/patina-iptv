@@ -38,6 +38,7 @@ impl CredentialStore for TestStore {
 struct LocalAirPlay {
     backend: AirPlay,
     address: SocketAddr,
+    pin_hint: PinHint,
 }
 
 impl Backend for LocalAirPlay {
@@ -55,6 +56,7 @@ impl Backend for LocalAirPlay {
                 identity: Some("021122334455".into()),
                 name: "Synthetic TV".into(),
                 addresses: vec![self.address],
+                pin_hint: self.pin_hint,
             };
             sink.push(record.candidate());
             Ok(())
@@ -67,20 +69,26 @@ impl Backend for LocalAirPlay {
         credential: Option<Credential>,
     ) -> BoxFuture<'a, Result<BackendConnect, Error>> {
         Box::pin(async move {
-            assert_eq!(route.payload::<Record>().unwrap().addresses, [self.address]);
+            let record = route.payload::<Record>().unwrap();
+            assert_eq!(record.addresses, [self.address]);
             self.backend
-                .connect_addresses(&[self.address], credential)
+                .connect_addresses(&record.addresses, record.pin_hint, credential)
                 .await
         })
     }
 }
 
 fn client(address: SocketAddr, timing: u16, store: TestStore) -> Cast {
+    client_with_hint(address, timing, store, PinHint::Unspecified)
+}
+
+fn client_with_hint(address: SocketAddr, timing: u16, store: TestStore, pin_hint: PinHint) -> Cast {
     Cast::builder()
         .credential_store(store)
         .build_with(vec![Arc::new(LocalAirPlay {
             backend: AirPlay::new(NonZeroU16::new(timing)),
             address,
+            pin_hint,
         })])
         .unwrap()
 }
@@ -134,7 +142,7 @@ async fn guest_playback_encrypts_control_and_events_without_saving_a_pairing() {
         });
 
         let store = TestStore::default();
-        let cast = client(address, 0, store.clone());
+        let cast = client_with_hint(address, 0, store.clone(), PinHint::Suppressed);
         let route = discovered(&cast).await;
         let Connect::Ready(connection) = cast.connect(&route).await.unwrap() else {
             panic!("open receiver must accept guest playback without a PIN");
@@ -238,6 +246,117 @@ async fn password_home_membership_and_ambiguous_auth_failures_do_not_show_pin_pr
             .unwrap()
             .unwrap();
     }
+}
+
+fn advertised_pin_hint(properties: &[(&str, &str)]) -> PinHint {
+    let service = mdns_sd::ServiceInfo::new(
+        SERVICE,
+        "Policy fixture",
+        "patina-policy.local.",
+        "127.0.0.1",
+        7000,
+        properties,
+    )
+    .unwrap();
+    Record::from_service(&service.as_resolved_service())
+        .unwrap()
+        .pin_hint
+}
+
+#[test]
+fn access_hints_accept_known_values_and_resolve_conflicts_conservatively() {
+    assert_eq!(advertised_pin_hint(&[]), PinHint::Unspecified);
+    for properties in [
+        &[("act", "2")][..],
+        &[("acl", "1")],
+        &[("pw", "TrUe")],
+        &[("sf", "0x80")],
+        &[("flags", "0X84")],
+        &[("sf", "0x8"), ("flags", "0x88")],
+        &[("pw", "false"), ("flags", "80")],
+        &[("act", "2"), ("flags", "0x8")],
+    ] {
+        assert_eq!(
+            advertised_pin_hint(properties),
+            PinHint::Suppressed,
+            "{properties:?}"
+        );
+    }
+    for properties in [
+        &[("sf", "0x8")][..],
+        &[("flags", "08")],
+        &[("sf", "0x8"), ("flags", "0xC")],
+        &[("sf", "0x8oops"), ("flags", "0x8")],
+    ] {
+        assert_eq!(
+            advertised_pin_hint(properties),
+            PinHint::Required,
+            "{properties:?}"
+        );
+    }
+    for properties in [
+        &[("act", "2x"), ("acl", "-1"), ("pw", "1")][..],
+        &[("sf", "+80"), ("flags", "0x")],
+        &[("sf", "0x200"), ("flags", "0x200")],
+        &[("sf", "0x8"), ("flags", "0x0")],
+        &[("sf", "0x100000080"), ("flags", "0x80,0x0")],
+    ] {
+        assert_eq!(
+            advertised_pin_hint(properties),
+            PinHint::Unspecified,
+            "{properties:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn advertised_non_pin_access_still_tries_guest_then_preserves_a_470_refusal() {
+    let accessory = Accessory::bind().await;
+    let address = accessory.address();
+    let server = tokio::spawn(async move {
+        accessory.deny_transient().await;
+        assert!(
+            timeout(Duration::from_millis(30), accessory.accept())
+                .await
+                .is_err()
+        );
+    });
+    let hint = advertised_pin_hint(&[("acl", "1"), ("flags", "0x8")]);
+    let cast = client_with_hint(address, 0, TestStore::default(), hint);
+    let route = discovered(&cast).await;
+    let error = cast
+        .connect(&route)
+        .await
+        .err()
+        .expect("guest access was refused");
+    assert_eq!(error.kind(), ErrorKind::ReceiverRefused);
+    assert_eq!(error.stage(), Stage::Connect);
+    assert_eq!(error.delivery(), Delivery::Acknowledged);
+    timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn advertised_pin_requirement_requests_approval_without_trying_guest() {
+    let accessory = Accessory::bind().await;
+    let address = accessory.address();
+    let server = tokio::spawn(async move {
+        let (public, id) = accessory.pair().await.unwrap();
+        let (mut wire, _) = accessory.verify(&public, &id).await.unwrap();
+        assert!(matches!(wire.receive().await, Err(Fault::Closed)));
+    });
+    let hint = advertised_pin_hint(&[("flags", "0x8")]);
+    let store = TestStore::default();
+    let cast = client_with_hint(address, 0, store.clone(), hint);
+    let route = discovered(&cast).await;
+    paired_connection(&cast, &route).await.close().await;
+    assert!(store.0.lock().unwrap().is_some());
+    timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -470,6 +589,7 @@ fn service_id_changes_and_duplicates_are_resolved_by_the_current_scan() {
         identity: normalize_identity("02:12:34:56:78:9A"),
         name: "TV".into(),
         addresses: vec![address],
+        pin_hint: PinHint::Unspecified,
     };
     let identity = "02123456789a";
     records.update("name".into(), Some(record.clone()), None);
@@ -496,6 +616,7 @@ fn service_id_changes_and_duplicates_are_resolved_by_the_current_scan() {
 #[tokio::test]
 async fn discovers_loopback_advertisements_and_revalidates_the_selected_identity() {
     use mdns_sd::{IfKind, ServiceInfo};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let accessory = Accessory::bind().await;
     let address = accessory.address();
@@ -510,16 +631,22 @@ async fn discovers_loopback_advertisements_and_revalidates_the_selected_identity
     });
 
     let mut backend = AirPlay::new(None);
+    let initial_scan = AtomicBool::new(true);
     backend.browse_daemon = Some(Box::new(move || {
+        let act = if initial_scan.swap(false, Ordering::Relaxed) {
+            "2"
+        } else {
+            "0"
+        };
         let daemon = ServiceDaemon::new().unwrap();
         daemon.disable_interface(IfKind::All).unwrap();
         daemon.enable_interface(IfKind::LoopbackV4).unwrap();
         for (name, properties) in [
             (
                 "Patina fixture with identity",
-                Some([("deviceid", "02:FA:12:CA:14:22")]),
+                &[("deviceid", "02:FA:12:CA:14:22"), ("act", act)][..],
             ),
-            ("Patina fixture without identity", None),
+            ("Patina fixture without identity", &[("act", "2")]),
         ] {
             let mut fixture = ServiceInfo::new(
                 SERVICE,
@@ -527,11 +654,7 @@ async fn discovers_loopback_advertisements_and_revalidates_the_selected_identity
                 "patina-fixture.local.",
                 address.ip(),
                 address.port(),
-                properties.map(|pairs| {
-                    std::collections::HashMap::from(
-                        pairs.map(|(key, value)| (key.to_owned(), value.to_owned())),
-                    )
-                }),
+                properties,
             )
             .unwrap();
             fixture.set_interfaces(vec![IfKind::LoopbackV4]);
@@ -562,6 +685,10 @@ async fn discovers_loopback_advertisements_and_revalidates_the_selected_identity
     );
     assert!(
         matches!(cast.connect(ephemeral).await, Err(error) if error.kind() == ErrorKind::Unsupported)
+    );
+    assert_eq!(
+        selectable.payload::<Record>().unwrap().pin_hint,
+        PinHint::Suppressed
     );
     let Connect::PinRequired(pairing) = cast.connect(selectable).await.unwrap() else {
         panic!()
@@ -953,15 +1080,17 @@ async fn alternate_service_addresses_fail_over_before_any_pairing_request() {
         assert!(matches!(socket.receive().await, Err(Fault::Closed)));
     });
     let backend = AirPlay::new(None);
-    let BackendConnect::PinRequired(mut pairing) =
-        backend.connect_addresses(&addresses, None).await.unwrap()
+    let BackendConnect::PinRequired(mut pairing) = backend
+        .connect_addresses(&addresses, PinHint::Unspecified, None)
+        .await
+        .unwrap()
     else {
         panic!("the reachable address must start pairing");
     };
     pairing.cancel().await;
     server.await.unwrap();
     let error = backend
-        .connect_addresses(&[refused], None)
+        .connect_addresses(&[refused], PinHint::Unspecified, None)
         .await
         .err()
         .expect("the reserved socket is not accepting connections");
@@ -996,7 +1125,11 @@ async fn verification_refusal_does_not_send_a_trust_message_to_another_address()
     let addresses = [first.address(), second.address()];
     let backend = AirPlay::new(None);
     let (result, first, second) = tokio::join!(
-        backend.connect_addresses(&addresses, Some(Credential::from_bytes(keys))),
+        backend.connect_addresses(
+            &addresses,
+            PinHint::Required,
+            Some(Credential::from_bytes(keys))
+        ),
         observed_verify(first),
         observed_verify(second),
     );

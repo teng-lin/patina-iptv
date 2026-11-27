@@ -479,7 +479,7 @@ pub(super) async fn start_pairing(address: SocketAddr) -> Reported<Wire> {
     start_pairing_on_wire(open(address).await?).await
 }
 
-async fn start_pairing_on_wire(mut wire: Wire) -> Reported<Wire> {
+pub(super) async fn start_pairing_on_wire(mut wire: Wire) -> Reported<Wire> {
     // The receiver may wait for approval before replying. Return after the
     // request is sent so the caller can display the pending approval prompt.
     timeout(
