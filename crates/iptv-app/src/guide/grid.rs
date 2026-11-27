@@ -13,7 +13,7 @@
 //! the programs of a band a little wider than the window and slide them,
 //! with the ruler's times and the now line, by one animated offset.
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 use crate::organization_view;
 
 mod cell;
@@ -31,9 +31,9 @@ use pan::Pan;
 use iptv_presentation::lists::{FAVORITES, RECENT};
 use nsh_core::prelude::*;
 
-use crate::fonts::CHANNEL;
+use crate::chrome::fonts::CHANNEL;
+use crate::chrome::scale::Scale;
 use crate::guide::Pane;
-use crate::scale::Scale;
 use crate::theme::{RADIUS, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, tint};
 
@@ -63,7 +63,7 @@ const WHITE: u32 = 0xFFFFFF;
 
 /// The channel column's width now (reactive: the window's size).
 pub fn channel_width() -> f32 {
-    let scale = crate::scale::now();
+    let scale = crate::chrome::scale::now();
     (window().width.0 * CHANNEL_SHARE).clamp(CHANNEL_MIN * scale, CHANNEL_MAX * scale)
 }
 
@@ -71,7 +71,7 @@ pub fn channel_width() -> f32 {
 /// overlay's alpha (`appearance.ui_transparency`).
 pub(crate) fn fill(ui: Ui, rgb_hex: u32) -> Rgba {
     let alpha = match ui.chrome.mode.get() {
-        ViewMode::Overlay => crate::theme::overlay_alpha(&crate::settings_wiring::read(ui)),
+        ViewMode::Overlay => crate::theme::overlay_alpha(&crate::wiring::settings_wiring::read(ui)),
         ViewMode::Guide | ViewMode::Fullscreen => 0xFF,
     };
     tint(rgb_hex, alpha)
@@ -122,11 +122,11 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let column: fn() -> f32 = channel_width;
     // Rows are numbered by place: the list's length is its widest number.
     let number_w = computed(move || {
-        crate::settings_wiring::read(ui);
-        if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
+        crate::wiring::settings_wiring::read(ui);
+        if crate::wiring::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
             crate::guide::numbers::column_width(
                 ui.guide.list.with(|l| l.len()),
-                size.of(CHANNEL) * crate::settings::font_factor(),
+                size.of(CHANNEL) * crate::wiring::settings::font_factor(),
             )
         } else {
             0.0
@@ -249,7 +249,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
 /// Over an empty list: what it would hold and how to fill it.
 fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
     let empty = move || ui.guide.list.with(|l| l.is_empty());
-    let settings = computed(move || crate::menu_view::empty_group_settings_available(ui));
+    let settings = computed(move || crate::chrome::menu_view::empty_group_settings_available(ui));
     let message = move || match ui.guide.list.with(|l| l.entry()) {
         FAVORITES => tr(
             "No favorite channels yet. Hold OK (or press Menu) on a channel and choose “Add to favorites”, or star channels with “Manage favorites…”.",
@@ -282,13 +282,13 @@ fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
         .child(when(
             move || settings.get(),
             move || {
-                crate::ui_kit::button(
+                crate::chrome::ui_kit::button(
                     ui,
                     size,
                     move || tr("Group settings"),
                     move || ui.guide.focus.with(|f| f.pane == Pane::Guide),
                     move || {
-                        crate::menu_view::open_empty_group_settings(ui);
+                        crate::chrome::menu_view::open_empty_group_settings(ui);
                     },
                 )
             },
@@ -320,7 +320,7 @@ fn hint_card(ui: Ui) -> impl IntoElement {
 /// What the keys do in the guide: a remote's, or a desktop keyboard's
 /// (`iptv_nav::Profile`).
 fn hint_lines() -> [&'static str; 4] {
-    match crate::input::PROFILE {
+    match crate::chrome::input::PROFILE {
         iptv_nav::Profile::Remote => [
             tr("◀  ·  earlier programs, then groups"),
             tr("◀ in the groups  ·  search"),
@@ -393,7 +393,7 @@ fn row(
         ui.guide_data();
         let base = pan.band().base;
         channel.get().map_or_else(Vec::new, |ch| {
-            crate::runtime_owner::schedule().programs_between(ch, base, pan.minutes())
+            crate::wiring::runtime_owner::schedule().programs_between(ch, base, pan.minutes())
         })
     });
     // The focused program's start when this row has the focus (a memo

@@ -9,7 +9,7 @@
 //! Entry points: first run without a stored source, the top bar's "Add
 //! playlist" (tap), and Menu in the groups pane (remote).
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 
 mod entry;
 pub(crate) mod words;
@@ -22,13 +22,13 @@ use iptv_presentation::wizard::{
 use nsh_core::picker::FilePickRequest;
 use nsh_core::prelude::*;
 
-use crate::data::{self, Job, Purpose, Update};
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit::icons::{self, Icon};
+use crate::chrome::ui_kit::{self, ERROR};
 use crate::guide::list_rows::Mark;
-use crate::scale::Scale;
 use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
-use crate::ui_kit::icons::{self, Icon};
-use crate::ui_kit::{self, ERROR};
+use crate::wiring::data::{self, Job, Purpose, Update};
 use crate::{Ui, tint};
 
 const WHITE: u32 = 0xFFFFFF;
@@ -61,7 +61,9 @@ fn imports_unavailable() -> bool {
     if crate::host::IMPORTS {
         return false;
     }
-    crate::toast::notify(crate::i18n::tr("This device cannot import playlists yet."));
+    crate::chrome::toast::notify(crate::chrome::i18n::tr(
+        "This device cannot import playlists yet.",
+    ));
     true
 }
 
@@ -81,12 +83,14 @@ pub fn open_add(ui: Ui) {
     if imports_unavailable() {
         return;
     }
-    if crate::runtime_owner::runtime().parental_has_pin()
-        && !crate::runtime_owner::runtime().parental_settings_allowed()
+    if crate::wiring::runtime_owner::runtime().parental_has_pin()
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
-            open_add(ui)
-        });
+        crate::wiring::navigation::request(
+            ui,
+            iptv_core::parental::Target::settings(),
+            move || open_add(ui),
+        );
         return;
     }
     if !is_open(ui) {
@@ -108,12 +112,14 @@ pub fn send(ui: Ui, event: WizardEvent) {
         || (matches!(&event, WizardEvent::Ok)
             && read(ui, |w| w.focus() == Some(Target::Submit)).unwrap_or(false));
     if submit
-        && crate::runtime_owner::runtime().parental_has_pin()
-        && !crate::runtime_owner::runtime().parental_settings_allowed()
+        && crate::wiring::runtime_owner::runtime().parental_has_pin()
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
-            send(ui, event)
-        });
+        crate::wiring::navigation::request(
+            ui,
+            iptv_core::parental::Target::settings(),
+            move || send(ui, event),
+        );
         return;
     }
     let mut effect = None;
@@ -161,7 +167,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
     match effect {
         WizardEffect::RestoreBackup => crate::backup::request_restore(ui),
         WizardEffect::EditField { field } => entry::begin(ui, field),
-        WizardEffect::ReadClipboard { field } => crate::tasks::spawn_in_app(async move {
+        WizardEffect::ReadClipboard { field } => crate::wiring::tasks::spawn_in_app(async move {
             let text = clipboard_string().await;
             send(
                 ui,
@@ -171,10 +177,10 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 },
             );
         }),
-        WizardEffect::PickFile => crate::tasks::spawn_in_app(async move {
+        WizardEffect::PickFile => crate::wiring::tasks::spawn_in_app(async move {
             let files = pick_files(FilePickRequest::new(false, 1)).await;
             let path = if let Some(file) = files.first() {
-                crate::runtime_owner::runtime()
+                crate::wiring::runtime_owner::runtime()
                     .keep_picked_file(&file.name, file.data.bytes())
                     .await
                     .inspect_err(|e| log::warn!("iptv wizard: keeping the file failed: {e}"))
@@ -185,8 +191,9 @@ fn perform(ui: Ui, effect: WizardEffect) {
             send(ui, WizardEvent::FilePicked(path));
         }),
         WizardEffect::StartImport { draft } => {
-            let runtime = crate::runtime_owner::runtime();
-            let fallback = iptv_presentation::i18n::translate(crate::i18n::language(), "Playlist");
+            let runtime = crate::wiring::runtime_owner::runtime();
+            let fallback =
+                iptv_presentation::i18n::translate(crate::chrome::i18n::language(), "Playlist");
             let (source, epg_url) = data::source_from_draft(&draft, fallback);
             let source_kind = source.kind();
             let job = Job {
@@ -199,7 +206,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
             let (id, _) = runtime.start_wizard_import(
                 job,
                 move |id, _store_epoch| {
-                    ui.wizard.update(|open| {
+                    ui.screens.wizard.update(|open| {
                         if let Some(open) = open {
                             open.wizard.admit_import(id);
                         }
@@ -220,10 +227,10 @@ fn perform(ui: Ui, effect: WizardEffect) {
         }
         WizardEffect::CancelImport { id } => {
             let wait_for_commit = read(ui, Wizard::step) == Some(Step::Canceling { id });
-            crate::runtime_owner::runtime().cancel_wizard_import(id, wait_for_commit);
+            crate::wiring::runtime_owner::runtime().cancel_wizard_import(id, wait_for_commit);
         }
         WizardEffect::Close(exit) => {
-            let runtime = crate::runtime_owner::runtime();
+            let runtime = crate::wiring::runtime_owner::runtime();
             runtime.parental_content_closed();
             log::info!("iptv wizard: closed ({exit:?})");
             if let WizardExit::Added { .. } = exit {
@@ -324,7 +331,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .test_id("wizard-layer")
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
                 .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::Wizard.accessibility_covered(ui)
+                    crate::chrome::overlays::Overlay::Wizard.accessibility_covered(ui)
                 })
                 .child(dynamic(move || {
                     let shown = screen.get();
@@ -415,7 +422,7 @@ fn choice(
                     .gap(move || size.px(4.0))
                     .child(
                         ui_kit::body(size, title)
-                            .font_weight(crate::fonts::MEDIUM)
+                            .font_weight(crate::chrome::fonts::MEDIUM)
                             .text_color(move || mark().text()),
                     )
                     .child(ui_kit::caption(size, detail).text_color(move || mark().secondary())),

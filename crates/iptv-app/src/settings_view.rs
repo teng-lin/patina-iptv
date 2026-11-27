@@ -3,7 +3,7 @@
 //! their current values on the right, the focused row's description below,
 //! and the editors and dialogs (`editors`). State and rules live in
 //! `iptv_presentation::settings::screen`; this draws it, maps remote keys and taps to
-//! it, stores what it answers through `crate::settings` (saved at once,
+//! it, stores what it answers through `crate::wiring::settings` (saved at once,
 //! applied where the app reads it) and runs its commands.
 //!
 //! Globally unimplemented settings are hidden consistently on every build; none of
@@ -13,11 +13,11 @@
 //! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
 //! own (`words`).
 
-use crate::i18n::{tr, trf};
-use crate::input::dismiss_keyboard;
-use crate::navigation::{request, settings_guarded};
-use crate::settings_wiring::refresh;
-use crate::toast::notify;
+use crate::chrome::i18n::{tr, trf};
+use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::toast::notify;
+use crate::wiring::navigation::{request, settings_guarded};
+use crate::wiring::settings_wiring::refresh;
 
 mod editors;
 pub(crate) mod remote_keys;
@@ -39,8 +39,8 @@ use iptv_settings::schema::ValueType;
 use iptv_settings::{Section, Settings, Value};
 use nsh_core::prelude::*;
 
-use crate::data::stored::{self, GuideStatus};
 use crate::theme::TEXT_DISABLED_ALPHA;
+use crate::wiring::data::stored::{self, GuideStatus};
 use crate::{Ui, tint};
 
 const WHITE: u32 = 0xFFFFFF;
@@ -136,9 +136,9 @@ thread_local! {
 // --- State ---------------------------------------------------------------------
 
 pub fn open(ui: Ui) {
-    if crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+    if crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
-        && !crate::runtime_owner::runtime().parental_settings_allowed()
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
         request(ui, iptv_core::parental::Target::settings(), move || {
             open(ui)
@@ -157,7 +157,7 @@ pub fn open(ui: Ui) {
 }
 
 pub fn close(ui: Ui) {
-    crate::runtime_owner::runtime().parental_content_closed();
+    crate::wiring::runtime_owner::runtime().parental_content_closed();
     if let Some(page) = ui
         .screens
         .settings_screen
@@ -233,14 +233,15 @@ pub(crate) fn set_playlist_visibility(ui: Ui, id: crate::runtime::model::SourceI
 }
 
 fn show_playlist(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
-    crate::tasks::spawn_in_app(async move {
-        if let Err(e) =
-            crate::data::update_policy(&crate::runtime(), id, move |policy| policy.enabled = show)
-                .await
+    crate::wiring::tasks::spawn_in_app(async move {
+        if let Err(e) = crate::wiring::data::update_policy(&crate::runtime(), id, move |policy| {
+            policy.enabled = show
+        })
+        .await
         {
             log::warn!("iptv settings: the store refused a playlist's check box: {e}");
             if e.settings_locked() {
-                notify_setting_error(crate::settings::SaveError::ParentalLocked);
+                notify_setting_error(crate::wiring::settings::SaveError::ParentalLocked);
             } else {
                 notify(tr(
                     "The change could not be saved. Reopen the list and try again.",
@@ -266,7 +267,7 @@ pub fn back(ui: Ui) -> bool {
 }
 
 fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
-    let settings = crate::settings::get();
+    let settings = crate::wiring::settings::get();
     f(&Ctx {
         settings: &settings,
         offer: &crate::settings_offer::offer_now,
@@ -292,10 +293,10 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
         Effect::None => {}
         Effect::Set { key, value } => {
             if (key.starts_with("parental.")
-                || crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+                || crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
                     == "blocked_content_and_settings")
-                && (!crate::runtime_owner::runtime().parental_has_pin()
-                    || !crate::runtime_owner::runtime().parental_settings_allowed())
+                && (!crate::wiring::runtime_owner::runtime().parental_has_pin()
+                    || !crate::wiring::runtime_owner::runtime().parental_settings_allowed())
             {
                 crate::parental_view::protected_settings(ui, move || store(key, value));
             } else {
@@ -308,7 +309,10 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
             set_playlist_visibility(ui, crate::runtime::model::SourceId(id), show);
         }
         Effect::PlaylistActions(id) => settings_guarded(ui, move || {
-            crate::menu_view::open_playlist_options(ui, crate::runtime::model::SourceId(id));
+            crate::chrome::menu_view::open_playlist_options(
+                ui,
+                crate::runtime::model::SourceId(id),
+            );
         }),
         Effect::Run(key) => run(ui, key),
         Effect::Close => close(ui),
@@ -322,23 +326,26 @@ fn store(key: &'static str, value: Value) {
 }
 
 /// Stores the setting through the runtime.
-pub(crate) fn save_setting(key: &str, value: Value) -> Result<(), crate::settings::SaveError> {
-    crate::settings::set(key, value)
+pub(crate) fn save_setting(
+    key: &str,
+    value: Value,
+) -> Result<(), crate::wiring::settings::SaveError> {
+    crate::wiring::settings::set(key, value)
 }
 
-pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
+pub(crate) fn notify_setting_error(error: crate::wiring::settings::SaveError) {
     use crate::runtime::model::SaveFailure;
     match error {
-        crate::settings::SaveError::ParentalLocked => {
+        crate::wiring::settings::SaveError::ParentalLocked => {
             notify(tr("Unlock parental controls before changing settings"))
         }
-        crate::settings::SaveError::Storage(_) => {
+        crate::wiring::settings::SaveError::Storage(_) => {
             notify(words::save_failure(SaveFailure::NotPublished))
         }
-        crate::settings::SaveError::Durability(_) => {
+        crate::wiring::settings::SaveError::Durability(_) => {
             notify(words::save_failure(SaveFailure::DurabilityUnconfirmed))
         }
-        crate::settings::SaveError::Invalid(_) => notify(&error.to_string()),
+        crate::wiring::settings::SaveError::Invalid(_) => notify(&error.to_string()),
     }
 }
 
@@ -346,9 +353,9 @@ pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
 /// Runs a command (`settings_offer::COMMANDS`).
 fn run(ui: Ui, key: &'static str) {
     if key != "parental.change_pin"
-        && crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+        && crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
             == "blocked_content_and_settings"
-        && !crate::runtime_owner::runtime().parental_settings_allowed()
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::protected_settings(ui, move || run(ui, key));
         return;
@@ -356,13 +363,13 @@ fn run(ui: Ui, key: &'static str) {
     match key {
         "history.clear" => {
             crate::playback::player::watch_time::reset(ui);
-            let owner = crate::runtime_owner::runtime();
+            let owner = crate::wiring::runtime_owner::runtime();
             let saved = owner.clear_watch_history();
             ui.playback
                 .player
                 .history
                 .set(iptv_presentation::playback::ChannelHistory::default());
-            crate::tasks::spawn_in_app(async move {
+            crate::wiring::tasks::spawn_in_app(async move {
                 if saved.await {
                     crate::guide::lists::favorites_changed(ui);
                     owner.refresh_watch_order();
@@ -376,7 +383,7 @@ fn run(ui: Ui, key: &'static str) {
         "general.check_updates" => updates::run(ui),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
-            crate::tasks::spawn_in_app(async move {
+            crate::wiring::tasks::spawn_in_app(async move {
                 if !opened.await {
                     notify(PRIVACY_POLICY_URL);
                 }
@@ -389,7 +396,9 @@ fn run(ui: Ui, key: &'static str) {
         ),
         "general.restore" => crate::backup::request_restore(ui),
         "epg.update_now" => {
-            if stored::update_now(&crate::runtime_owner::runtime(), move || refresh(ui)) {
+            if stored::update_now(&crate::wiring::runtime_owner::runtime(), move || {
+                refresh(ui)
+            }) {
                 refresh(ui);
             } else {
                 notify(tr("This playlist has no guide source switched on"));
@@ -397,10 +406,10 @@ fn run(ui: Ui, key: &'static str) {
         }
         // The combined view chooses a playlist before opening its Guide data.
         "epg.manage_sources" | "epg.add_source" => {
-            crate::navigation::guide_sources(ui, crate::runtime().shown_source());
+            crate::wiring::navigation::guide_sources(ui, crate::runtime().shown_source());
         }
         "epg.clear" => {
-            let cleared = stored::clear(&crate::runtime_owner::runtime(), move |deleted| {
+            let cleared = stored::clear(&crate::wiring::runtime_owner::runtime(), move |deleted| {
                 notify(if deleted {
                     tr("Guide data deleted")
                 } else {
@@ -412,18 +421,18 @@ fn run(ui: Ui, key: &'static str) {
                 notify(tr("No playlist on screen"));
             }
         }
-        "remote.customize" => crate::remote_editor::open(ui),
+        "remote.customize" => crate::chrome::remote_editor::open(ui),
         // The playlists screen, over the settings screen.
-        "playlists.manage" => crate::navigation::manage_playlists(ui),
+        "playlists.manage" => crate::wiring::navigation::manage_playlists(ui),
         "playlists.show_all" => {
             close(ui);
-            crate::data::switch_all(&crate::runtime());
+            crate::wiring::data::switch_all(&crate::runtime());
         }
         // As the playlists screen's Add: behind the PIN once one is set.
-        "playlists.add" => crate::navigation::add_playlist(ui),
-        "playlists.update_all" => crate::data::refresh_all(&crate::runtime()),
+        "playlists.add" => crate::wiring::navigation::add_playlist(ui),
+        "playlists.update_all" => crate::wiring::data::refresh_all(&crate::runtime()),
         // The playlists in their manual order, the first one focused.
-        "playlists.reorder" => crate::navigation::reorder_playlists(ui),
+        "playlists.reorder" => crate::wiring::navigation::reorder_playlists(ui),
         other => log::info!("iptv settings: {other} is not implemented yet"),
     }
 }
@@ -482,10 +491,10 @@ fn lit_page(page: &Page) -> bool {
 /// What a command row shows on its right.
 fn command_value(key: &str) -> String {
     match key {
-        "general.restore" if crate::runtime_owner::runtime().restore_is_pending() => {
+        "general.restore" if crate::wiring::runtime_owner::runtime().restore_is_pending() => {
             tr("Scheduled for next launch").to_owned()
         }
-        "epg.update_now" => match crate::runtime_owner::runtime().guide_status() {
+        "epg.update_now" => match crate::wiring::runtime_owner::runtime().guide_status() {
             GuideStatus::NoSource => tr("No playlist").to_owned(),
             GuideStatus::Updating => tr("Updating…").to_owned(),
             GuideStatus::Empty => tr("Not downloaded").to_owned(),
@@ -507,7 +516,7 @@ fn command_value(key: &str) -> String {
             let setting =
                 iptv_settings::catalog::setting(iptv_settings::keys::KEY_OVERRIDES.as_str());
             setting.map_or_else(String::new, |setting| {
-                let value = crate::settings::get()
+                let value = crate::wiring::settings::get()
                     .get(setting.key)
                     .unwrap_or_else(|_| setting.default_value());
                 words::value(setting, &value)
@@ -521,13 +530,13 @@ fn command_value(key: &str) -> String {
 /// The "Guide sources" row's value: how many, switched on, and failed at
 /// their last download.
 fn sources_value() -> String {
-    let sources = crate::runtime_owner::runtime().shown_sources();
+    let sources = crate::wiring::runtime_owner::runtime().shown_sources();
     if sources.is_empty() {
         return tr("No enabled playlist").to_owned();
     }
     let lines: Vec<_> = sources
         .into_iter()
-        .flat_map(|source| crate::runtime_owner::runtime().source_lines(source))
+        .flat_map(|source| crate::wiring::runtime_owner::runtime().source_lines(source))
         .collect();
     let on = lines.iter().filter(|l| l.source.enabled).count();
     let failed = lines

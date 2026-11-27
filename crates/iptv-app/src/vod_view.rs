@@ -3,10 +3,10 @@
 //! state, details and playback; only their list is read differently.
 use crate::{
     Ui,
-    i18n::{tr, trf},
+    chrome::i18n::{tr, trf},
+    chrome::scale::Scale,
+    chrome::ui_kit,
     runtime::Runtime,
-    scale::Scale,
-    ui_kit,
 };
 use iptv_core::vod::{Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Progress, Shelf, Sort};
 use iptv_nav::Action;
@@ -26,7 +26,7 @@ pub fn is_open(ui: Ui) -> bool {
 }
 
 pub fn open(ui: Ui, kind: Kind) {
-    let sort = sort_of(crate::settings::get().choice(
+    let sort = sort_of(crate::wiring::settings::get().choice(
         iptv_settings::keys::VOD_SORT,
         &iptv_settings::Target::Global,
     ));
@@ -64,7 +64,7 @@ fn cycle_sort(ui: Ui) {
         s.query.sort
     });
     reload(ui, false);
-    if let Err(error) = crate::settings::set(
+    if let Err(error) = crate::wiring::settings::set(
         iptv_settings::keys::VOD_SORT.as_str(),
         iptv_settings::Value::choice(choice_of(sort)),
     ) {
@@ -83,10 +83,10 @@ pub fn open_shelf(ui: Ui, shelf: Shelf) {
 
 pub fn close(ui: Ui) {
     if ui.playback.player.vod.with_untracked(Option::is_none) {
-        crate::runtime_owner::runtime().parental_content_closed();
+        crate::wiring::runtime_owner::runtime().parental_content_closed();
     }
     // A shelf page or focus lookup still being read is no longer wanted.
-    crate::runtime_owner::runtime().vod_discovery_cancel();
+    crate::wiring::runtime_owner::runtime().vod_discovery_cancel();
     ui.screens.vod.update(Screen::close);
 }
 
@@ -112,7 +112,9 @@ pub fn return_from_player(ui: Ui) -> bool {
     ui.screens
         .vod
         .update(|s| s.return_from_player(details, &played, saved));
-    ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
+    ui.chrome
+        .mode
+        .apply(crate::chrome::mode::Action::ReturnToBrowse);
     true
 }
 
@@ -132,12 +134,12 @@ pub fn returns_to(ui: Ui) -> Option<Kind> {
 
 pub fn back(ui: Ui) -> bool {
     if ui.playback.player.vod.with_untracked(Option::is_none) {
-        crate::runtime_owner::runtime().parental_content_closed();
+        crate::wiring::runtime_owner::runtime().parental_content_closed();
     }
     let outcome = edit(ui, Screen::back);
     crate::parental_view::enforce(ui);
     match outcome {
-        BackOutcome::Closed => crate::runtime_owner::runtime().vod_discovery_cancel(),
+        BackOutcome::Closed => crate::wiring::runtime_owner::runtime().vod_discovery_cancel(),
         BackOutcome::Reload { through } => load(ui, false, Some(through)),
         BackOutcome::Stay => {}
     }
@@ -183,8 +185,8 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
             through,
         )
     });
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         // A queued host task may first run after Back or another shelf.
         // Do not start work (or supersede the newer read's token) then.
         if !ui
@@ -247,7 +249,7 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
                 }
                 // The focused title is kept: Retry looks for it again.
                 Err(_) => s.fail(
-                    crate::i18n::key("On-demand library could not be loaded"),
+                    crate::chrome::i18n::key("On-demand library could not be loaded"),
                     if append {
                         Operation::More { offset }
                     } else if through > 0 {
@@ -270,8 +272,8 @@ fn load_previous(ui: Ui, step_up: bool) {
     }) else {
         return;
     };
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         if !ui
             .screens
             .vod
@@ -287,7 +289,7 @@ fn load_previous(ui: Ui, step_up: bool) {
             match result {
                 Ok(page) => s.finish_previous(generation, start, page, step_up),
                 Err(_) => s.fail(
-                    crate::i18n::key("On-demand library could not be loaded"),
+                    crate::chrome::i18n::key("On-demand library could not be loaded"),
                     Operation::Previous { start, step_up },
                 ),
             }
@@ -324,7 +326,7 @@ fn retry(ui: Ui) {
 /// without first closing the content as choosing another title does.
 fn retry_details(ui: Ui, key: Key) {
     let generation = ui.screens.vod.with_untracked(|s| s.generation);
-    crate::navigation::request(ui, Runtime::vod_target(&key), move || {
+    crate::wiring::navigation::request(ui, Runtime::vod_target(&key), move || {
         if ui
             .screens
             .vod
@@ -342,7 +344,7 @@ fn retry_details(ui: Ui, key: Key) {
 /// the same id is refused, and its title must be chosen again.
 fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
     let generation = ui.screens.vod.with_untracked(|s| s.generation);
-    crate::navigation::request(ui, Runtime::vod_target(&item), move || {
+    crate::wiring::navigation::request(ui, Runtime::vod_target(&item), move || {
         if !ui
             .screens
             .vod
@@ -351,8 +353,8 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
             return;
         }
         let generation = edit(ui, |s| s.begin_operation());
-        let owner = crate::runtime_owner::runtime();
-        crate::tasks::spawn_in_app(async move {
+        let owner = crate::wiring::runtime_owner::runtime();
+        crate::wiring::tasks::spawn_in_app(async move {
             // The preflight gives an immediate stale-action explanation.
             // The runtime also binds the credentials snapshot to this same
             // incarnation before I/O, so an edit racing this check cannot
@@ -370,7 +372,7 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
                     ui.screens.vod.update(|s| {
                         s.reject_replaced_playlist(
                             generation,
-                            crate::i18n::key(
+                            crate::chrome::i18n::key(
                                 "Playback unavailable; refresh the playlist and try again",
                             ),
                         );
@@ -388,13 +390,13 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
                         details,
                         &key,
                         &incarnation,
-                        crate::i18n::key(
+                        crate::chrome::i18n::key(
                             "Playback unavailable; refresh the playlist and try again",
                         ),
                     ),
                     Err(_) => {
                         s.fail(
-                            crate::i18n::key(
+                            crate::chrome::i18n::key(
                                 "Playback unavailable; refresh the playlist and try again",
                             ),
                             Operation::Play {
@@ -421,10 +423,10 @@ fn select(ui: Ui, key: Key) {
             .is_some_and(|(p, _)| p.parent.as_ref().unwrap_or(&p.key) == &key)
     });
     if !same {
-        crate::runtime_owner::runtime().parental_content_closed();
+        crate::wiring::runtime_owner::runtime().parental_content_closed();
     }
     let generation = ui.screens.vod.with_untracked(|s| s.generation);
-    crate::navigation::request(ui, Runtime::vod_target(&key), move || {
+    crate::wiring::navigation::request(ui, Runtime::vod_target(&key), move || {
         if ui
             .screens
             .vod
@@ -437,8 +439,8 @@ fn select(ui: Ui, key: Key) {
 
 fn select_authorized(ui: Ui, key: Key) {
     let generation = edit(ui, |s| s.begin_details(key.clone()));
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.vod_details(key.clone()).await;
         ui.screens.vod.update(|s| {
             if !s.finish_operation(generation) {
@@ -447,7 +449,9 @@ fn select_authorized(ui: Ui, key: Key) {
             match result {
                 Ok(details) => s.show_details(details),
                 Err(_) => s.fail(
-                    crate::i18n::key("Details unavailable; refresh the playlist and try again"),
+                    crate::chrome::i18n::key(
+                        "Details unavailable; refresh the playlist and try again",
+                    ),
                     Operation::Details(key),
                 ),
             }
@@ -477,7 +481,7 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
     let generation = edit(ui, Screen::supersede_operation);
     let parent = (key.kind == Kind::Episode).then(|| details.item.key.clone());
     let run = move || {
-        crate::navigation::request(ui, Runtime::vod_target(&key), move || {
+        crate::wiring::navigation::request(ui, Runtime::vod_target(&key), move || {
             if ui
                 .screens
                 .vod
@@ -488,7 +492,7 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
         })
     };
     if let Some(parent) = parent {
-        crate::navigation::request(ui, Runtime::vod_target(&parent), run);
+        crate::wiring::navigation::request(ui, Runtime::vod_target(&parent), run);
     } else {
         run();
     }
@@ -517,8 +521,8 @@ fn play_authorized(
         incarnation: details.incarnation.clone(),
     };
     let series = details.item.key.clone();
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.vod_play(details, key, restart).await;
         // The episode that ended, its next one not played after all.
         let not_played = {
@@ -559,7 +563,7 @@ fn play_authorized(
                     // Once a recording stops, Retry resolves a new link.
                     ui.screens.vod.update(|s| {
                         s.fail(
-                            crate::i18n::key(
+                            crate::chrome::i18n::key(
                                 "No provider connection available while recording; stop a recording or check Streams at once",
                             ),
                             failed,
@@ -573,14 +577,14 @@ fn play_authorized(
                 if full_screen {
                     // The screen waits under the player: Back from the
                     // title returns to its details (`return_from_player`).
-                    crate::runtime_owner::runtime().vod_discovery_cancel();
+                    crate::wiring::runtime_owner::runtime().vod_discovery_cancel();
                     ui.screens.vod.update(|s| s.hand_to_player());
                 }
             }
             Err(_) => {
                 ui.screens.vod.update(|s| {
                     s.fail(
-                        crate::i18n::key(
+                        crate::chrome::i18n::key(
                             "Playback unavailable; refresh the playlist and try again",
                         ),
                         failed,
@@ -610,7 +614,7 @@ fn toggle_block(ui: Ui) {
         .vod
         .with_untracked(|s| s.details.as_ref().map(|d| Runtime::vod_target(&d.item.key)))
     {
-        let blocked = !crate::runtime_owner::runtime().parental_explicitly_blocked(&target);
+        let blocked = !crate::wiring::runtime_owner::runtime().parental_explicitly_blocked(&target);
         crate::parental_view::block(ui, target, blocked);
     }
 }
@@ -837,10 +841,15 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         }
     });
     if let Some((key, parent, progress, incarnation)) = write {
-        crate::runtime_owner::runtime().queue_vod_progress(key, parent, progress, incarnation);
+        crate::wiring::runtime_owner::runtime().queue_vod_progress(
+            key,
+            parent,
+            progress,
+            incarnation,
+        );
     }
     if let Some((parent, incarnation)) = series_complete {
-        crate::runtime_owner::runtime().queue_vod_progress(
+        crate::wiring::runtime_owner::runtime().queue_vod_progress(
             parent,
             None,
             Progress {
@@ -859,7 +868,8 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         ui.screens
             .vod
             .update(|s| s.watched(&mut details, &p.key, true));
-        let autoplay = crate::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE);
+        let autoplay =
+            crate::wiring::settings::flag(iptv_settings::keys::VOD_AUTOPLAY_NEXT_EPISODE);
         let (key, season) = (next.key.clone(), next.season);
         // The screen never changes on its own (#187).
         match where_watched(ui, &details.item.key) {
@@ -882,7 +892,7 @@ enum Watched {
 }
 
 fn where_watched(ui: Ui, series: &Key) -> Watched {
-    use crate::overlays::Overlay;
+    use crate::chrome::overlays::Overlay;
     let details = ui.top_overlay() == Some(Overlay::Vod)
         && ui
             .screens
@@ -903,7 +913,7 @@ fn where_watched(ui: Ui, series: &Key) -> Watched {
 /// choose the next episode `key` of `season`; `ready` says it waits for
 /// Play.
 fn select_next(ui: Ui, details: Details, key: &Key, season: u32, ready: bool) {
-    let notice = ready.then(|| crate::i18n::key("Ready for the next episode"));
+    let notice = ready.then(|| crate::chrome::i18n::key("Ready for the next episode"));
     ui.screens
         .vod
         .update(|s| s.select_next_episode(details, key.clone(), season, notice));
@@ -919,7 +929,7 @@ fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u
                 details,
                 key,
                 season,
-                crate::i18n::key("Ready for the next episode"),
+                crate::chrome::i18n::key("Ready for the next episode"),
             );
         }),
         Watched::Details => {
@@ -940,8 +950,8 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
     // The viewer acting on the screen meanwhile (`play_key` and Back
     // advance its generation) leaves the next episode waiting.
     let generation = ui.screens.vod.with_untracked(|s| s.generation);
-    crate::tasks::spawn_in_app(async move {
-        let owner = crate::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
+        let owner = crate::wiring::runtime_owner::runtime();
         let allowed = owner
             .parental_check(&Runtime::vod_target(&series))
             .await
@@ -1312,7 +1322,7 @@ fn has_next(ui: Ui) -> bool {
 fn block_label(ui: Ui) -> &'static str {
     let blocked = ui.screens.vod.with(|s| {
         s.details.as_ref().is_some_and(|d| {
-            crate::runtime_owner::runtime()
+            crate::wiring::runtime_owner::runtime()
                 .parental_explicitly_blocked(&Runtime::vod_target(&d.item.key))
         })
     });
@@ -1431,7 +1441,7 @@ fn detail_screen(ui: Ui, size: Scale) -> View {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Vod.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::Vod.accessibility_covered(ui)
         })
         .child(details(ui, size))
         .child(
@@ -1520,7 +1530,7 @@ fn library_screen(ui: Ui, size: Scale) -> View {
     ui_kit::screen(ui, size)
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Vod.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::Vod.accessibility_covered(ui)
         })
         .child(header)
         .child(hint)

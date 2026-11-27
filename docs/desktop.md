@@ -60,7 +60,7 @@ Windows and Command on macOS.
 | F11 (Linux, Windows), Ctrl+Cmd+F (macOS) | The operating system's full screen for the window |
 | Mod+, (macOS) | Settings |
 
-- **Now:** the set above (`crates/iptv-app/src/input/keys.rs`,
+- **Now:** the set above (`crates/iptv-app/src/chrome/input/keys.rs`,
   `input.rs`). macOS also has its menu bar (`desktop.rs`); Linux and
   Windows draw none.
 - **Now: a shortcut belongs to the window that has the keyboard focus.**
@@ -182,7 +182,7 @@ computer awake. Closing a laptop's lid still sleeps (logind ignores
 inhibitors for the lid by default); on Linux, a suspend chosen from the
 system menu may first say that Patina is recording.
 
-- **Now:** all rows (`crates/iptv-app/src/desktop.rs`,
+- **Now:** all rows (`crates/iptv-app/src/chrome/desktop.rs`,
   `desktop/quit_confirm.rs`, `desktop/player_windows.rs`,
   `desktop/pip_window.rs`). The headless scenarios keep the macOS close
   behavior unless `IPTV_TEST_CLOSE_ASKS` is set

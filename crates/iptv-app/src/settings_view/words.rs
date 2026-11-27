@@ -2,7 +2,7 @@
 //! subsections, settings, commands and choices, and how values read. The
 //! catalog's summaries serve as the rows' descriptions.
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 
 use iptv_settings::schema::{IntUnit, TimeUnit, ValueType};
 use iptv_settings::{Section, Setting, Value};
@@ -22,7 +22,7 @@ pub fn save_failure(failure: crate::runtime::model::SaveFailure) -> &'static str
 
 /// Whether the keys set up now are a keyboard's (`input::keys_for`).
 fn keyboard() -> bool {
-    crate::input::keys_now() == Some(iptv_presentation::capabilities::Keys::Keyboard)
+    crate::chrome::input::keys_now() == Some(iptv_presentation::capabilities::Keys::Keyboard)
 }
 
 /// The name of a settings page (`settings_view::PAGES`). The keys' page
@@ -335,7 +335,7 @@ pub fn description(key: &str) -> Option<&'static str> {
 /// The name of a choice (enum variant or palette key).
 pub fn choice(family: &str, variant: &str) -> String {
     if family == "language" {
-        return crate::i18n::language_name(variant).to_owned();
+        return crate::chrome::i18n::language_name(variant).to_owned();
     }
     let name = match (family, variant) {
         ("app_update_frequency", "never") => tr("Never"),
@@ -554,7 +554,7 @@ pub fn value(setting: &Setting, value: &Value) -> String {
             .unwrap_or_else(|| v.clone()),
         Value::Text(t) if t.is_empty() => empty(setting.key).to_owned(),
         Value::Text(t) if setting.key == "general.language" => {
-            let name = crate::i18n::language_name(t);
+            let name = crate::chrome::i18n::language_name(t);
             if name.is_empty() {
                 t.clone()
             } else {
@@ -645,7 +645,7 @@ mod save_failure_tests {
         let updated = save_failure(SaveFailure::DurabilityUnconfirmed).to_owned();
         assert_ne!(unsaved, updated);
         for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
-            crate::i18n::in_language(language.tag, || {
+            crate::chrome::i18n::in_language(language.tag, || {
                 let not_published = save_failure(SaveFailure::NotPublished);
                 let durability = save_failure(SaveFailure::DurabilityUnconfirmed);
                 assert_ne!(not_published, unsaved, "{}", language.tag);

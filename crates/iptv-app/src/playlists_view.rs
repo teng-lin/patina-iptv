@@ -15,8 +15,8 @@
 //! action is tappable; a tap beside a sheet closes it. Text entry uses the
 //! wizard's sheet (`ui_kit::entry`). Wording is iptv-rs's own.
 
-use crate::i18n::{tr, trf};
-use crate::input::dismiss_keyboard;
+use crate::chrome::i18n::{tr, trf};
+use crate::chrome::input::dismiss_keyboard;
 
 use iptv_presentation::library::details;
 mod details_card;
@@ -32,11 +32,11 @@ pub use state::Screen as Open;
 use state::{Act, EditKind, Effect, Item, Key, Layer, Screen};
 pub(crate) use words::masked_link;
 
-use crate::data::{self, Activity, Playlist};
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit::entry::{self, TextSheet};
+use crate::chrome::ui_kit::{self, ERROR, ROW_THREE};
 use crate::guide::list_rows::{self, Mark};
-use crate::scale::Scale;
-use crate::ui_kit::entry::{self, TextSheet};
-use crate::ui_kit::{self, ERROR, ROW_THREE};
+use crate::wiring::data::{self, Activity, Playlist};
 use crate::{Ui, ViewMode, tint};
 
 const WHITE: u32 = 0xFFFFFF;
@@ -89,7 +89,9 @@ pub fn open(ui: Ui) {
     }
     ui.screens.playlists.set(Some(screen));
     if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen {
-        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.chrome
+            .mode
+            .apply(crate::chrome::mode::Action::ReturnToBrowse);
     }
 }
 
@@ -134,7 +136,7 @@ pub fn is_open(ui: Ui) -> bool {
 }
 
 fn load() -> Vec<Playlist> {
-    crate::runtime_owner::runtime()
+    crate::wiring::runtime_owner::runtime()
         .playlists()
         .unwrap_or_else(|e| {
             log::warn!("iptv playlists: the store is unavailable: {e}");
@@ -212,7 +214,7 @@ fn cancel(ui: Ui) {
 
 fn perform(ui: Ui, effect: Effect) {
     if matches!(effect, Effect::Policy(..)) {
-        crate::navigation::settings_guarded(ui, move || apply_effect(ui, effect));
+        crate::wiring::navigation::settings_guarded(ui, move || apply_effect(ui, effect));
         return;
     }
     if matches!(
@@ -224,19 +226,21 @@ fn perform(ui: Ui, effect: Effect) {
             | Effect::SetUserAgent(..)
             | Effect::ToggleOnDemand(_)
             | Effect::CycleStreams(_)
-    ) && crate::runtime_owner::runtime().parental_has_pin()
-        && !crate::runtime_owner::runtime().parental_settings_allowed()
+    ) && crate::wiring::runtime_owner::runtime().parental_has_pin()
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
-            perform(ui, effect)
-        });
+        crate::wiring::navigation::request(
+            ui,
+            iptv_core::parental::Target::settings(),
+            move || perform(ui, effect),
+        );
         return;
     }
     apply_effect(ui, effect);
 }
 
 fn apply_effect(ui: Ui, effect: Effect) {
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         log::info!("iptv playlists: {}", effect_name(&effect));
         let changes_library = matches!(effect, Effect::Delete(_) | Effect::Policy(..));
         let result = match effect {
@@ -246,7 +250,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::PlaylistOrder(id) => {
-                crate::menu_view::open_playlist_order(ui, id);
+                crate::chrome::menu_view::open_playlist_order(ui, id);
                 Ok(())
             }
             Effect::ReorderGroups(id) | Effect::GroupOrder(id) => {
@@ -265,7 +269,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
             }
             Effect::AllPlaylists => {
                 close(ui);
-                data::switch_all(&crate::runtime_owner::runtime());
+                data::switch_all(&crate::wiring::runtime_owner::runtime());
                 Ok(())
             }
             Effect::Add => {
@@ -274,20 +278,22 @@ fn apply_effect(ui: Ui, effect: Effect) {
             }
             Effect::Show(id) => {
                 close(ui);
-                data::switch_to(&crate::runtime_owner::runtime(), id);
+                data::switch_to(&crate::wiring::runtime_owner::runtime(), id);
                 Ok(())
             }
             Effect::Refresh(id) => {
-                data::refresh(&crate::runtime_owner::runtime(), id);
+                data::refresh(&crate::wiring::runtime_owner::runtime(), id);
                 Ok(())
             }
             Effect::Policy(id, edit) => {
-                data::update_policy(&crate::runtime_owner::runtime(), id, move |p| edit.apply(p))
-                    .await
+                data::update_policy(&crate::wiring::runtime_owner::runtime(), id, move |p| {
+                    edit.apply(p)
+                })
+                .await
             }
             Effect::ToggleOnDemand(id) => {
                 let on = on_demand(id);
-                if let Err(e) = crate::runtime_owner::runtime().set_playlist_setting(
+                if let Err(e) = crate::wiring::runtime_owner::runtime().set_playlist_setting(
                     id,
                     iptv_settings::keys::PLAYLISTS_INCLUDE_VOD.as_str(),
                     iptv_settings::Value::Bool(!on),
@@ -298,7 +304,9 @@ fn apply_effect(ui: Ui, effect: Effect) {
             }
             Effect::CycleStreams(id) => {
                 let next = state::next_streams(own_streams(id));
-                if let Err(e) = crate::runtime_owner::runtime().set_connection_limit(id, next) {
+                if let Err(e) =
+                    crate::wiring::runtime_owner::runtime().set_connection_limit(id, next)
+                {
                     crate::settings_view::notify_setting_error(e);
                 }
                 Ok(())
@@ -321,19 +329,19 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::Rename(id, name) => {
-                data::rename(&crate::runtime_owner::runtime(), id, &name).await
+                data::rename(&crate::wiring::runtime_owner::runtime(), id, &name).await
             }
             Effect::Guides(id) => {
                 crate::epg_sources_view::open(ui, id);
                 Ok(())
             }
-            Effect::Delete(id) => data::delete(&crate::runtime_owner::runtime(), id).await,
+            Effect::Delete(id) => data::delete(&crate::wiring::runtime_owner::runtime(), id).await,
             Effect::RefreshAll => {
-                data::refresh_all(&crate::runtime_owner::runtime());
+                data::refresh_all(&crate::wiring::runtime_owner::runtime());
                 Ok(())
             }
             Effect::OpenDetails(id) => {
-                if let Some(source) = crate::runtime_owner::runtime().source_details(id) {
+                if let Some(source) = crate::wiring::runtime_owner::runtime().source_details(id) {
                     update(ui, |s| {
                         s.open_details(source);
                         None
@@ -342,11 +350,11 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::TryDetails(id, source) => {
-                data::try_details(&crate::runtime_owner::runtime(), id, *source);
+                data::try_details(&crate::wiring::runtime_owner::runtime(), id, *source);
                 Ok(())
             }
             Effect::SetUserAgent(id, agent) => {
-                data::set_user_agent(&crate::runtime_owner::runtime(), id, agent);
+                data::set_user_agent(&crate::wiring::runtime_owner::runtime(), id, agent);
                 Ok(())
             }
             Effect::Close => {
@@ -358,10 +366,10 @@ fn apply_effect(ui: Ui, effect: Effect) {
             log::warn!("iptv playlists: the store refused it: {e}");
             if e.settings_locked() {
                 crate::settings_view::notify_setting_error(
-                    crate::settings::SaveError::ParentalLocked,
+                    crate::wiring::settings::SaveError::ParentalLocked,
                 );
             } else if changes_library {
-                crate::toast::notify(tr(
+                crate::chrome::toast::notify(tr(
                     "The change could not be saved. Reopen the list and try again.",
                 ));
             }
@@ -400,7 +408,7 @@ fn effect_name(effect: &Effect) -> String {
 /// Whether playlist `id` imports its movies and series (its own setting,
 /// else the global one).
 fn on_demand(id: SourceId) -> bool {
-    crate::settings::get().bool(
+    crate::wiring::settings::get().bool(
         iptv_settings::keys::PLAYLISTS_INCLUDE_VOD,
         &iptv_settings::Target::playlist(id.0.to_string()),
     )
@@ -410,7 +418,7 @@ fn on_demand(id: SourceId) -> bool {
 /// allowance its provider reports).
 fn own_streams(id: SourceId) -> Option<u32> {
     let at = iptv_settings::Target::playlist(id.0.to_string());
-    match crate::settings::get()
+    match crate::wiring::settings::get()
         .stored(iptv_settings::keys::PLAYLISTS_MAX_CONNECTIONS.as_str(), &at)
     {
         Some(iptv_settings::Value::Int(n)) => u32::try_from(*n).ok(),
@@ -502,7 +510,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("playlists-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::Playlists.accessibility_covered(ui)
+                    crate::chrome::overlays::Overlay::Playlists.accessibility_covered(ui)
                 })
                 .child(
                     ui_kit::header(ui, size, move || tr("Playlists"), close)
@@ -792,15 +800,15 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                 }
                 (Act::PlaylistOrder, _) => {
                     ui.app.settings.get();
-                    let order = crate::settings::choice(iptv_settings::keys::PLAYLIST_SORT);
+                    let order = crate::wiring::settings::choice(iptv_settings::keys::PLAYLIST_SORT);
                     let method = crate::settings_view::choice_label("sort", order);
                     trf("Playlist order: {method}", &[("method", (&method).into())])
                 }
                 (Act::GroupOrder, _) => {
                     ui.guide_data();
-                    crate::menu_view::group_order_label(&iptv_presentation::lists::ListId::Group(
-                        format!("playlist:{}", id.0),
-                    ))
+                    crate::chrome::menu_view::group_order_label(
+                        &iptv_presentation::lists::ListId::Group(format!("playlist:{}", id.0)),
+                    )
                 }
                 (Act::RefreshOnStart, Some(p)) => trf(
                     "Refresh on startup: {answer}",
@@ -818,7 +826,7 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                     ui.app.library.version.get();
                     words::streams(
                         own_streams(id),
-                        crate::runtime_owner::runtime().reported_streams(id),
+                        crate::wiring::runtime_owner::runtime().reported_streams(id),
                     )
                 }
                 _ => words::act(act, kind, shown, running()).to_owned(),

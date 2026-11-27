@@ -20,7 +20,7 @@
 //! the grid, without leaving full screen; a result adds its channel as a
 //! new tile and the screen closes, Back closes it without one.
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 use nsh_core::time::Instant;
 use std::time::Duration;
 
@@ -184,11 +184,11 @@ fn epg(schedule: &dyn Schedule) -> Option<&EpgSchedule> {
 /// Unix time of guide minute 0, for converting result times to guide
 /// minutes (the same epoch the guide and its clock labels use).
 fn guide_epoch() -> UnixTime {
-    crate::runtime_owner::schedule().epoch_unix()
+    crate::wiring::runtime_owner::schedule().epoch_unix()
 }
 
 fn load_history() -> SearchHistory {
-    let list = crate::runtime_owner::runtime().search_history();
+    let list = crate::wiring::runtime_owner::runtime().search_history();
     SearchHistory::from_list(list, SearchHistory::DEFAULT_CAPACITY)
 }
 
@@ -197,15 +197,17 @@ fn load_history() -> SearchHistory {
 /// then deleted). A screen opened before the answer started empty and is
 /// given them unless a search was made meanwhile.
 pub(crate) fn load_saved_history(ui: Ui) {
-    crate::tasks::spawn_in_app(refresh_saved_history(ui));
+    crate::wiring::tasks::spawn_in_app(refresh_saved_history(ui));
 }
 
 pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output = ()> {
     let revision = ui.screens.search_history_revision.get_untracked();
-    crate::runtime_owner::runtime().clear_loaded_search_history();
-    let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
-    let loaded =
-        crate::runtime::commands::load_search_history(&crate::runtime_owner::runtime(), legacy);
+    crate::wiring::runtime_owner::runtime().clear_loaded_search_history();
+    let legacy = crate::wiring::data::data_dir().join(LEGACY_HISTORY_FILE);
+    let loaded = crate::runtime::commands::load_search_history(
+        &crate::wiring::runtime_owner::runtime(),
+        legacy,
+    );
     async move {
         let list = match loaded.await {
             Ok(list) => list,
@@ -217,7 +219,7 @@ pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output =
         if ui.screens.search_history_revision.get_untracked() != revision {
             return;
         }
-        if options(&crate::settings::get()).show_history {
+        if options(&crate::wiring::settings::get()).show_history {
             ui.screens.search.update(|screen| {
                 if let Some(screen) = screen
                     && screen.state.history().is_empty()
@@ -227,7 +229,7 @@ pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output =
                 }
             });
         }
-        crate::runtime_owner::runtime().install_search_history(list);
+        crate::wiring::runtime_owner::runtime().install_search_history(list);
     }
 }
 
@@ -237,24 +239,26 @@ pub(crate) fn clear_history(ui: Ui) {
         .search_history_revision
         .update(|revision| *revision += 1);
     let saved = crate::runtime::commands::clear_search_history(
-        &crate::runtime_owner::runtime(),
-        crate::data::data_dir().join(LEGACY_HISTORY_FILE),
+        &crate::wiring::runtime_owner::runtime(),
+        crate::wiring::data::data_dir().join(LEGACY_HISTORY_FILE),
     );
-    crate::runtime_owner::runtime().install_search_history(Vec::new());
+    crate::wiring::runtime_owner::runtime().install_search_history(Vec::new());
     ui.screens.search.update(|screen| {
         if let Some(screen) = screen {
             *screen.state.history_mut() = SearchHistory::default();
         }
     });
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         if saved.await.is_err() {
-            crate::toast::notify(tr("Recent channel changes could not be saved; try again"));
+            crate::chrome::toast::notify(tr(
+                "Recent channel changes could not be saved; try again",
+            ));
         }
     });
 }
 
 fn save_history(ui: Ui) {
-    let owner = crate::runtime_owner::runtime();
+    let owner = crate::wiring::runtime_owner::runtime();
     // An initial or recovery read can fail independently of later writes.
     // Keep the saved entries if the screen could not load them.
     if !owner.search_history_loaded() {
@@ -267,14 +271,14 @@ fn save_history(ui: Ui) {
     else {
         return;
     };
-    let shown = options(&crate::settings::get()).show_history;
+    let shown = options(&crate::wiring::settings::get()).show_history;
     let list = to_save(shown, load_history(), &session);
     if owner.search_history_matches(&list) {
         return;
     }
     owner.install_search_history(list.clone());
     let saved = crate::runtime::commands::save_search_history(&owner, list);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         if let Err(error) = saved.await {
             log::warn!("iptv search: could not save the recent searches: {error}");
         }
@@ -294,8 +298,8 @@ fn set_programs(ui: Ui, status: ProgramSearch) {
 /// EPG), so the screen shows first.
 fn prepare(ui: Ui) {
     let version = ui.app.data_version.get_untracked();
-    let schedule = crate::runtime_owner::schedule();
-    crate::runtime_owner::runtime().prepare_search_channels(version, &*schedule);
+    let schedule = crate::wiring::runtime_owner::schedule();
+    crate::wiring::runtime_owner::runtime().prepare_search_channels(version, &*schedule);
     if epg(&*schedule).is_none()
         && schedule
             .as_any()
@@ -305,7 +309,7 @@ fn prepare(ui: Ui) {
         set_programs(ui, ProgramSearch::Unavailable);
         return;
     }
-    if crate::runtime_owner::runtime().has_program_index() {
+    if crate::wiring::runtime_owner::runtime().has_program_index() {
         set_programs(ui, ProgramSearch::Ready);
         return;
     }
@@ -313,16 +317,16 @@ fn prepare(ui: Ui) {
     // Under the app's owner: a timer dies with its owner, and multiview's
     // Search and add opens the screen from a menu item that goes as it
     // closes. A timer that finds the index built does nothing.
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         timer(Duration::from_millis(30)).await;
-        let wanted = crate::runtime_owner::runtime().begin_program_index(version);
-        let schedule = crate::runtime_owner::schedule();
+        let wanted = crate::wiring::runtime_owner::runtime().begin_program_index(version);
+        let schedule = crate::wiring::runtime_owner::schedule();
         if !wanted {
             return;
         }
         let t = Instant::now();
         program_index::build(&*schedule, schedule.channel_count(), move |index| {
-            let current = crate::runtime_owner::runtime().finish_program_index(version);
+            let current = crate::wiring::runtime_owner::runtime().finish_program_index(version);
             if !current || ui.screens.search.with_untracked(Option::is_none) {
                 return;
             }
@@ -340,7 +344,7 @@ fn prepare(ui: Ui) {
                 index.program_count(),
                 t.elapsed().as_millis()
             );
-            crate::runtime_owner::runtime().install_program_index(index);
+            crate::wiring::runtime_owner::runtime().install_program_index(index);
             set_programs(ui, ProgramSearch::Ready);
             search_again(ui);
         });
@@ -350,14 +354,14 @@ fn prepare(ui: Ui) {
 /// Runs both searches for `query` now and hands the results to the state.
 fn run_search(ui: Ui, query: &str) {
     let favorites = ui.app.favorites.get_untracked();
-    let schedule = crate::runtime_owner::schedule();
+    let schedule = crate::wiring::runtime_owner::schedule();
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);
     let past_without_replay = ui
         .screens
         .search
         .with_untracked(|s| s.as_ref().is_some_and(|s| s.state.past_without_replay()));
-    let mut channels = crate::runtime_owner::runtime().search_channels(
+    let mut channels = crate::wiring::runtime_owner::runtime().search_channels(
         query,
         &favorites,
         ChannelSearchOptions {
@@ -377,25 +381,29 @@ fn run_search(ui: Ui, query: &str) {
         limit: LIMIT,
         ..Default::default()
     };
-    let mut programs = crate::runtime_owner::runtime().search_programs(
+    let mut programs = crate::wiring::runtime_owner::runtime().search_programs(
         query,
         crate::guide::clock::wall_unix(),
         &*schedule,
         opts,
     );
     channels.retain_mut(|hit| {
-        let Some(channel) =
-            resolve_result_channel(&crate::runtime_owner::runtime(), &hit.identity, &*schedule)
-        else {
+        let Some(channel) = resolve_result_channel(
+            &crate::wiring::runtime_owner::runtime(),
+            &hit.identity,
+            &*schedule,
+        ) else {
             return false;
         };
         hit.channel = channel;
         true
     });
     programs.retain_mut(|hit| {
-        let Some(channel) =
-            resolve_result_channel(&crate::runtime_owner::runtime(), &hit.identity, &*schedule)
-        else {
+        let Some(channel) = resolve_result_channel(
+            &crate::wiring::runtime_owner::runtime(),
+            &hit.identity,
+            &*schedule,
+        ) else {
             return false;
         };
         hit.channel = channel;
@@ -425,10 +433,10 @@ fn search_again(ui: Ui) {
 /// search hides the recent searches, and a timer owned by the tapped row
 /// would go with it (the search never ran).
 fn debounce(ui: Ui, query: String) {
-    let ticket = crate::runtime_owner::runtime().begin_search();
-    crate::tasks::spawn_in_app(async move {
+    let ticket = crate::wiring::runtime_owner::runtime().begin_search();
+    crate::wiring::tasks::spawn_in_app(async move {
         timer(DEBOUNCE).await;
-        if crate::runtime_owner::runtime().search_is_current(ticket) {
+        if crate::wiring::runtime_owner::runtime().search_is_current(ticket) {
             run_search(ui, &query);
         }
     });
@@ -448,7 +456,7 @@ pub fn open(ui: Ui) {
         Some(false) => {}
         None => {
             ui.screens.search.set(Some(Screen {
-                state: SearchState::new(if options(&crate::settings::get()).show_history {
+                state: SearchState::new(if options(&crate::wiring::settings::get()).show_history {
                     load_history()
                 } else {
                     SearchHistory::default()
@@ -462,7 +470,9 @@ pub fn open(ui: Ui) {
         }
     }
     if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen {
-        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.chrome
+            .mode
+            .apply(crate::chrome::mode::Action::ReturnToBrowse);
     }
 }
 
@@ -475,9 +485,9 @@ pub fn close(ui: Ui) {
         crate::playback::multiview::list_closed(ui);
     }
     save_history(ui);
-    crate::runtime_owner::runtime().release_program_index();
+    crate::wiring::runtime_owner::runtime().release_program_index();
     ui.screens.search.set(None);
-    crate::input::dismiss_keyboard();
+    crate::chrome::input::dismiss_keyboard();
 }
 
 /// The screen is shown and takes the remote.
@@ -545,9 +555,12 @@ fn choose(ui: Ui, id: ResultId) {
                 .cloned()
         })
     });
-    let schedule = crate::runtime_owner::schedule();
-    let channel =
-        resolve_result_channel(&crate::runtime_owner::runtime(), id.channel(), &*schedule);
+    let schedule = crate::wiring::runtime_owner::schedule();
+    let channel = resolve_result_channel(
+        &crate::wiring::runtime_owner::runtime(),
+        id.channel(),
+        &*schedule,
+    );
     match select_result(&id, hit.as_ref(), channel, ResultPolicy::Guide) {
         Outcome::Live(channel) => watch(ui, channel, Playback::Live),
         Outcome::CatchUp { channel, start } => {
@@ -569,7 +582,9 @@ fn watch(ui: Ui, channel: usize, playback: Playback) {
     crate::guide::lists::tap(ui, channel, now);
     ui.play(channel, playback);
     // Full screen first: the resume effect ignores a suspended screen in full screen.
-    ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
+    ui.chrome
+        .mode
+        .apply(crate::chrome::mode::Action::EnterFullscreen);
     ui.show_playing();
     ui.screens.search.update(|s| {
         if let Some(s) = s {

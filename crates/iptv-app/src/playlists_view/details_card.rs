@@ -7,11 +7,11 @@ use nsh_core::prelude::*;
 
 use super::details::Param;
 use super::{ERROR, WHITE, mark, state, update, words};
-use crate::data::Activity;
+use crate::chrome::i18n::{tr, trf};
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit;
 use crate::guide::list_rows::{self, ROW_TWO};
-use crate::i18n::{tr, trf};
-use crate::scale::Scale;
-use crate::ui_kit;
+use crate::wiring::data::Activity;
 use crate::{Ui, rgb};
 
 pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {

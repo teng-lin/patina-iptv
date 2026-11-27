@@ -2,7 +2,7 @@
 //! keys across the rail, the groups column and the grid
 //! (`iptv_presentation::browse`).
 //!
-//! `crate::runtime_owner::schedule()` stays the full catalog: `Ui::playing`, `Ui::play`,
+//! `crate::wiring::runtime_owner::schedule()` stays the full catalog: `Ui::playing`, `Ui::play`,
 //! search and the player use catalog channels. The focus works on rows of
 //! [`Ui::list`] through [`view`]; [`focused_channel`] maps back. The list
 //! is rebuilt when the selection, the catalog or the favorites change,
@@ -35,7 +35,10 @@ thread_local! {
 
 /// The list on screen as a schedule of rows.
 pub(crate) fn view(guide: crate::GuideUi) -> ListView {
-    ListView::new(crate::runtime_owner::schedule(), guide.list.with(Rc::clone))
+    ListView::new(
+        crate::wiring::runtime_owner::schedule(),
+        guide.list.with(Rc::clone),
+    )
 }
 
 /// The catalog channel on the focused row.
@@ -47,7 +50,7 @@ pub(crate) fn focused_channel(guide: crate::GuideUi) -> Option<usize> {
 /// The number catalog `channel` shows (the player card, History): its
 /// place in the list on screen, as in the guide, else the catalog's.
 pub(crate) fn number(guide: crate::GuideUi, channel: usize) -> u32 {
-    let catalog = crate::runtime_owner::schedule();
+    let catalog = crate::wiring::runtime_owner::schedule();
     guide.list.with(|l| l.number_of(channel, &*catalog))
 }
 
@@ -61,7 +64,7 @@ pub fn rail(ui: Ui) -> Vec<RailItem> {
             any: ui.app.any_vod.get(),
             live_only: live_only(),
         },
-        crate::capabilities::recordings_library(ui),
+        crate::wiring::capabilities::recordings_library(ui),
     )
 }
 
@@ -72,7 +75,7 @@ fn rail_untracked(ui: Ui) -> Vec<RailItem> {
             any: ui.app.any_vod.get_untracked(),
             live_only: live_only(),
         },
-        crate::capabilities::recordings_library_untracked(ui),
+        crate::wiring::capabilities::recordings_library_untracked(ui),
     )
 }
 
@@ -90,7 +93,7 @@ fn rail_of(vod: VodAvailability, recordings: bool) -> Vec<RailItem> {
 /// as the library last loaded them (none while it loads). Callers that
 /// follow it track `Library::version`.
 pub fn live_only() -> bool {
-    let playlists = crate::runtime_owner::runtime()
+    let playlists = crate::wiring::runtime_owner::runtime()
         .playlists()
         .unwrap_or_default();
     iptv_presentation::browse::live_only(playlists.iter().map(|p| (p.kind, p.policy.enabled)))
@@ -105,7 +108,7 @@ pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
 pub fn list_name(ui: Ui) -> String {
     ui.app.data_version.get();
     let entry = ui.guide.list.with(|l| l.entry());
-    entry_name(entry, &*crate::runtime_owner::schedule())
+    entry_name(entry, &*crate::wiring::runtime_owner::schedule())
 }
 
 pub(crate) fn category_preferences(settings: &Settings) -> [bool; 3] {
@@ -118,7 +121,7 @@ pub(crate) fn category_preferences(settings: &Settings) -> [bool; 3] {
 }
 
 pub(crate) fn entries_in(ui: Ui, catalog: &dyn Schedule) -> VisibleEntries {
-    let mut visible = category_preferences(&crate::settings_wiring::read(ui));
+    let mut visible = category_preferences(&crate::wiring::settings_wiring::read(ui));
     // The combined view has its own aggregate, All playlists.
     visible[ALL] |= catalog.all_channels_label() == GroupName::AllPlaylists;
     VisibleEntries::new(entry_count(catalog), visible)
@@ -126,7 +129,7 @@ pub(crate) fn entries_in(ui: Ui, catalog: &dyn Schedule) -> VisibleEntries {
 
 pub(crate) fn visible_entries(ui: Ui) -> VisibleEntries {
     ui.guide_data();
-    entries_in(ui, &*crate::runtime_owner::schedule())
+    entries_in(ui, &*crate::wiring::runtime_owner::schedule())
 }
 
 /// Builds the list of the selected entry. With `keep`, the focus stays on
@@ -143,7 +146,7 @@ fn rebuild_in(ui: Ui, keep: bool, explicit_entry: Option<usize>) {
     } else {
         None
     };
-    let catalog = crate::runtime_owner::schedule();
+    let catalog = crate::wiring::runtime_owner::schedule();
     let player = keep_player_list(ui, &*catalog);
     let entries = entries_in(ui, &*catalog);
     let entry = explicit_entry.unwrap_or_else(|| {
@@ -174,7 +177,7 @@ fn rebuild_in(ui: Ui, keep: bool, explicit_entry: Option<usize>) {
 pub fn favorites_changed(ui: Ui) {
     let entry = Entry::at(ui.guide.focus.with_untracked(|f| f.group));
     if matches!(entry, Entry::Favorites | Entry::Recent)
-        || matches!(entry, Entry::Group(group) if crate::runtime_owner::schedule().group_preferences(group).favorites_only)
+        || matches!(entry, Entry::Group(group) if crate::wiring::runtime_owner::schedule().group_preferences(group).favorites_only)
     {
         rebuild(ui, true);
     }
@@ -310,7 +313,7 @@ fn listed(ui: Ui, channel: usize) -> usize {
     if let Some(row) = ui.guide.list.with_untracked(|l| l.row_of(channel)) {
         return row;
     }
-    let catalog = crate::runtime_owner::schedule();
+    let catalog = crate::wiring::runtime_owner::schedule();
     let entry = group_of(&*catalog, channel).map_or(ALL, |g| Entry::Group(g).index());
     // A direct selection (for example from Search) can reach an ungrouped
     // channel through the aggregate even when its category tab is hidden.
@@ -351,12 +354,12 @@ pub fn resumed(ui: Ui, channel: usize) {
 /// channel when that list has its row. False when the core leaves the
 /// usual place.
 fn into_resume_list(ui: Ui, channel: usize) -> bool {
-    let catalog = crate::runtime_owner::schedule();
+    let catalog = crate::wiring::runtime_owner::schedule();
     let Some(entry) = resume_entry(
         channel,
         &*catalog,
         &crate::guide::favorites::favorite_channels(),
-        crate::settings::flag(iptv_settings::keys::SHOW_FAVORITES),
+        crate::wiring::settings::flag(iptv_settings::keys::SHOW_FAVORITES),
     ) else {
         return false;
     };
@@ -402,11 +405,12 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
 
 /// Reconcile the selected category in each window when visibility changes.
 pub(crate) fn bind_categories(ui: Ui) {
-    let categories = computed(move || category_preferences(&crate::settings_wiring::read(ui)));
+    let categories =
+        computed(move || category_preferences(&crate::wiring::settings_wiring::read(ui)));
     effect(move || {
         categories.get();
         untracked(|| {
-            let catalog = crate::runtime_owner::schedule();
+            let catalog = crate::wiring::runtime_owner::schedule();
             // The real catalog's restore chooses the initial category.
             if catalog.channel_count() == 0 {
                 return;
@@ -549,7 +553,9 @@ fn follow(ui: Ui, outcome: Outcome) {
             if ui.playback.playing.get_untracked().is_some()
                 || crate::playback::on_demand::active(ui) =>
         {
-            ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
+            ui.chrome
+                .mode
+                .apply(crate::chrome::mode::Action::EnterFullscreen);
             ui.show_playing();
         }
         Outcome::Open(item) => open(ui, item),
@@ -593,7 +599,7 @@ pub fn columns_shown(ui: Ui) -> bool {
 fn toggle_playlist(entry: usize) -> bool {
     match Entry::at(entry) {
         Entry::Group(group) => {
-            crate::data::toggle_playlist(&crate::runtime_owner::runtime(), group)
+            crate::wiring::data::toggle_playlist(&crate::wiring::runtime_owner::runtime(), group)
         }
         _ => false,
     }

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 fn current(ui: Ui) -> Option<Target> {
     ui.guide_data();
-    let context = crate::input::context(&ui);
+    let context = crate::chrome::input::context(&ui);
     if let Some(target) = ui.playback.pending_zap.get()
         && matches!(
             context,
@@ -43,7 +43,7 @@ fn current(ui: Ui) -> Option<Target> {
             // without leaving the channel: a waiting choice stays, and
             // panning back starts no preview again.
             if !live {
-                let key = crate::runtime_owner::schedule().channel_key(ch)?;
+                let key = crate::wiring::runtime_owner::schedule().channel_key(ch)?;
                 let held = ui.guide.focus.with(|f| {
                     ui.guide
                         .pan_anchor
@@ -65,7 +65,7 @@ fn current(ui: Ui) -> Option<Target> {
         _ => return None,
     };
     Some(Target {
-        key: crate::runtime_owner::schedule().channel_key(ch)?,
+        key: crate::wiring::runtime_owner::schedule().channel_key(ch)?,
         source: ui.app.library.shown.get().map(|s| s.0),
         surface,
     })
@@ -73,7 +73,8 @@ fn current(ui: Ui) -> Option<Target> {
 /// Handhelds need connected keys before guide autoplay and its delay
 /// apply. Desktops and TVs keep them regardless of the input report.
 pub(crate) fn autoplay_supported(host: Host) -> bool {
-    !crate::device::handheld(host.form_factor) || crate::input::keys_for(host).is_some()
+    !crate::wiring::device::handheld(host.form_factor)
+        || crate::chrome::input::keys_for(host).is_some()
 }
 
 /// Whether choosing a channel in the guide over the video or in the
@@ -82,7 +83,7 @@ pub(crate) fn autoplay_supported(host: Host) -> bool {
 /// preview layout does not ask: there the first choice tunes the preview,
 /// and choosing the playing channel goes full screen (`browse_playback`).
 fn stays_after_choosing(s: &Settings, form_factor: FormFactor) -> bool {
-    !crate::device::handheld(form_factor)
+    !crate::wiring::device::handheld(form_factor)
         && s.choice(keys::GUIDE_AFTER_CHOOSING, &iptv_settings::Target::Global) == "stay"
 }
 
@@ -98,10 +99,10 @@ fn fullscreen_timeout_ms(s: &Settings, form_factor: FormFactor) -> u64 {
 }
 
 fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
-    let s = crate::settings_wiring::read(ui);
+    let s = crate::wiring::settings_wiring::read(ui);
     let at = &iptv_settings::Target::Global;
     // The form factor only: a resized window changes nothing here.
-    let host = crate::device::host();
+    let host = crate::wiring::device::host();
     let form_factor = host.form_factor;
     Policy {
         // Off while its row is not offered (a phone or a tablet with no
@@ -241,7 +242,7 @@ fn run(ui: Ui) {
                         ui.playback.touch_zapped.set(false);
                     }
                     if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen
-                        && (crate::settings::flag(keys::INFO_ON_SWITCH)
+                        && (crate::wiring::settings::flag(keys::INFO_ON_SWITCH)
                             || (touched && !untracked(|| crate::playback::play_bar::shows(ui))))
                     {
                         ui.show_playing();
@@ -261,7 +262,7 @@ fn run(ui: Ui) {
             if let Some(channel) =
                 current(ui).and_then(|t| crate::guide::favorites::channel_of(&t.key))
                 && playing_live(ui, channel)
-                && crate::runtime_owner::schedule().channel_block(channel)
+                && crate::wiring::runtime_owner::schedule().channel_block(channel)
                     == iptv_core::organization::Block::None
             {
                 full(ui);
@@ -280,7 +281,9 @@ fn full(ui: Ui) {
     if crate::channels_view::is_open(ui) {
         crate::channels_view::close(ui);
     }
-    ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
+    ui.chrome
+        .mode
+        .apply(crate::chrome::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {
@@ -311,7 +314,7 @@ pub fn bind(ui: Ui) {
         let focus = ui.guide.focus.get();
         ui.guide.list.with(|_| ());
         let channel = untracked(|| crate::guide::lists::focused_channel(ui.guide))
-            .and_then(|ch| crate::runtime_owner::schedule().channel_key(ch));
+            .and_then(|ch| crate::wiring::runtime_owner::schedule().channel_key(ch));
         let stale = ui.guide.pan_anchor.with_untracked(|a| {
             a.as_ref()
                 .is_some_and(|a| channel.as_deref().is_none_or(|c| !a.holds(c, &focus)))
@@ -327,7 +330,7 @@ pub fn bind(ui: Ui) {
             .playback
             .playing
             .get()
-            .and_then(|c| crate::runtime_owner::schedule().channel_key(c));
+            .and_then(|c| crate::wiring::runtime_owner::schedule().channel_key(c));
         let live = ui.playback.playback.get() == Playback::Live;
         untracked(|| {
             ui.guide.browse_playback.update(|b| {
@@ -369,7 +372,7 @@ pub fn zap_by(ui: Ui, channel: usize, touch: bool) {
         select(ui);
         return;
     }
-    if let Some(key) = crate::runtime_owner::schedule().channel_key(channel) {
+    if let Some(key) = crate::wiring::runtime_owner::schedule().channel_key(channel) {
         ui.playback.touch_zapped.set(touch);
         ui.playback.pending_zap.set(Some(Target {
             key,

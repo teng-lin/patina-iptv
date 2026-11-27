@@ -151,7 +151,7 @@ const RETIRED: &[&str] = &[
 /// `None` leaves them to the other rules.
 ///
 /// - `general.clock`: a phone or a tablet follows the system's 24-hour
-///   setting ([`crate::i18n::clock_style`]).
+///   setting ([`crate::chrome::i18n::clock_style`]).
 /// - `appearance.ui_transparency`, `guide.browse_mode`,
 ///   `guide.list_browse_mode`: in a compact window the layout decides (the
 ///   guide shows its preview; the channel list has no
@@ -187,14 +187,16 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
         _ => {}
     }
     let hidden = match key {
-        "general.double_back_to_exit" => !crate::exit_confirmation::offered(device.host),
-        "general.clock" | "guide.after_choosing" => crate::device::handheld(device.form_factor()),
+        "general.double_back_to_exit" => !crate::chrome::exit_confirmation::offered(device.host),
+        "general.clock" | "guide.after_choosing" => {
+            crate::wiring::device::handheld(device.form_factor())
+        }
         "appearance.ui_transparency" | "guide.browse_mode" | "guide.list_browse_mode" => {
             device.window == Class::Compact
         }
         "guide.fullscreen_timeout" => device.form_factor() != FormFactor::Tv,
         "player.info_on_switch" => {
-            crate::device::handheld(device.form_factor()) && !input.keyboard && !input.dpad
+            crate::wiring::device::handheld(device.form_factor()) && !input.keyboard && !input.dpad
         }
         _ => return None,
     };
@@ -202,7 +204,7 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
 }
 
 /// What the app does with the setting or command `key` on `device` (as it
-/// is now: [`crate::device::current`], so a row can come and go when the
+/// is now: [`crate::wiring::device::current`], so a row can come and go when the
 /// form factor, the window or the connected input changes). The
 /// long-press time matters only where keys report their release
 /// (Android), and picture in picture on leaving only on an Android phone
@@ -247,7 +249,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if key == "playlists.show_all" {
         let owner = crate::runtime();
         if !crate::host::IMPORTS
-            || crate::data::combined::active(&owner)
+            || crate::wiring::data::combined::active(&owner)
             || !crate::runtime::data::has_multiple_enabled(&owner)
         {
             return Offer::Hidden;
@@ -263,14 +265,14 @@ pub fn offer(device: Device, key: &str) -> Offer {
     // Arranging and ordering playlists needs two of them; sorted by name,
     // there is no hand order to arrange.
     if matches!(key, "playlists.reorder" | "playlists.sort")
-        && crate::runtime_owner::runtime()
+        && crate::wiring::runtime_owner::runtime()
             .playlists()
             .map_or(0, |playlists| playlists.len())
             < 2
     {
         return Offer::Hidden;
     }
-    if key == "playlists.reorder" && !crate::settings::playlists_by_hand() {
+    if key == "playlists.reorder" && !crate::wiring::settings::playlists_by_hand() {
         return Offer::Hidden;
     }
     if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) || RETIRED.contains(&key) {
@@ -292,13 +294,13 @@ pub fn offer(device: Device, key: &str) -> Offer {
         return Offer::Hidden;
     }
     // The keyboard or remote settings: only while there are keys (#280).
-    if on_keys_page(key) && crate::input::keys_for(host).is_none() {
+    if on_keys_page(key) && crate::chrome::input::keys_for(host).is_none() {
         return Offer::Hidden;
     }
     if matches!(key, "guide.autoplay" | "guide.switch_delay") {
         return if !crate::playback::browse_playback::autoplay_supported(host) {
             Offer::Hidden
-        } else if crate::device::handheld(host.form_factor) {
+        } else if crate::wiring::device::handheld(host.form_factor) {
             Offer::Active
         } else {
             Offer::Advanced
@@ -313,7 +315,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
     }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
-        || (key == keys::LONG_PRESS.as_str() && crate::input::long_press())
+        || (key == keys::LONG_PRESS.as_str() && crate::chrome::input::long_press())
         || (key == keys::PIP_ON_LEAVE.as_str() && crate::playback::pip::offers_on_leave(host))
     {
         Offer::Active
@@ -325,7 +327,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
 /// [`offer`] on the device as it is now (reactive: a closure that asks
 /// runs again when a signal changes).
 pub fn offer_now(key: &str) -> Offer {
-    offer(crate::device::current(), key)
+    offer(crate::wiring::device::current(), key)
 }
 
 #[cfg(test)]
@@ -545,7 +547,7 @@ mod tests {
                 assert_eq!(offer(key), page, "{key} on {device:?}");
             }
             // A hold only where keys report their release.
-            let hold = if has_keys && crate::input::long_press() {
+            let hold = if has_keys && crate::chrome::input::long_press() {
                 Offer::Active
             } else {
                 Offer::Hidden
@@ -559,7 +561,7 @@ mod tests {
                 assert_eq!(offer(key), zapping, "{key} on {device:?}");
             }
             assert_eq!(
-                crate::input::keys_for(device.host).is_some(),
+                crate::chrome::input::keys_for(device.host).is_some(),
                 has_keys,
                 "{device:?}"
             );

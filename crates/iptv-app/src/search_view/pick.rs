@@ -14,7 +14,7 @@ pub fn open_to_pick(ui: Ui) {
     if ui.screens.search.with_untracked(Option::is_some) {
         close(ui);
     }
-    let history = if options(&crate::settings::get()).show_history {
+    let history = if options(&crate::wiring::settings::get()).show_history {
         load_history()
     } else {
         SearchHistory::default()
@@ -42,10 +42,12 @@ pub(super) fn choose(ui: Ui, id: &ResultId) -> bool {
     if !untracked(|| picking(ui)) {
         return false;
     }
-    let schedule = crate::runtime_owner::schedule();
-    let Some(channel) =
-        resolve_result_channel(&crate::runtime_owner::runtime(), id.channel(), &*schedule)
-    else {
+    let schedule = crate::wiring::runtime_owner::schedule();
+    let Some(channel) = resolve_result_channel(
+        &crate::wiring::runtime_owner::runtime(),
+        id.channel(),
+        &*schedule,
+    ) else {
         return true;
     };
     if crate::playback::multiview::picked(ui, channel) {

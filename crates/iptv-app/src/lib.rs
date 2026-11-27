@@ -4,7 +4,7 @@
 //! program, navigation rail and groups beside the guide grid) over one
 //! persistent video layer (`video.rs`). The guide shows one list at a time (`lists.rs`).
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 
 #[cfg(patina_airplay_probe)]
 #[path = "../../../tools/apple-airplay-probe/view.rs"]
@@ -17,7 +17,7 @@ pub use host::set_tui_mode;
 /// Guide values and navigation used by the shell.
 pub mod guide;
 #[cfg(feature = "test-support")]
-mod guide_window_walkthrough;
+use wiring::guide_window_walkthrough;
 mod playback;
 pub mod theme;
 
@@ -28,43 +28,45 @@ mod backup;
 #[cfg(feature = "test-support")]
 pub use backup::{Pickers, set_pickers_for_test};
 use playback::browse_playback;
-mod capabilities;
+
 mod capture_limits;
 mod cast_pairing;
 mod casting;
 mod channels_view;
-mod chooser;
+use chrome::chooser;
 
-mod content_image;
 mod custom_groups;
-mod data;
-mod desktop;
-mod device;
-mod device_wiring;
+use chrome::desktop;
+use wiring::data;
+
+use wiring::device_wiring;
 mod epg_sources_view;
-mod exit_confirmation;
+use chrome::exit_confirmation;
+use chrome::fonts;
 use guide::fav_editor;
 use guide::favorites;
-use playback::external_player;
-mod fonts;
 use guide::grid;
+use playback::external_player;
 mod guide_assign_view;
 use guide::guide_clock;
 mod guide_inspect_view;
 mod guide_repair_view;
 use guide::header;
+mod chrome;
 mod host;
-pub mod layout;
-mod tasks;
+mod wiring;
+pub use chrome::layout;
+
 pub use guide::timeline;
 // A browser host exports nothing: the glob is empty there.
+use chrome::i18n;
+use chrome::input;
+use chrome::keyboard;
 #[allow(unused_imports)]
 #[doc(inline)]
 pub use host::exports::*;
-mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
-mod input;
 /// Whether a keyboard binding fires on auto-repeats now (headless tests).
 #[cfg(feature = "test-support")]
 pub use input::keyboard_repeats;
@@ -72,27 +74,23 @@ pub use input::keyboard_repeats;
 #[cfg(feature = "test-support")]
 pub use input::use_remote_key_phases;
 use playback::interruption;
-mod keyboard;
 
-mod listen;
-
+use chrome::menu_view;
+use chrome::mode;
 use guide::lists;
 use playback::media;
-mod menu_view;
-mod mode;
 pub(crate) mod parental_view;
 #[cfg(feature = "test-support")]
-mod performance_probe;
+use wiring::performance_probe;
 mod recordings_view;
 mod vod_view;
 use iptv_runtime as runtime;
 use playback::multiview;
 use playback::multiview_picker;
 use playback::multiview_view;
-mod navigation;
 
 mod organization_view;
-mod overlays;
+use chrome::overlays;
 use playback::panels;
 use playback::pip;
 use playback::play_bar;
@@ -100,32 +98,32 @@ use playback::player;
 
 use playback::player_panels;
 mod playlists_view;
-mod rail;
-mod remote_editor;
-mod request_ui;
-mod runtime_events;
-mod runtime_owner;
-mod runtime_wiring;
+use chrome::rail;
+use chrome::remote_editor;
+use wiring::request_ui;
+
+use chrome::scale;
 use runtime_owner::runtime;
 pub use runtime_owner::schedule;
-mod scale;
+use wiring::runtime_owner;
+use wiring::runtime_wiring;
 mod search_view;
 
-mod settings;
+use wiring::settings;
 mod settings_offer;
 mod settings_view;
-mod settings_wiring;
+use wiring::settings_wiring;
 mod setup_view;
-pub mod startup;
-mod startup_view;
+pub use chrome::startup;
+use chrome::startup_view;
 /// The app's guide clock and its UI tick.
 pub mod time {
     pub use crate::guide::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
     pub use crate::guide::guide_clock::{start, tick};
 }
-mod toast;
+use chrome::toast;
+use chrome::ui_kit;
 use playback::touch_zap;
-mod ui_kit;
 use playback::video;
 mod wizard_view;
 
@@ -1373,14 +1371,23 @@ pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySour
 /// The guide header a desktop window `width` × `height` gets at the default
 /// text size (for tests: the same policy the header and the video follow).
 #[cfg(feature = "test-support")]
-pub fn desktop_guide_header(width: f32, height: f32) -> crate::layout::GuideHeader {
-    crate::layout::GuideHeader::of(width, height, scale::scale_for(width, height, true), 1.0)
+pub fn desktop_guide_header(width: f32, height: f32) -> crate::chrome::layout::GuideHeader {
+    crate::chrome::layout::GuideHeader::of(
+        width,
+        height,
+        scale::scale_for(width, height, true),
+        1.0,
+    )
 }
 
 /// The guide header a phone's window `width` × `height` gets at the text
 /// factor `text` (for tests: the same policy the header and the video
 /// follow, at the phone's guide scale).
 #[cfg(feature = "test-support")]
-pub fn phone_guide_header(width: f32, height: f32, text: f32) -> crate::layout::GuideHeader {
-    crate::layout::GuideHeader::of(width, height, scale::PHONE, text)
+pub fn phone_guide_header(
+    width: f32,
+    height: f32,
+    text: f32,
+) -> crate::chrome::layout::GuideHeader {
+    crate::chrome::layout::GuideHeader::of(width, height, scale::PHONE, text)
 }

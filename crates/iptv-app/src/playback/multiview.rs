@@ -62,7 +62,7 @@ pub type State = Multiview<usize>;
 /// signals, whether the window is wider than tall, and the streams the
 /// shown source's account allows (#279).
 pub fn offer(ui: Ui) -> MultiviewOffer {
-    offer_on(ui, crate::device::current())
+    offer_on(ui, crate::wiring::device::current())
 }
 
 /// [`offer`] on `device`'s signals.
@@ -82,13 +82,13 @@ pub fn offer_on(ui: Ui, device: Device) -> MultiviewOffer {
 fn account_streams(ui: Ui) -> Option<u32> {
     ui.app.account_streams.get().or_else(|| {
         let channel = ui.playback.playing.get()?;
-        let schedule = crate::runtime_owner::schedule();
+        let schedule = crate::wiring::runtime_owner::schedule();
         let all = schedule
             .as_any()?
             .downcast_ref::<iptv_guide::combined::CombinedSchedule>()?;
         let (source, _) = all.channel_source(channel)?;
-        crate::data::combined::connection_limit(
-            &crate::runtime_owner::runtime(),
+        crate::wiring::data::combined::connection_limit(
+            &crate::wiring::runtime_owner::runtime(),
             crate::runtime::model::SourceId(source.id),
         )
     })
@@ -98,7 +98,7 @@ fn account_streams(ui: Ui) -> Option<u32> {
 /// the account's limit), for the entry points' accessibility descriptions.
 pub fn disabled_reason(ui: Ui) -> Option<&'static str> {
     match offer(ui) {
-        MultiviewOffer::Disabled(why) => Some(crate::capabilities::reason(why)),
+        MultiviewOffer::Disabled(why) => Some(crate::wiring::capabilities::reason(why)),
         _ => None,
     }
 }
@@ -114,7 +114,7 @@ pub fn availability(ui: Ui) -> Availability {
     if let MultiviewOffer::Disabled(_) = offer
         && session(ui)
     {
-        offer = MultiviewOffer::Tiles(crate::device::host().decoder_slots());
+        offer = MultiviewOffer::Tiles(crate::wiring::device::host().decoder_slots());
     }
     iptv_presentation::capabilities::multiview(
         offer,
@@ -148,12 +148,12 @@ const HINT_MS: u64 = 5_000;
 /// The streams the shown source's account allows at once, if known: the
 /// failure card names it when the provider refuses a stream.
 pub fn account_limit() -> Option<u32> {
-    crate::runtime_owner::runtime().account_limit()
+    crate::wiring::runtime_owner::runtime().account_limit()
 }
 
 /// The source on screen changed its account's allowance (`data.rs`).
 pub fn set_account_streams(allowed: Option<u32>) {
-    crate::runtime_owner::runtime().update_account_limit(allowed);
+    crate::wiring::runtime_owner::runtime().update_account_limit(allowed);
 }
 
 /// A multiview session exists (its grid shows, or it waits for a detour).
@@ -249,7 +249,7 @@ pub fn surface_rect(ui: Ui, surface: usize) -> Option<(f32, f32, f32, f32)> {
 /// On a detour it goes back to the grid.
 pub fn open(ui: Ui) {
     if let Some(reason) = untracked(|| crate::playback::multiview::availability(ui)).reason() {
-        crate::toast::notify(crate::capabilities::reason(reason));
+        crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
         return;
     }
     if untracked(|| detour(ui)) {
@@ -270,7 +270,7 @@ pub fn open(ui: Ui) {
     crate::channels_view::close(ui);
     let limits = Limits {
         decoders: untracked(|| tiles(ui)),
-        connections: crate::runtime_owner::runtime().account_limit(),
+        connections: crate::wiring::runtime_owner::runtime().account_limit(),
     };
     log::info!(
         "iptv multiview: open (device {} streams, account {:?})",
@@ -380,15 +380,15 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
         return false;
     }
     log::info!("iptv multiview: picked {channel}");
-    let schedule = crate::runtime_owner::schedule();
+    let schedule = crate::wiring::runtime_owner::schedule();
     let all = schedule
         .as_any()
         .and_then(|s| s.downcast_ref::<iptv_guide::combined::CombinedSchedule>());
     apply(ui, |m, _| {
         let exceeded = all.and_then(|all| {
             let (source, _) = all.channel_source(channel)?;
-            let allowed = crate::data::combined::connection_limit(
-                &crate::runtime_owner::runtime(),
+            let allowed = crate::wiring::data::combined::connection_limit(
+                &crate::wiring::runtime_owner::runtime(),
                 crate::runtime::model::SourceId(source.id),
             )?;
             let replacing = match m.pick() {
@@ -430,8 +430,10 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
     // Read at each step, so a change in the settings applies at the next
     // focus move, also in a session already open.
     // Not offered on a phone: there a stored value is kept, unused.
-    let follows = crate::settings::flag(iptv_settings::keys::SOUND_FOLLOWS_TILE)
-        && iptv_presentation::capabilities::sound_follows_tile(untracked(crate::device::host));
+    let follows = crate::wiring::settings::flag(iptv_settings::keys::SOUND_FOLLOWS_TILE)
+        && iptv_presentation::capabilities::sound_follows_tile(untracked(
+            crate::wiring::device::host,
+        ));
     let mut step = None;
     ui.playback.multiview.update(|m| {
         if let Some(m) = m.as_mut() {

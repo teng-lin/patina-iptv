@@ -6,15 +6,15 @@
 //! scaled with the guide (`scale.rs`): on a TV (× 0.8) the panel is
 //! 208 dp wide, 8 dp from the edge, with 40 dp rows.
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 
 use iptv_presentation::multiview::{Dialog, TileAction};
 use nsh_core::prelude::*;
 
 use super::with_state;
+use crate::chrome::scale::Scale;
 use crate::guide::list_rows::{self, Mark, ROW};
 use crate::playback::multiview;
-use crate::scale::Scale;
 use crate::theme::RESTING_ALPHA;
 use crate::{Ui, tint};
 

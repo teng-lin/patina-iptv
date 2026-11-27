@@ -71,7 +71,7 @@ pub fn synthetic_url(channel: usize, playback: crate::Playback) -> Option<String
     Some(match playback {
         crate::Playback::Live => format!("{MOCK_SERVER}/ch{}/index.m3u8", channel % 3),
         crate::Playback::CatchUp { start, offset } => {
-            let s = crate::runtime_owner::schedule();
+            let s = crate::wiring::runtime_owner::schedule();
             let p = s.program_at(channel, start);
             let utc = crate::guide::unix_of(&*s, p.start) + i64::from(offset);
             let duration = (p.end - p.start) * 60 - offset;
@@ -233,7 +233,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         }),
         seek: Box::new(move || stream.seek.get()),
         picture_size: Box::new(move || {
-            let identity = crate::chooser::picture_identity(ui, surface);
+            let identity = crate::chrome::chooser::picture_identity(ui, surface);
             ui.app
                 .picture
                 .with(|p| p.for_channel(identity.as_deref()))
@@ -282,7 +282,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
     player.on_native_event(move |e: &NativeEvent| {
         #[cfg(feature = "test-support")]
         if e.name.as_ref() == "test.parental.lock" {
-            crate::runtime_owner::runtime().parental_lock();
+            crate::wiring::runtime_owner::runtime().parental_lock();
             return;
         }
         match PlayerEvent::decode(&e.name, &e.data) {
@@ -320,7 +320,7 @@ fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
         PlayerEventError::UnknownState(name) => (PlayerEventKind::State, name),
         PlayerEventError::NoSize { width, height } => {
             if surface == 0 {
-                crate::startup::mark("video size");
+                crate::chrome::startup::mark("video size");
             }
             (PlayerEventKind::Size, format!("{width}×{height}"))
         }
@@ -400,10 +400,10 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         }
         PlayerEvent::FirstRender { token } => {
             #[cfg(feature = "test-support")]
-            crate::performance_probe::rendered(ui, surface, token);
+            crate::wiring::performance_probe::rendered(ui, surface, token);
             if token == stream.token.get_untracked() {
                 if surface == 0 {
-                    crate::startup::mark("video rendered");
+                    crate::chrome::startup::mark("video rendered");
                 }
                 if crate::host::video_under_page() {
                     stream.rendered.set(Some(token));
@@ -424,7 +424,7 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         PlayerEvent::Size { width, height } => {
             stream.size.set(Some((width as u32, height as u32)));
             if surface == 0 {
-                crate::startup::mark("video size");
+                crate::chrome::startup::mark("video size");
             }
             format!("{width}×{height}")
         }

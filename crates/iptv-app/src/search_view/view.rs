@@ -3,14 +3,14 @@
 //! titles in Roboto Condensed at the guide's sizes, the focus its light
 //! pill.
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 use nsh_core::Checked;
 
 use super::*;
-use crate::fonts::{CAPTION, CONDENSED, SANS};
+use crate::chrome::fonts::{CAPTION, CONDENSED, SANS};
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit;
 use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
-use crate::scale::Scale;
-use crate::ui_kit;
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
     ui.screens.search.with(|s| s.as_ref().map(f))
@@ -52,7 +52,7 @@ fn screen(ui: Ui) -> impl IntoElement {
         .style_when(move || compact_header(size), move |s| s.px(size.px(16.0)))
         .test_id("search-screen")
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Search.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::Search.accessibility_covered(ui)
         })
         .child(header(ui, size))
         .child(ui_kit::caption(size, move || hint(ui)))
@@ -76,7 +76,7 @@ fn hint(ui: Ui) -> &'static str {
     if matches!(phase, Phase::NoResults | Phase::Typing) {
         return match (editing, ui.keys_shown()) {
             (true, _) => tr("Edit the query or choose Clear"),
-            (false, true) if crate::desktop::DESKTOP => tr("Enter edit query   Esc close"),
+            (false, true) if crate::chrome::desktop::DESKTOP => tr("Enter edit query   Esc close"),
             (false, true) => tr("OK edit query   Back close"),
             (false, false) => tr("Tap the search field to edit, or choose Clear"),
         };
@@ -102,10 +102,10 @@ fn button(ui: Ui, size: Scale, label: &'static str, act: fn(Ui)) -> impl IntoEle
     ui_kit::button(ui, size, move || tr(label), || false, move || act(ui))
 }
 
-/// The query takes its own row in a compact window (`crate::layout`).
+/// The query takes its own row in a compact window (`crate::chrome::layout`).
 fn compact_header(size: Scale) -> bool {
-    use crate::layout::Class;
-    let text = size.of(1.0) * crate::settings::text_factor();
+    use crate::chrome::layout::Class;
+    let text = size.of(1.0) * crate::wiring::settings::text_factor();
     Class::of(window().width.0, text) == Class::Compact
 }
 
@@ -117,8 +117,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         })
         .unwrap_or(false)
     });
-    crate::input::bind_field_focus(field, move || want_keyboard.get());
-    crate::keyboard::on_dismissed(
+    crate::chrome::input::bind_field_focus(field, move || want_keyboard.get());
+    crate::chrome::keyboard::on_dismissed(
         move || want_keyboard.get(),
         move || apply(ui, SearchAction::KeyboardHidden),
     );
@@ -228,7 +228,7 @@ fn history(ui: Ui, size: Scale) -> impl IntoElement {
         .flex_1()
         .gap(move || size.px(8.0))
         .child(ui_kit::heading(size, move || {
-            if !options(&crate::settings_wiring::read(ui)).show_history {
+            if !options(&crate::wiring::settings_wiring::read(ui)).show_history {
                 ""
             } else if count() == 0 {
                 tr("No recent searches yet")
@@ -305,9 +305,12 @@ fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgramHit>)> {
     })
     .flatten()
     .and_then(|(id, mut hit)| {
-        let schedule = crate::runtime_owner::schedule();
-        let channel =
-            resolve_result_channel(&crate::runtime_owner::runtime(), id.channel(), &*schedule)?;
+        let schedule = crate::wiring::runtime_owner::schedule();
+        let channel = resolve_result_channel(
+            &crate::wiring::runtime_owner::runtime(),
+            id.channel(),
+            &*schedule,
+        )?;
         if let Some(hit) = hit.as_mut() {
             hit.channel = channel;
         }
@@ -384,15 +387,16 @@ fn result_row(
     let mark = move || mark(ui, focused());
     let line1 = move || match item() {
         Some((ResultId::Channel(id), _)) => {
-            let schedule = crate::runtime_owner::schedule();
-            let Some(c) = crate::runtime_owner::runtime().resolve_search_channel(&id, &*schedule)
+            let schedule = crate::wiring::runtime_owner::schedule();
+            let Some(c) =
+                crate::wiring::runtime_owner::runtime().resolve_search_channel(&id, &*schedule)
             else {
                 return String::new();
             };
             let star = ui.app.favorites.with(|f| f.contains(&c));
             format!(
                 "{}   {}{}",
-                crate::runtime_owner::schedule().channel_number(c),
+                crate::wiring::runtime_owner::schedule().channel_number(c),
                 if star { "★ " } else { "" },
                 channel_name(c)
             )
@@ -403,8 +407,8 @@ fn result_row(
     };
     let line2 = move || match item() {
         Some((ResultId::Channel(id), _))
-            if crate::runtime_owner::runtime()
-                .resolve_search_channel(&id, &*crate::runtime_owner::schedule())
+            if crate::wiring::runtime_owner::runtime()
+                .resolve_search_channel(&id, &*crate::wiring::runtime_owner::schedule())
                 .is_some_and(|c| ui.playback.playing.get() == Some(c)) =>
         {
             tr("Playing").to_owned()

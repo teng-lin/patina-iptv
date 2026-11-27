@@ -1,12 +1,12 @@
 //! Existing guide-source workflow's read-only coverage/candidate inspection.
-use crate::input::dismiss_keyboard;
+use crate::chrome::input::dismiss_keyboard;
 use crate::runtime::model::{InspectionControl, ProbeRequest, ProbeTarget};
 use crate::{
     Ui,
+    chrome::i18n::tr,
+    chrome::scale::Scale,
+    chrome::ui_kit,
     guide::list_rows::{self, Mark, ROW_TWO},
-    i18n::tr,
-    scale::Scale,
-    ui_kit,
 };
 use iptv_library::{SourceId, inspection::*};
 use iptv_nav::Action;
@@ -117,13 +117,13 @@ fn audit(ui: Ui, next: bool) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let mut query = Query::source(screen.source);
         query.text = screen.query;
         if next {
             query.cursor = screen.next;
         }
-        let result = crate::runtime_owner::runtime()
+        let result = crate::wiring::runtime_owner::runtime()
             .epg_audit(query, screen.window, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -136,13 +136,13 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let mut query = Query::source(screen.source);
         query.text = screen.query;
         if next {
             query.cursor = screen.next;
         }
-        let result = crate::runtime_owner::runtime()
+        let result = crate::wiring::runtime_owner::runtime()
             .epg_candidates(subject.clone(), query, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -152,7 +152,7 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
             Ok(page) => {
                 let mut query = Query::source(screen.source);
                 query.limit = 5;
-                let programs = crate::runtime_owner::runtime()
+                let programs = crate::wiring::runtime_owner::runtime()
                     .query_programs(query, screen.window, Some(subject.clone()), control.clone())
                     .await;
                 if !current(ui, id, &control) {
@@ -178,12 +178,12 @@ fn inspect_link(ui: Ui) {
         return;
     };
     dismiss_keyboard();
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let request = ProbeRequest {
             source: screen.source,
             target: ProbeTarget::Supplied(iptv_providers::SecretUrl::new(screen.link)),
         };
-        let result = crate::runtime_owner::runtime()
+        let result = crate::wiring::runtime_owner::runtime()
             .probe_feed(request, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -191,7 +191,7 @@ fn inspect_link(ui: Ui) {
         }
         match result {
             Ok(stage) => {
-                let page = crate::runtime_owner::runtime()
+                let page = crate::wiring::runtime_owner::runtime()
                     .probe_candidates(
                         stage.evidence.clone(),
                         String::new(),
@@ -216,9 +216,9 @@ fn staged_candidates(ui: Ui) {
     let Some(stage) = screen.stage else {
         return;
     };
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let after = screen.next;
-        let result = crate::runtime_owner::runtime()
+        let result = crate::wiring::runtime_owner::runtime()
             .probe_candidates(stage.evidence, screen.query, after, 50, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -231,14 +231,14 @@ fn samples(ui: Ui, candidate: CandidateRef) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let stage = if let Some(stage) = screen.stage.filter(|s| {
             s.evidence.feed.unwrap_or(iptv_epg::FeedId(0)) == candidate.feed
                 && s.evidence.incarnation == candidate.incarnation
         }) {
             Ok(stage)
         } else {
-            crate::runtime_owner::runtime()
+            crate::wiring::runtime_owner::runtime()
                 .probe_feed(
                     ProbeRequest {
                         source: screen.source,
@@ -259,7 +259,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
             }
         };
         let selected = candidate.clone();
-        let result = crate::runtime_owner::runtime()
+        let result = crate::wiring::runtime_owner::runtime()
             .probe_schedule(
                 stage.evidence.clone(),
                 candidate,
@@ -468,14 +468,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     let field = element_ref();
-    crate::input::bind_field_focus(field, move || state(ui, |s| s.typing).unwrap_or(false));
+    crate::chrome::input::bind_field_focus(field, move || state(ui, |s| s.typing).unwrap_or(false));
     when(
         move || is_open(ui),
         move || {
             ui_kit::screen(ui, size)
                 .test_id("guide-inspection-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::GuideInspection.accessibility_covered(ui)
+                    crate::chrome::overlays::Overlay::GuideInspection.accessibility_covered(ui)
                 })
                 .child(ui_kit::header(
                     ui,

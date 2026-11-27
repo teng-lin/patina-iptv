@@ -8,8 +8,8 @@
 
 use nsh_core::prelude::*;
 
-use crate::fonts::{LIST_ITEM, LIST_SECONDARY, SANS};
-use crate::scale::Scale;
+use crate::chrome::fonts::{LIST_ITEM, LIST_SECONDARY, SANS};
+use crate::chrome::scale::Scale;
 use crate::theme::{
     FOCUSED_CELL, FOCUSED_TEXT, LIST_TEXT, RADIUS, RESTING_ALPHA, TEXT_DISABLED_ALPHA,
     TEXT_SECONDARY_ALPHA,
@@ -87,7 +87,7 @@ pub fn pitch(size: Scale, pitch: f32) -> impl Fn() -> Points + Copy {
 }
 
 fn text_pitch(pitch: f32) -> f32 {
-    pitch * crate::settings::text_factor().max(1.0)
+    pitch * crate::wiring::settings::text_factor().max(1.0)
 }
 
 /// A row `pitch` apart from the next (its fill [`GAP`] in from both), its
@@ -133,7 +133,7 @@ pub fn name(size: Scale, content: impl IntoReactive<SharedString>) -> Text {
 
 /// A triangle at the same size as the playing-channel marker.
 pub(crate) fn triangle(size: Scale, glyph: impl IntoReactive<SharedString>) -> Text {
-    text(glyph).text_size(move || size.text_px(crate::fonts::CHANNEL * 0.6))
+    text(glyph).text_size(move || size.text_px(crate::chrome::fonts::CHANNEL * 0.6))
 }
 
 /// A second line in `family` (Roboto Condensed for program titles).
@@ -156,7 +156,7 @@ pub fn small(size: Scale, content: impl IntoReactive<SharedString>, sp: f32) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fonts::{CHANNEL, HEADER_BODY};
+    use crate::chrome::fonts::{CHANNEL, HEADER_BODY};
 
     #[test]
     fn lists_use_the_guides_type_and_pitch() {

@@ -23,7 +23,7 @@ pub fn tick(ui: Ui) {
 pub fn start(ui: Ui) {
     // Synthetic work-counter journeys exclude unrelated minute-boundary work.
     #[cfg(feature = "test-support")]
-    if crate::performance_probe::enabled() {
+    if crate::wiring::performance_probe::enabled() {
         return;
     }
     let _task = set_timeout(next_tick(), move || {

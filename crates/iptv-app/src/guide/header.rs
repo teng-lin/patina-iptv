@@ -3,7 +3,7 @@
 //! the focused channel and its source, then the program's title, timing
 //! and description.
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 
 use iptv_core::{guide::Schedule, lists::group_of};
 use iptv_guide::combined::CombinedSchedule;
@@ -11,11 +11,13 @@ use std::time::Duration;
 
 use nsh_core::prelude::*;
 
-use crate::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE, MEDIUM, SANS};
+use crate::chrome::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE, MEDIUM, SANS};
+use crate::chrome::layout::{
+    COLUMN_GAP, DETAILS_GAP, MAX_TIMES_LINES, TIMES_GAP, TIMES_PROGRESS_W,
+};
+use crate::chrome::scale::Scale;
 use crate::guide::{Airing, Pane, Program};
-use crate::layout::{COLUMN_GAP, DETAILS_GAP, MAX_TIMES_LINES, TIMES_GAP, TIMES_PROGRESS_W};
 use crate::playback::panels::{PREVIEW_MARGIN, PREVIEW_RADIUS, header_now};
-use crate::scale::Scale;
 use crate::theme::{BRIGHT_TEXT, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, clock, tint};
 
@@ -96,7 +98,9 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
         .on_press(move || {
             ui.touched();
             if !idle() {
-                ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
+                ui.chrome
+                    .mode
+                    .apply(crate::chrome::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
         })
@@ -204,7 +208,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         ui.app.guide_pages.get();
         settled.with(|p| {
             let (_, _, _, ch, p) = (*p)?;
-            let schedule = crate::runtime_owner::schedule();
+            let schedule = crate::wiring::runtime_owner::schedule();
             program_description(&*schedule, ch, p)
         })
     });
@@ -218,7 +222,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let single_playlist = computed(move || {
         ui.app.library.version.get();
         let shown = ui.app.library.shown.get()?;
-        crate::runtime::data::library::playlists(&crate::runtime_owner::runtime())
+        crate::runtime::data::library::playlists(&crate::wiring::runtime_owner::runtime())
             .ok()?
             .into_iter()
             .find(|playlist| playlist.id == shown)
@@ -232,7 +236,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
             |channel| {
                 single_playlist.with(|playlist| {
                     channel_labels(
-                        &*crate::runtime_owner::schedule(),
+                        &*crate::wiring::runtime_owner::schedule(),
                         channel,
                         playlist.as_deref(),
                     )
@@ -244,7 +248,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let open_program_menu = move || {
         if program.with(Option::is_some) && !crate::organization_view::inline_order_open(ui) {
             ui.touched();
-            crate::menu_view::open(ui);
+            crate::chrome::menu_view::open(ui);
         }
     };
     view()
@@ -289,7 +293,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                         program.with(|p| {
                             p.map_or_else(String::new, |(_, _, _, ch, p)| {
                                 crate::guide::listing_labels::listing(
-                                    crate::runtime_owner::schedule().listing(ch, p),
+                                    crate::wiring::runtime_owner::schedule().listing(ch, p),
                                 )
                             })
                         })
@@ -501,7 +505,7 @@ fn corner_back_shown(ui: Ui) -> bool {
 /// preview, kept inside a preview `preview_w` wide.
 fn corner_back_left(inset: f32, preview_w: f32) -> f32 {
     let wanted = 20.0 + (inset - PREVIEW_MARGIN).max(0.0);
-    let last = PREVIEW_MARGIN + preview_w - crate::ui_kit::TOUCH;
+    let last = PREVIEW_MARGIN + preview_w - crate::chrome::ui_kit::TOUCH;
     wanted.min(last.max(PREVIEW_MARGIN))
 }
 
@@ -521,8 +525,8 @@ fn corner_back(ui: Ui) -> impl IntoElement {
         // preview's right edge.
         .left(move || px(corner_back_left(safe_area().left.0, header_now().1)))
         .top(px(16.0))
-        .child(crate::ui_kit::round_back(
-            crate::ui_kit::TOUCH,
+        .child(crate::chrome::ui_kit::round_back(
+            crate::chrome::ui_kit::TOUCH,
             0.0,
             crate::playback::play_bar::back_bg(ui),
             move || {

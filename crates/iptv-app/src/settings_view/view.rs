@@ -6,14 +6,14 @@
 
 use std::time::Duration;
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 
 use super::*;
-use crate::fonts::{LIST_ITEM, SANS, SECTION};
+use crate::chrome::fonts::{LIST_ITEM, SANS, SECTION};
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit::{self, HEADING_ROW};
 use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
-use crate::scale::Scale;
 use crate::theme::LIST_TEXT;
-use crate::ui_kit::{self, HEADING_ROW};
 use nsh_core::Checked;
 
 const PANEL_W: f32 = 860.0;
@@ -31,7 +31,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     view()
         .test_id("settings-layer")
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Settings.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::Settings.accessibility_covered(ui)
         })
         .absolute()
         .inset_0()
@@ -41,7 +41,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 
 fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = computed(move || {
-        let settings = crate::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui);
         // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.playback.pip.with(|p| p.supported);
         state(ui, |s| {
@@ -65,7 +65,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     // only when they change, not when keys or touch are used, so a screen
     // reader's place in it holds.
     let shown = computed(move || {
-        let settings = crate::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui);
         let ctx = Ctx {
             settings: &settings,
             offer: &crate::settings_offer::offer_now,
@@ -184,7 +184,7 @@ pub(crate) fn focused_playlist(ui: Ui) -> Option<i64> {
 }
 
 /// Stored playlist `id` (reactive: the library's version).
-fn stored_playlist(ui: Ui, id: i64) -> Option<crate::data::Playlist> {
+fn stored_playlist(ui: Ui, id: i64) -> Option<crate::wiring::data::Playlist> {
     ui.app.library.version.get();
     crate::runtime()
         .playlists()
@@ -229,7 +229,7 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
             .child(
                 list_rows::name(size, move || page().map_or("", |p| words::page(p.key)))
                     .text_color(move || {
-                        crate::settings_wiring::read(ui);
+                        crate::wiring::settings_wiring::read(ui);
                         match mark() {
                             Mark::Focused => Mark::Focused.text(),
                             Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
@@ -312,7 +312,7 @@ fn row_view(
     let row = move || rows.with(|r| r.get(at.index()).copied());
     let heading = move || matches!(row(), Some(Row::Heading { .. }));
     let lit = move || {
-        let settings = crate::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui);
         row().is_some_and(|r| matches!(status(&settings, &r), Status::Active | Status::ReadOnly))
     };
     let focused = move || ui.keys_shown() && focused_index.get() == Some(at.index());
@@ -343,12 +343,12 @@ fn row_view(
         Some(Row::Playlist(p)) => stored_playlist(ui, p.id)
             .map(|p| crate::playlists_view::summary(ui, &p).0)
             .unwrap_or_default(),
-        Some(r) => note(&crate::settings_wiring::read(ui), &r),
+        Some(r) => note(&crate::wiring::settings_wiring::read(ui), &r),
         None => String::new(),
     };
     let note = move || note_of(row());
     let current = move || {
-        let settings = crate::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui);
         match row() {
             Some(Row::Setting(s)) => {
                 let value = settings.get(s.key).unwrap_or_else(|_| s.default_value());
@@ -392,7 +392,7 @@ fn row_view(
         })
         .accessibility_state(move || {
             let checked = |on: bool| Some(if on { Checked::True } else { Checked::False });
-            let settings = crate::settings_wiring::read(ui);
+            let settings = crate::wiring::settings_wiring::read(ui);
             match row() {
                 None | Some(Row::Heading { .. }) => AccessibilityState::default(),
                 Some(Row::Playlist(p)) => AccessibilityState {
@@ -529,7 +529,7 @@ fn row_view(
 
 fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     let description = move || {
-        let settings = crate::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui);
         // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.playback.pip.with(|p| p.supported);
         let ctx = Ctx {
@@ -558,7 +558,7 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     };
     ui_kit::body(size, description)
         .test_id("settings-help")
-        .h(move || px(size.of(FOOTER_H) * crate::settings::text_factor().max(1.0)))
+        .h(move || px(size.of(FOOTER_H) * crate::wiring::settings::text_factor().max(1.0)))
         .flex_shrink_0()
         .px(move || size.px(4.0))
         .number_of_lines(4)

@@ -2,8 +2,8 @@
 //! The portable picker owns selection, filtering and remote focus; the
 //! guide's list and the persistent player surfaces stay in place.
 
+use crate::chrome::i18n::{tr, trf};
 use crate::guide::lists::entry_name;
-use crate::i18n::{tr, trf};
 
 use iptv_core::guide::Schedule;
 use iptv_guide::combined::CombinedSchedule;
@@ -14,10 +14,10 @@ use nsh_base::input;
 use nsh_core::prelude::*;
 use std::rc::Rc;
 
-use crate::fonts::CONDENSED;
+use crate::chrome::fonts::CONDENSED;
+use crate::chrome::scale::Scale;
 use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
-use crate::scale::Scale;
-use crate::{Ui, clock, ui_kit};
+use crate::{Ui, chrome::ui_kit, clock};
 
 /// An independent browser over the shared channel catalog. The portable
 /// schedule owns playlist expansion; replacing this snapshot never changes
@@ -60,7 +60,7 @@ fn state<T>(ui: Ui, f: impl FnOnce(&ChannelPicker) -> T) -> Option<T> {
 }
 
 pub fn open(ui: Ui) {
-    let catalog = crate::runtime_owner::schedule();
+    let catalog = crate::wiring::runtime_owner::schedule();
     let group = ListId::of(ui.guide.list.with_untracked(|l| l.entry()), &*catalog);
     let channel = crate::playback::multiview::pick_from(ui).and_then(|c| catalog.channel_key(c));
     ui.playback.channel_picker.set(Some(Screen {
@@ -95,7 +95,7 @@ fn refresh(ui: Ui) {
 /// Channel indices remain those of the shared catalog, so selecting a row
 /// still routes playback to its current source and stream.
 fn refresh_catalog(ui: Ui) {
-    let current = crate::runtime_owner::schedule();
+    let current = crate::wiring::runtime_owner::schedule();
     let previous = catalog(ui);
     let next: Rc<dyn Schedule> = match (combined(&*current), combined(&*previous)) {
         (Some(current), Some(previous)) => {
@@ -120,7 +120,9 @@ fn type_query(ui: Ui, query: &str) {
 
 fn choose(ui: Ui, row: usize) {
     let key = state(ui, |p| p.channels().get(row).map(|c| c.key.clone())).flatten();
-    if let Some(channel) = key.and_then(|key| crate::runtime_owner::schedule().find_channel(&key)) {
+    if let Some(channel) =
+        key.and_then(|key| crate::wiring::runtime_owner::schedule().find_channel(&key))
+    {
         update(ui, |p| p.focus_row(row));
         if crate::playback::multiview::picked(ui, channel) {
             close(ui);
@@ -216,7 +218,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     let categories = computed(move || {
-        crate::guide::lists::category_preferences(&crate::settings_wiring::read(ui))
+        crate::guide::lists::category_preferences(&crate::wiring::settings_wiring::read(ui))
     });
     effect(move || {
         categories.get();
@@ -276,7 +278,7 @@ fn screen(ui: Ui) -> impl IntoElement {
     });
     ui_kit::screen(ui, size)
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::ChannelPicker.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::ChannelPicker.accessibility_covered(ui)
         })
         .test_id("multiview-picker")
         .child(header(ui, size))
@@ -336,8 +338,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let field = element_ref();
     let editing =
         computed(move || state(ui, |p| p.keyboard && p.pane == Pane::Search).unwrap_or(false));
-    crate::input::bind_field_focus(field, move || editing.get());
-    crate::keyboard::on_dismissed(
+    crate::chrome::input::bind_field_focus(field, move || editing.get());
+    crate::chrome::keyboard::on_dismissed(
         move || editing.get(),
         move || update(ui, ChannelPicker::keyboard_hidden),
     );

@@ -4,7 +4,7 @@ The portable [capability model](../crates/iptv-core/src/capabilities.rs) separat
 host facilities from live player reports. The
 [presentation capability rules](../crates/iptv-presentation/src/capabilities.rs)
 decide when to offer PiP and multiview. The
-[shell adapter](../crates/iptv-app/src/capabilities.rs) chooses the host profile;
+[shell adapter](../crates/iptv-app/src/wiring/capabilities.rs) chooses the host profile;
 native services report what the operating system actually accepted.
 
 | Host profile | Player surfaces | Recorder can outlive UI |
@@ -38,7 +38,7 @@ The operating system alone cannot tell an Android phone from a tablet or a
 TV, so gates also take three signals that can change while the app runs
 ([portable model](../crates/iptv-core/src/capabilities.rs),
 [`Device`](../crates/iptv-presentation/src/capabilities.rs),
-[shell adapter](../crates/iptv-app/src/device.rs)):
+[shell adapter](../crates/iptv-app/src/wiring/device.rs)):
 
 | Signal | Source | Gates |
 | --- | --- | --- |
@@ -152,7 +152,7 @@ feature being available grants no permission to play content.
 Record now is offered only where the viewer stays with the capture and the
 host can keep it running (#275;
 [`record_now`, `recordings_library`](../crates/iptv-presentation/src/capabilities.rs),
-[shell gates](../crates/iptv-app/src/capabilities.rs)):
+[shell gates](../crates/iptv-app/src/wiring/capabilities.rs)):
 
 | Host | Record now | Recordings library |
 | --- | --- | --- |

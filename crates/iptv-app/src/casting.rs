@@ -1,9 +1,10 @@
 //! Intent handling for the Cast picker and remote.
 use crate::{
-    Playback, Ui, chooser,
-    i18n::{tr, trf},
-    runtime_owner::{runtime, schedule},
-    toast::notify,
+    Playback, Ui,
+    chrome::chooser,
+    chrome::i18n::{tr, trf},
+    chrome::toast::notify,
+    wiring::runtime_owner::{runtime, schedule},
 };
 use iptv_core::{
     capabilities::FormFactor,
@@ -95,7 +96,7 @@ mod projection_tests {
 
 pub(super) fn available(ui: Ui) -> bool {
     runtime().cast_available()
-        && crate::device::host().form_factor != FormFactor::Tv
+        && crate::wiring::device::host().form_factor != FormFactor::Tv
         && ui.playback.player_surface == 0
         && !crate::playback::multiview::is_open(ui)
         && !crate::playback::pip::in_window(ui)
@@ -126,7 +127,7 @@ pub(super) fn discover(ui: Ui) {
     }
     ui.cast.state.update(|state| state.discovering = true);
     let channel = ui.playback.player.main().key.get_untracked();
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = runtime().cast_receivers().await;
         ui.cast.state.update(|state| state.discovering = false);
         let still_open = ui.screens.chooser.with_untracked(|open| {
@@ -236,7 +237,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     if airplay && runtime().native_cast_view().is_none() {
         chooser::open(ui, chooser::Kind::AirPlay);
     }
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let mut retired = false;
         let mut transferred = false;
         let result = async {
@@ -261,7 +262,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                         cmd,
                         channel_headers,
                     } = *link;
-                    let client = owner.link_client(crate::settings::network_config());
+                    let client = owner.link_client(crate::wiring::settings::network_config());
                     let (source, portal) = owner
                         .spawn_network(async move {
                             let net = client.await.ok()?;
@@ -433,7 +434,7 @@ fn monitor(ui: Ui, ticket: u64) {
         if runtime().active_cast_ticket() != Some(ticket) {
             return;
         }
-        crate::tasks::spawn_in_app(async move {
+        crate::wiring::tasks::spawn_in_app(async move {
             match runtime().poll_cast(ticket).await {
                 ended @ (Ok(RemoteState::Ended) | Err(Error::StopUnconfirmed))
                     if runtime().cast_target().is_none() && ui.cast.remote.get_untracked() =>
@@ -493,7 +494,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
         return;
     };
     ui.cast.state.update(|state| state.busy = true);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = runtime().cast_command(command).await;
         ui.cast.state.update(|state| state.busy = false);
         match result {
@@ -569,7 +570,7 @@ pub(crate) fn volume(ui: Ui, command: Command) -> bool {
         return false;
     }
     if supports(ui, command) {
-        crate::tasks::spawn_in_app(async move {
+        crate::wiring::tasks::spawn_in_app(async move {
             if let Err(error) = runtime().cast_command(command).await {
                 report(error);
             }

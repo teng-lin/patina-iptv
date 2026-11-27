@@ -2,16 +2,16 @@
 //! the channel column. The slot times and the now line's dot slide with
 //! the programs (`pan.rs`).
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 
 use super::BAND;
 use crate::guide::timeline::MARGIN;
 use nsh_core::prelude::*;
 
 use super::{NOW_W, Pan, fill};
-use crate::fonts::{RULER, SANS};
+use crate::chrome::fonts::{RULER, SANS};
+use crate::chrome::scale::Scale;
 use crate::guide::{PAST, STEP};
-use crate::scale::Scale;
 use crate::theme::{RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, clock, tint};
 
@@ -51,7 +51,7 @@ pub(super) fn ruler(
     // Enlarged text needs room for localized 12-hour labels (including
     // the day period). Use hourly ticks rather than ellipsizing minutes.
     let tick_step = move || {
-        if crate::settings::font_factor() > 1.0 {
+        if crate::wiring::settings::font_factor() > 1.0 {
             STEP * 2
         } else {
             STEP
@@ -166,13 +166,13 @@ fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
         ui.guide_data();
         let now = ui.guide.focus.with(|f| f.now);
         let shown = pan.band().base + MARGIN + PAST;
-        let unix = crate::guide::unix_of(&*crate::runtime_owner::schedule(), shown);
+        let unix = crate::guide::unix_of(&*crate::wiring::runtime_owner::schedule(), shown);
         format!(
             "{}  {}",
             iptv_presentation::clock::date(
                 unix,
                 crate::guide::clock::offset_minutes(unix),
-                crate::i18n::clock_style()
+                crate::chrome::i18n::clock_style()
             ),
             clock(now)
         )

@@ -7,13 +7,13 @@ use nsh_core::prelude::*;
 use crate::settings_view::updates as facade;
 use crate::{
     Ui, ViewMode,
+    chrome::i18n::{tr, trf},
+    chrome::scale::Scale,
+    chrome::ui_kit,
     host::updates::{
         self as host, CheckError, Frequency, Metadata, ReleaseStatus, Service, Snapshot, Trigger,
         UpdatePrompts,
     },
-    i18n::{tr, trf},
-    scale::Scale,
-    ui_kit,
 };
 
 #[derive(Clone, Copy)]
@@ -46,9 +46,9 @@ fn update_ui(ui: Ui) -> UpdateUi {
 }
 
 fn metadata() -> Metadata {
-    let report = crate::device::reported();
+    let report = crate::wiring::device::reported();
     Metadata {
-        platform: crate::device::host().platform,
+        platform: crate::wiring::device::host().platform,
         direct_apk: report.and_then(|report| report.direct_apk),
         android_build: report.and_then(|report| report.direct_android_build),
     }
@@ -62,7 +62,7 @@ struct Prompts(Ui);
 
 impl UpdatePrompts for Prompts {
     fn notify(&self, key: &'static str) {
-        crate::toast::notify(tr(key));
+        crate::chrome::toast::notify(tr(key));
     }
 
     fn translate(&self, key: &'static str) -> &'static str {
@@ -93,7 +93,7 @@ impl UpdatePrompts for Prompts {
     }
 
     fn close_after_shutdown(&self) {
-        crate::desktop::close_after_shutdown(self.0);
+        crate::chrome::desktop::close_after_shutdown(self.0);
     }
 
     fn flush_bookmarks(&self) {
@@ -155,13 +155,13 @@ pub(crate) fn bind(ui: Ui) {
     effect(move || {
         if ui.screens.update_dialog_open.get()
             && lifecycle() != nsh_core::platform::Lifecycle::Background
-            && ui.top_overlay() == Some(crate::overlays::Overlay::AppUpdate)
+            && ui.top_overlay() == Some(crate::chrome::overlays::Overlay::AppUpdate)
             && snapshot(ui).notice.is_some()
         {
             acknowledge(ui);
         }
     });
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         if let Err(error) = service().restore().await {
             log::warn!("iptv update schedule restore failed: {error}");
         }
@@ -211,14 +211,14 @@ fn check(ui: Ui, trigger: Trigger) {
         return;
     }
     let service = service();
-    let frequency = Frequency::from_setting(crate::settings::choice(
+    let frequency = Frequency::from_setting(crate::wiring::settings::choice(
         iptv_settings::keys::APP_UPDATE_FREQUENCY,
     ));
     let Some(check) = service.begin_check(trigger, frequency) else {
         return;
     };
     changed(ui);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         check.await;
         if !ui.screens.update_dialog_open.get_untracked() {
             update_ui(ui).focus.set(0);
@@ -227,7 +227,7 @@ fn check(ui: Ui, trigger: Trigger) {
         if let Err(error) = service.persist().await {
             log::warn!("iptv update schedule save failed: {error}");
             if trigger == Trigger::Manual {
-                crate::toast::notify(tr("Could not save update preferences. Try again."));
+                crate::chrome::toast::notify(tr("Could not save update preferences. Try again."));
             }
         }
     });
@@ -235,10 +235,10 @@ fn check(ui: Ui, trigger: Trigger) {
 
 fn persist(ui: Ui) {
     changed(ui);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         if let Err(error) = service().persist().await {
             log::warn!("iptv update preferences save failed: {error}");
-            crate::toast::notify(tr("Could not save update preferences. Try again."));
+            crate::chrome::toast::notify(tr("Could not save update preferences. Try again."));
         }
     });
 }
@@ -260,7 +260,7 @@ fn acknowledge(ui: Ui) {
 }
 
 fn review(ui: Ui) {
-    crate::navigation::settings_guarded(ui, move || {
+    crate::wiring::navigation::settings_guarded(ui, move || {
         acknowledge(ui);
         update_ui(ui).focus.set(0);
         update_ui(ui).notes_scroll.reset();
@@ -295,7 +295,9 @@ fn manual_download(ui: Ui) {
         return;
     }
     if let Some(download) = snapshot(ui).cached.and_then(|check| check.release.download) {
-        crate::tasks::spawn_in_app(async move { Prompts(ui).open_url(&download.url).await });
+        crate::wiring::tasks::spawn_in_app(
+            async move { Prompts(ui).open_url(&download.url).await },
+        );
     }
 }
 
@@ -510,7 +512,9 @@ fn download(ui: Ui) {
     }
     let Some(check) = snapshot(ui).cached else {
         if releases_fallback(ui) {
-            crate::tasks::spawn_in_app(async move { Prompts(ui).open_url(host::RELEASES).await });
+            crate::wiring::tasks::spawn_in_app(async move {
+                Prompts(ui).open_url(host::RELEASES).await
+            });
         }
         return;
     };
@@ -521,7 +525,7 @@ fn download(ui: Ui) {
     update_ui(ui).cancel_requested.set(false);
     let operation = InstallOperation::new(ui);
     progress_timer(ui);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let _operation = operation;
         let prompts = Prompts(ui);
         let owner = crate::runtime();
@@ -660,7 +664,7 @@ fn panel(ui: Ui) -> View {
         .test_id("app-update-panel")
         .on_press(|| {})
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::AppUpdate.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::AppUpdate.accessibility_covered(ui)
         })
         .child(ui_kit::header(
             ui,
@@ -807,9 +811,9 @@ pub(crate) fn notice_open(ui: Ui) -> bool {
     {
         return false;
     }
-    crate::overlays::Overlay::ALL
+    crate::chrome::overlays::Overlay::ALL
         .into_iter()
-        .filter(|overlay| *overlay != crate::overlays::Overlay::AppUpdateNotice)
+        .filter(|overlay| *overlay != crate::chrome::overlays::Overlay::AppUpdateNotice)
         .all(|overlay| !overlay.is_open(ui))
 }
 

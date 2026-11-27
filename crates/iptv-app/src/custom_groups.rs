@@ -1,14 +1,15 @@
 //! Custom groups and filtered bulk membership editing. Provider membership
 //! remains imported data; moves are offered only between custom groups.
-use crate::i18n::{tr, trf};
-use crate::input::dismiss_keyboard;
+use crate::chrome::i18n::{tr, trf};
+use crate::chrome::input::dismiss_keyboard;
 
 use crate::runtime::Error;
 use crate::{
-    Ui, data,
-    scale::Scale,
-    ui_kit,
-    ui_kit::entry::{self, Sheet},
+    Ui,
+    chrome::scale::Scale,
+    chrome::ui_kit,
+    chrome::ui_kit::entry::{self, Sheet},
+    wiring::data,
 };
 use iptv_library::{ChannelScope, SourceId};
 use iptv_nav::Action;
@@ -34,7 +35,7 @@ fn request<R: Send + 'static>(
 ) {
     let generation = ui.screens.custom_groups.epoch();
     let result = operation;
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = result.await;
         if ui.screens.custom_groups.is_current(generation) && is_open(ui) {
             done(ui, result);
@@ -49,11 +50,11 @@ fn mutate<R: Send + 'static>(
 ) {
     let generation = ui.screens.custom_groups.epoch();
     let result = operation;
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = result.await;
         // A committed edit affects the guide even if its editor was closed.
         if result.is_ok() {
-            data::organization_changed(&crate::runtime_owner::runtime(), source);
+            data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
         }
         if ui.screens.custom_groups.is_current(generation) && is_open(ui) {
             done(ui, result);
@@ -69,8 +70,8 @@ pub fn open_copy(ui: Ui, source: SourceId, scope: ChannelScope) {
 }
 
 fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
-    if !crate::runtime_owner::runtime().parental_settings_allowed()
-        && crate::runtime_owner::runtime()
+    if !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
+        && crate::wiring::runtime_owner::runtime()
             .parental_blocked_targets()
             .iter()
             .any(|t| {
@@ -85,7 +86,7 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
     ui.screens.custom_groups.open(Open::new(source));
     request(
         ui,
-        crate::runtime::commands::custom_groups(&crate::runtime_owner::runtime(), source),
+        crate::runtime::commands::custom_groups(&crate::wiring::runtime_owner::runtime(), source),
         move |ui, result| match result {
             Ok(groups) => {
                 update(ui, |s| s.reload_groups(groups));
@@ -110,7 +111,11 @@ fn reload(ui: Ui) {
     };
     request(
         ui,
-        crate::runtime::commands::group_members(&crate::runtime_owner::runtime(), source, scope),
+        crate::runtime::commands::group_members(
+            &crate::wiring::runtime_owner::runtime(),
+            source,
+            scope,
+        ),
         |ui, result| {
             if let Ok((groups, rows)) = result {
                 update(ui, |s| s.reload_members(groups, rows));
@@ -140,7 +145,11 @@ fn show_members(ui: Ui, scope: ChannelScope) {
     let loaded_scope = scope.clone();
     request(
         ui,
-        crate::runtime::commands::members(&crate::runtime_owner::runtime(), source, loaded_scope),
+        crate::runtime::commands::members(
+            &crate::wiring::runtime_owner::runtime(),
+            source,
+            loaded_scope,
+        ),
         move |ui, result| match result {
             Ok(rows) => update(ui, |s| s.enter_members(scope, rows)),
             Err(error) => report(ui, Err(error)),
@@ -203,7 +212,7 @@ fn commit_text(ui: Ui) {
         ui,
         s.source,
         crate::runtime::commands::save_custom_group(
-            &crate::runtime_owner::runtime(),
+            &crate::wiring::runtime_owner::runtime(),
             s.source,
             match kind {
                 Text::Rename(group) => Some(group),
@@ -301,8 +310,8 @@ fn act(ui: Ui, index: usize) {
             kind: iptv_core::parental::ContentKind::Group,
             id: format!("custom:{}", group.0),
         };
-        if crate::runtime_owner::runtime().parental_explicitly_blocked(&target)
-            && !crate::runtime_owner::runtime().parental_settings_allowed()
+        if crate::wiring::runtime_owner::runtime().parental_explicitly_blocked(&target)
+            && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
         {
             crate::parental_view::protected_settings(ui, move || act(ui, index));
             return;
@@ -352,7 +361,7 @@ fn act(ui: Ui, index: usize) {
                     ui,
                     s.source,
                     crate::runtime::commands::remove_custom_members(
-                        &crate::runtime_owner::runtime(),
+                        &crate::wiring::runtime_owner::runtime(),
                         origin,
                         ids,
                     ),
@@ -385,7 +394,7 @@ fn act(ui: Ui, index: usize) {
                 ui,
                 s.source,
                 crate::runtime::commands::transfer_custom_members(
-                    &crate::runtime_owner::runtime(),
+                    &crate::wiring::runtime_owner::runtime(),
                     s.source,
                     s.origin(),
                     target,
@@ -425,7 +434,7 @@ fn act(ui: Ui, index: usize) {
                     ui,
                     s.source,
                     crate::runtime::commands::delete_custom_group(
-                        &crate::runtime_owner::runtime(),
+                        &crate::wiring::runtime_owner::runtime(),
                         g,
                     ),
                     |ui, result| {
@@ -498,7 +507,7 @@ fn entry_sheet(ui: Ui) -> impl IntoElement {
     )
 }
 /// Under the screen's title: what copying and moving do.
-const CAPTION: &str = crate::i18n::key(
+const CAPTION: &str = crate::chrome::i18n::key(
     "Copy adds membership. Move transfers between custom groups. \
      Channels and provider groups are retained.",
 );
@@ -623,7 +632,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("custom-groups-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::CustomGroups.accessibility_covered(ui)
+                    crate::chrome::overlays::Overlay::CustomGroups.accessibility_covered(ui)
                 })
                 .child(
                     ui_kit::header(ui, size, tr("Custom groups"), close)

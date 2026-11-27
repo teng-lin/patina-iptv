@@ -6,10 +6,10 @@ use iptv_presentation::tracks::fps_label;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 
-use crate::fonts::{
+use crate::chrome::fonts::{
     OSD_BADGE, OSD_COMPACT_DETAIL, OSD_COMPACT_TITLE, OSD_COMPACT_TV_TITLE, OSD_DETAIL,
 };
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 use crate::theme::{RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, channel_name, clock, tint};
 
@@ -35,7 +35,7 @@ fn program_info(ui: Ui) -> Option<ProgramInfo> {
         return None;
     }
     let (channel, program) = progress::program(ui);
-    let schedule = crate::runtime_owner::schedule();
+    let schedule = crate::wiring::runtime_owner::schedule();
     let next = if ui.playback.playback.get() == Playback::Live {
         let next = schedule.program_at(channel, program.end);
         match schedule.listing(channel, next) {
@@ -73,7 +73,8 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
     };
     let fps = computed(move || fps_label(ui.playback.player.main().format.with(|f| f.fps)));
     let live = move || !ui.playback.paused.get() && ui.playback.playback.get() == Playback::Live;
-    let show_quality = move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::scale::phone();
+    let show_quality =
+        move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::chrome::scale::phone();
     let show_next = move || next.with(Option::is_some) && window().width.0 >= NEXT_MIN_WIDTH;
     let has_title = move || {
         crate::playback::on_demand::title(ui)

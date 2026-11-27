@@ -2,10 +2,10 @@
 use crate::runtime::model::InspectionControl;
 use crate::{
     Ui,
+    chrome::i18n::tr,
+    chrome::scale::Scale,
+    chrome::ui_kit,
     guide::list_rows::{self, Mark, ROW_TWO},
-    i18n::tr,
-    scale::Scale,
-    ui_kit,
 };
 use iptv_library::{Choice, SourceId, guide_repair as model, inspection::*};
 use iptv_nav::Action;
@@ -85,7 +85,7 @@ fn finish_screen(
 }
 fn release(preview: Option<model::Preview>) {
     if let Some(p) = preview {
-        let _ = crate::runtime_owner::runtime().release_guide_repair_plan(&p.id, p.digest);
+        let _ = crate::wiring::runtime_owner::runtime().release_guide_repair_plan(&p.id, p.digest);
     }
 }
 fn invalidate(ui: Ui) {
@@ -114,7 +114,7 @@ fn dismiss_inspection_input(ui: Ui) {
             s.typing = false;
         }
     });
-    crate::input::dismiss_keyboard();
+    crate::chrome::input::dismiss_keyboard();
 }
 pub fn reopen(ui: Ui) {
     dismiss_inspection_input(ui);
@@ -138,8 +138,8 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         cancel: cancel.clone(),
         ..Default::default()
     };
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.inspect_channel(channel.clone(), control).await;
         if cancel.is_canceled()
             || inspection
@@ -151,7 +151,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         let info = match result {
             Ok(info) => info,
             Err(_) => {
-                crate::toast::notify(tr("Guide changes could not be saved"));
+                crate::chrome::toast::notify(tr("Guide changes could not be saved"));
                 return;
             }
         };
@@ -162,7 +162,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         })
         .unwrap_or(false)
         {
-            crate::toast::notify(tr("Finish the current guide changes first"));
+            crate::chrome::toast::notify(tr("Finish the current guide changes first"));
             return;
         }
         if state(ui, |s| {
@@ -198,8 +198,8 @@ pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
         return;
     };
     let cancel = control.cancel.clone();
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.recent_guide_repairs(source, 20, control).await;
         finish(ui, generation, &cancel, result.map(Reply::History));
     });
@@ -209,11 +209,11 @@ fn preview(ui: Ui) {
         return;
     };
     let cancel = control.cancel.clone();
-    let owner = crate::runtime_owner::runtime();
+    let owner = crate::wiring::runtime_owner::runtime();
     if let Some(preview) = screen.preview {
         let _ = owner.release_guide_repair_plan(&preview.id, preview.digest);
     }
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         match owner.preview_guide_repair(screen.request, control).await {
             Ok(preview) => {
                 if state(ui, |s| accepts(s, generation, &cancel)).unwrap_or(false) {
@@ -229,9 +229,9 @@ fn preview(ui: Ui) {
 // Read-only previews and history entries carry no settings authorization.
 // Check again at mutation admission, including after the PIN prompt resumes.
 fn request_settings_pin(ui: Ui, retry: fn(Ui)) -> bool {
-    let required = crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+    let required = crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
-        && !crate::runtime_owner::runtime().parental_settings_allowed();
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed();
     if required {
         crate::parental_view::protected_settings(ui, move || retry(ui));
     }
@@ -250,8 +250,8 @@ fn apply(ui: Ui) {
         finish(ui, generation, &cancel, Err(model::Error::PlanMissing));
         return;
     };
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner
             .apply_guide_repair(preview.id.clone(), preview.digest, control)
             .await;
@@ -275,8 +275,8 @@ fn status(ui: Ui, id: Option<String>) {
         finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.guide_repair_operation(id).await;
         finish(ui, generation, &cancel, result.map(Reply::Status));
     });
@@ -290,8 +290,8 @@ fn verify(ui: Ui) {
         finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner
             .verify_guide_repair(id, screen.request.window, control)
             .await;
@@ -310,8 +310,8 @@ fn undo(ui: Ui) {
         finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.undo_guide_repair(id, control).await;
         finish(ui, generation, &cancel, result.map(Reply::Undone));
     });
@@ -333,7 +333,7 @@ fn page(ui: Ui, indirect: bool) {
     } else {
         screen.indirect_offset
     };
-    match crate::runtime_owner::runtime().guide_repair_plan(
+    match crate::wiring::runtime_owner::runtime().guide_repair_plan(
         &preview.id,
         preview.digest,
         mapping,
@@ -378,7 +378,8 @@ fn activate(ui: Ui, row: Row) {
         }
         Row::Cancel => {
             if let Some(id) = state(ui, Screen::commit_id).flatten() {
-                let result = crate::runtime_owner::runtime().cancel_guide_repair_operation(&id);
+                let result =
+                    crate::wiring::runtime_owner::runtime().cancel_guide_repair_operation(&id);
                 update(ui, |s| s.report_error(result.err()));
                 status(ui, Some(id));
             }
@@ -748,7 +749,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             let screen = ui_kit::screen(ui, size)
                 .test_id("guide-repair-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::GuideRepair.accessibility_covered(ui)
+                    crate::chrome::overlays::Overlay::GuideRepair.accessibility_covered(ui)
                 })
                 .child(ui_kit::header(
                     ui,

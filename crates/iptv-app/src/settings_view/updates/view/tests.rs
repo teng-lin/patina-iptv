@@ -144,7 +144,7 @@ fn abandoned_operation_does_not_write_disposed_panel_signals() {
 
 #[test]
 fn retained_package_does_not_hide_manual_check_progress_or_failure() {
-    crate::i18n::in_language("en", || {
+    crate::chrome::i18n::in_language("en", || {
         use iptv_runtime::app_updates::github::{DownloadLink, ReleaseCheck, ReleaseInfo};
         let mut state = Snapshot {
             checking: true,
@@ -230,11 +230,11 @@ fn UpdateOverlap() -> impl IntoElement {
     use iptv_runtime::app_updates::github::{DownloadLink, ReleaseCheck, ReleaseInfo};
     use std::rc::Rc;
     let directory = tempfile::tempdir().unwrap();
-    crate::tasks::bind_owner();
-    let application = Rc::new(crate::runtime_owner::new_runtime(
+    crate::wiring::tasks::bind_owner();
+    let application = Rc::new(crate::wiring::runtime_owner::new_runtime(
         directory.path().to_owned(),
     ));
-    let ui = crate::runtime_owner::with_runtime(application.clone(), || {
+    let ui = crate::wiring::runtime_owner::with_runtime(application.clone(), || {
         let ui = Ui::new(
             crate::SharedUi::new(),
             crate::playback::player::Player::new(),
@@ -302,7 +302,7 @@ fn UpdateOverlap() -> impl IntoElement {
     view()
         .child(text("No overlapping update operations"))
         .child(text("Open verified fixture route").on_press(move || {
-            crate::runtime_owner::with_runtime(application.clone(), || manual_download(ui));
+            crate::wiring::runtime_owner::with_runtime(application.clone(), || manual_download(ui));
         }))
 }
 

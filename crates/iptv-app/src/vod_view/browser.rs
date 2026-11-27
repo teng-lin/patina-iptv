@@ -67,9 +67,11 @@ fn navigation(ui: Ui, size: Scale) -> View {
                     close(ui);
                 })
                 .child(
-                    svg(crate::ui_kit::icons::src(crate::ui_kit::icons::Icon::Close))
-                        .size(move || size.px(24.0))
-                        .text_color(rgb(crate::theme::LIST_TEXT)),
+                    svg(crate::chrome::ui_kit::icons::src(
+                        crate::chrome::ui_kit::icons::Icon::Close,
+                    ))
+                    .size(move || size.px(24.0))
+                    .text_color(rgb(crate::theme::LIST_TEXT)),
                 ),
         )
         .child(view().flex_1())
@@ -129,7 +131,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
                         .flex_row()
                         .gap(move || size.px(14.0))
                         .child(
-                            svg(crate::rail::icon(item))
+                            svg(crate::chrome::rail::icon(item))
                                 .size(move || size.px(26.0))
                                 .text_color(move || {
                                     rgb(if focused() {
@@ -389,9 +391,11 @@ fn tools(ui: Ui, size: Scale) -> View {
                     })
                     .child(
                         svg(if control == Control::Search {
-                            crate::rail::icon(RailItem::Search)
+                            crate::chrome::rail::icon(RailItem::Search)
                         } else {
-                            crate::ui_kit::icons::src(crate::ui_kit::icons::Icon::Sort)
+                            crate::chrome::ui_kit::icons::src(
+                                crate::chrome::ui_kit::icons::Icon::Sort,
+                            )
                         })
                         .size(move || size.px(26.0))
                         .text_color(move || {
@@ -519,7 +523,7 @@ fn poster(
                             card().is_some_and(|c| c.poster.as_ref().is_some_and(|p| !p.is_empty()))
                         },
                         move || {
-                            let source = crate::content_image::source(move || {
+                            let source = crate::chrome::content_image::source(move || {
                                 card().and_then(|c| c.poster).unwrap_or_default()
                             });
                             image(source)
@@ -535,7 +539,7 @@ fn poster(
                             .items_center()
                             .justify_center()
                             .child(
-                                svg(crate::rail::icon(
+                                svg(crate::chrome::rail::icon(
                                     if card().is_some_and(|c| c.key.kind == Kind::Series) {
                                         RailItem::Shows
                                     } else {
@@ -694,11 +698,11 @@ fn category_heading_button(ui: Ui, size: Scale) -> View {
 
 pub(super) fn screen(ui: Ui, size: Scale) -> View {
     super::empty::bind(ui);
-    // The layout class at the current text size (`crate::layout`):
+    // The layout class at the current text size (`crate::chrome::layout`):
     // a compact window shows the empty catalog as its one pane.
     let compact = computed(move || {
-        use crate::layout::Class;
-        let text = size.of(1.0) * crate::settings::text_factor();
+        use crate::chrome::layout::Class;
+        let text = size.of(1.0) * crate::wiring::settings::text_factor();
         Class::of(window().width.0, text) == Class::Compact
     });
     effect(move || {
@@ -709,7 +713,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         ui.app.library.version.get();
         (
             !crate::guide::lists::live_only(),
-            crate::capabilities::recordings_library(ui),
+            crate::wiring::capabilities::recordings_library(ui),
         )
     });
     effect(move || {
@@ -723,11 +727,11 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         let (Some(key), generation) = preview.get() else {
             return;
         };
-        let owner = crate::runtime_owner::runtime();
+        let owner = crate::wiring::runtime_owner::runtime();
         let cancel = iptv_import::CancelToken::new();
         let on_drop = cancel.clone();
         cleanup(move || on_drop.cancel());
-        crate::tasks::spawn_in_app(async move {
+        crate::wiring::tasks::spawn_in_app(async move {
             timer(std::time::Duration::from_millis(250)).await;
             if cancel.is_canceled()
                 || !ui.screens.vod.with_untracked(|s| {
@@ -751,7 +755,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         });
     });
     let field = element_ref();
-    crate::input::bind_field_focus(field, move || {
+    crate::chrome::input::bind_field_focus(field, move || {
         ui.screens
             .vod
             .with(|s| s.control == Control::Search && s.search_open)
@@ -765,7 +769,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         .test_id("vod-screen")
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Vod.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::Vod.accessibility_covered(ui)
         })
         .child(when(
             move || ui.screens.vod.with(|s| s.shows_navigation()),

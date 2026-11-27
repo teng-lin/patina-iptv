@@ -54,34 +54,34 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/backup_documents.rs", "PROBE"),          // Android document picker probe request.
     ("backup.rs", "PICKERS"),                       // The document pickers the host reported.
     ("backup.rs", "PICKERS_FOR_TEST"),              // Synthetic picker injection (headless tests).
-    ("content_image.rs", "CACHE"),                  // Artwork cache.
-    ("content_image.rs", "PERMITS"),                // Artwork concurrency limit.
-    ("content_image.rs", "CLIENT"),                 // Artwork transport cache.
+    ("chrome/content_image.rs", "CACHE"),           // Artwork cache.
+    ("chrome/content_image.rs", "PERMITS"),         // Artwork concurrency limit.
+    ("chrome/content_image.rs", "CLIENT"),          // Artwork transport cache.
     ("host/native/credential_key.rs", "TEST_KEY"),  // Synthetic test key injection.
     ("host/updates/android.rs", "HOST"),            // Direct APK installer JNI class handle.
     ("host/native/external_player.rs", "HOST"),     // Android chooser JNI class handle.
     ("host/native/external_player.rs", "PLAYBACK"), // External playback outlives the foreground activity.
     ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
-    ("tasks.rs", "APP_OWNER"),                      // UI root owner for detached local tasks.
-    ("desktop.rs", "WINDOW"),                       // Native window handle.
-    ("desktop.rs", "POINTER"),                      // Pointer position within the window.
-    ("desktop.rs", "LAST_MOVE"),                    // Pointer gesture clock.
-    ("desktop.rs", "TRAVELED"),                     // Last pointer place, for Keys to Pointer.
-    ("desktop.rs", "QUITTING"),                     // Stop and quit in progress (no second ask).
-    ("device.rs", "REPORTED"),                      // Reactive handle of the host's device report.
-    ("device.rs", "ACCESSIBILITY"), // Reactive handle of the host's accessibility report.
-    ("fonts.rs", "FITTED"),         // Font measurement cache.
-    ("fonts.rs", "FONTS_IN"),       // Font registration flag.
-    ("guide/header.rs", "ON"),      // Debug overlay environment flag cache.
-    ("i18n.rs", "SYSTEM"),          // System locale cache.
-    ("i18n.rs", "WORDING_SETTINGS"), // cfg(test)-only scoped wording preferences.
-    ("i18n/pseudo.rs", "ENABLED"),  // test-support-only pseudolocale environment flag.
-    ("i18n/pseudo.rs", "FIXED"),    // test-support-only immutable expanded catalog.
-    ("input.rs", "REMOTE_PHASES"),  // test-support-only remote key phase switch.
-    ("input.rs", "REPEATS"),        // test-support-only keyboard repeat mirror.
-    ("runtime_owner.rs", "RUNTIME"), // The shell's single application handle.
-    ("runtime_owner.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
+    ("wiring/tasks.rs", "APP_OWNER"),               // UI root owner for detached local tasks.
+    ("chrome/desktop.rs", "WINDOW"),                // Native window handle.
+    ("chrome/desktop.rs", "POINTER"),               // Pointer position within the window.
+    ("chrome/desktop.rs", "LAST_MOVE"),             // Pointer gesture clock.
+    ("chrome/desktop.rs", "TRAVELED"),              // Last pointer place, for Keys to Pointer.
+    ("chrome/desktop.rs", "QUITTING"),              // Stop and quit in progress (no second ask).
+    ("wiring/device.rs", "REPORTED"),               // Reactive handle of the host's device report.
+    ("wiring/device.rs", "ACCESSIBILITY"), // Reactive handle of the host's accessibility report.
+    ("chrome/fonts.rs", "FITTED"),         // Font measurement cache.
+    ("chrome/fonts.rs", "FONTS_IN"),       // Font registration flag.
+    ("guide/header.rs", "ON"),             // Debug overlay environment flag cache.
+    ("chrome/i18n.rs", "SYSTEM"),          // System locale cache.
+    ("chrome/i18n.rs", "WORDING_SETTINGS"), // cfg(test)-only scoped wording preferences.
+    ("chrome/i18n/pseudo.rs", "ENABLED"),  // test-support-only pseudolocale environment flag.
+    ("chrome/i18n/pseudo.rs", "FIXED"),    // test-support-only immutable expanded catalog.
+    ("chrome/input.rs", "REMOTE_PHASES"),  // test-support-only remote key phase switch.
+    ("chrome/input.rs", "REPEATS"),        // test-support-only keyboard repeat mirror.
+    ("wiring/runtime_owner.rs", "RUNTIME"), // The shell's single application handle.
+    ("wiring/runtime_owner.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
     ("host.rs", "TUI_MODE"), // Host flag: TUI backend bypasses StickyCells trackball wrapper.
     ("lib.rs", "LEAVE"),     // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
     ("guide/lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
@@ -93,14 +93,14 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/recording_host/android.rs", "HOST"), // JNI VM/class handle for the recording host.
     ("playback/seek.rs", "PRESSES"),                   // Key gesture state.
     ("playback/seek.rs", "HOLD"),                      // Held-key gesture state.
-    ("settings.rs", "REVISION"),                       // Reactive settings subscription handle.
+    ("wiring/settings.rs", "REVISION"),                // Reactive settings subscription handle.
     ("playback/pip.rs", "PIP_SUPPORTED"), // The host's picture-in-picture report, for the settings offer.
     ("settings_view.rs", "PAGES"),        // Immutable screen definitions.
     ("settings_view.rs", "LAST"),         // Last selected settings tab.
-    ("toast.rs", "NOTICE"),               // Toast signal handle.
+    ("chrome/toast.rs", "NOTICE"),        // Toast signal handle.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
-    ("startup.rs", "MARKED"),                                  // Startup phase instrumentation.
-    ("startup.rs", "FALLBACK"),                                // Startup clock instrumentation.
+    ("chrome/startup.rs", "MARKED"),                           // Startup phase instrumentation.
+    ("chrome/startup.rs", "FALLBACK"),                         // Startup clock instrumentation.
     ("guide/clock.rs", "SHOWN"),                               // Visible guide clock origin.
     ("playback/video.rs", "OPENS"), // Native player open instrumentation.
     ("playback/video.rs", "SOURCED"), // Native player source projection.

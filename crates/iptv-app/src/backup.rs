@@ -1,6 +1,6 @@
 //! Platform dialogs and document transport for runtime-owned backups.
+use crate::chrome::i18n::{tr, trf};
 use crate::host::backup_documents as documents;
-use crate::i18n::{tr, trf};
 use crate::runtime::backup::error::{Context, Error, Rejection};
 use crate::runtime::backup::report;
 
@@ -10,25 +10,25 @@ mod review;
 pub(crate) use review::{RestoreReview, back, is_open, key, layer};
 
 /// What a backup holds, before its file is chosen.
-const EXPORT_NOTE: &str = crate::i18n::key(
+const EXPORT_NOTE: &str = crate::chrome::i18n::key(
     "The unencrypted backup includes playlist logins and passwords, settings, \
      channel arrangements, history and guide setup. Downloaded guide listings are excluded. \
      Keep the file private.",
 );
 /// A restore is already scheduled: what happens to changes until then.
-const PENDING_NOTE: &str = crate::i18n::key(
+const PENDING_NOTE: &str = crate::chrome::i18n::key(
     "The backup replaces current data when you next open Patina. \
      Changes made before then will be replaced.",
 );
 /// Android: the app has to be closed and opened for the restore to apply.
-const RESTART_NOTE: &str = crate::i18n::key(
+const RESTART_NOTE: &str = crate::chrome::i18n::key(
     "Close Patina, then open it again to apply the backup. Keep the \
      app open to cancel the scheduled restore from Settings first.",
 );
 
 pub(crate) fn export_ui() {
-    crate::tasks::spawn_in_app(async move {
-        let Some(busy) = crate::runtime_owner::runtime().begin_backup() else {
+    crate::wiring::tasks::spawn_in_app(async move {
+        let Some(busy) = crate::wiring::runtime_owner::runtime().begin_backup() else {
             return;
         };
         let answer = nsh_base::alert_dialog()
@@ -42,14 +42,16 @@ pub(crate) fn export_ui() {
             return;
         }
         if !crate::guide::favorites::flush().await {
-            crate::toast::notify(tr("Recent channel changes could not be saved; try again"));
+            crate::chrome::toast::notify(tr(
+                "Recent channel changes could not be saved; try again",
+            ));
             return;
         }
-        let settings = crate::settings::get().to_json_string();
-        let root = crate::data::data_dir();
-        crate::toast::notify(tr("Writing backup…"));
+        let settings = crate::wiring::settings::get().to_json_string();
+        let root = crate::wiring::data::data_dir();
+        crate::chrome::toast::notify(tr("Writing backup…"));
         let result = documents::save_export(&busy, root, settings, tr("Patina backup")).await;
-        crate::toast::notify(tr(match result {
+        crate::chrome::toast::notify(tr(match result {
             Ok(true) => "Backup saved",
             Ok(false) => "Backup canceled",
             Err(error) => report("writing a backup", error),
@@ -147,7 +149,7 @@ pub(crate) fn offered(key: &str) -> bool {
     let pickers = pickers();
     match key {
         "general.backup" => pickers.create,
-        _ => pickers.open || crate::runtime_owner::runtime().restore_is_pending(),
+        _ => pickers.open || crate::wiring::runtime_owner::runtime().restore_is_pending(),
     }
 }
 
@@ -159,19 +161,21 @@ pub(crate) fn available() -> bool {
 
 pub(crate) fn request_restore(ui: crate::Ui) {
     if available() {
-        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
-            restore_ui(ui)
-        });
+        crate::wiring::navigation::request(
+            ui,
+            iptv_core::parental::Target::settings(),
+            move || restore_ui(ui),
+        );
     }
 }
 
 fn restore_ui(ui: crate::Ui) {
-    crate::tasks::spawn_in_app(async move {
-        let Some(busy) = crate::runtime_owner::runtime().begin_backup() else {
+    crate::wiring::tasks::spawn_in_app(async move {
+        let Some(busy) = crate::wiring::runtime_owner::runtime().begin_backup() else {
             return;
         };
-        let root = crate::data::data_dir();
-        if crate::runtime_owner::runtime().restore_is_pending() {
+        let root = crate::wiring::data::data_dir();
+        if crate::wiring::runtime_owner::runtime().restore_is_pending() {
             let dialog = nsh_base::alert_dialog()
                 .title(tr("Restore scheduled"))
                 .description(tr(PENDING_NOTE))
@@ -188,8 +192,8 @@ fn restore_ui(ui: crate::Ui) {
             match answer.ok().and_then(|a| a.action) {
                 Some(action) if action.as_str() == "cancel" => {
                     let result = busy.worker(|archive| archive.cancel()).await;
-                    crate::settings_wiring::refresh(ui);
-                    crate::toast::notify(tr(match result {
+                    crate::wiring::settings_wiring::refresh(ui);
+                    crate::chrome::toast::notify(tr(match result {
                         Ok(()) => "Scheduled restore canceled",
                         Err(error) => report("canceling the scheduled restore", error),
                     }));
@@ -206,14 +210,14 @@ fn restore_ui(ui: crate::Ui) {
             Ok(Some(file)) => file,
             Ok(None) => return,
             Err(error) => {
-                crate::toast::notify(tr(report("choosing a backup", error)));
+                crate::chrome::toast::notify(tr(report("choosing a backup", error)));
                 return;
             }
         };
         if !review::confirm(ui, file.name.take()).await {
             return;
         }
-        crate::toast::notify(tr("Checking backup…"));
+        crate::chrome::toast::notify(tr("Checking backup…"));
         let result = busy
             .worker(move |archive| {
                 let mut input =
@@ -221,12 +225,14 @@ fn restore_ui(ui: crate::Ui) {
                 archive.stage(&mut input)
             })
             .await;
-        crate::settings_wiring::refresh(ui);
+        crate::wiring::settings_wiring::refresh(ui);
         // Release operation ownership before presenting a dismissible failure.
         drop(busy);
         match result {
             Ok(()) => {
-                crate::toast::notify(tr("Restore scheduled. Close and reopen Patina to apply it"));
+                crate::chrome::toast::notify(tr(
+                    "Restore scheduled. Close and reopen Patina to apply it",
+                ));
                 offer_restart().await;
             }
             Err(error) => {
@@ -239,7 +245,7 @@ fn restore_ui(ui: crate::Ui) {
                         .show()
                         .await;
                 } else {
-                    crate::toast::notify(tr(report("scheduling a restore", error)));
+                    crate::chrome::toast::notify(tr(report("scheduling a restore", error)));
                 }
             }
         }
@@ -320,7 +326,7 @@ async fn offer_restart() {
             .show()
             .await;
         if answer.is_ok_and(|a| a.action.as_deref() == Some("close")) {
-            documents::close(crate::data::data_dir()).await;
+            documents::close(crate::wiring::data::data_dir()).await;
         }
     }
 }

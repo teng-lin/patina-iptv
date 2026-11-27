@@ -11,7 +11,7 @@
 //! the video SurfaceView. [`status`] draws the waiting and error
 //! states of `player.rs`.
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
@@ -22,7 +22,7 @@ use iptv_presentation::sound::delay_label;
 use iptv_presentation::tracks::{audio_layout_in, summary_in};
 use nsh_core::prelude::*;
 
-use crate::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};
+use crate::chrome::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};
 use crate::theme::{FOCUS_ALPHA, RADIUS, RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, ViewMode, tint};
 
@@ -83,7 +83,7 @@ fn label(ui: Ui, control: Control) -> String {
             tr("Multiview"),
             match crate::playback::multiview::offer(ui) {
                 iptv_presentation::capabilities::MultiviewOffer::Disabled(reason) => {
-                    Some(crate::capabilities::reason(reason).to_owned())
+                    Some(crate::wiring::capabilities::reason(reason).to_owned())
                 }
                 _ => None,
             },
@@ -96,31 +96,31 @@ fn label(ui: Ui, control: Control) -> String {
                     iptv_presentation::capabilities::pip(pip, crate::playback::pip::playing(ui))
                         .reason()
                 })
-                .map(|reason| crate::capabilities::reason(reason).to_owned()),
+                .map(|reason| crate::wiring::capabilities::reason(reason).to_owned()),
         ),
         VideoTracks => {
             let playing = main.size.get().map(|(_, h)| format!("{h}p"));
             with(
                 tr("Video"),
                 tracks
-                    .with(|t| summary_in(t, Track::Video, crate::i18n::language()))
+                    .with(|t| summary_in(t, Track::Video, crate::chrome::i18n::language()))
                     .or(playing),
             )
         }
         AudioTracks => {
             let ch = main.format.with(|f| f.channels);
-            let layout = (ch > 0).then(|| audio_layout_in(ch, crate::i18n::language()));
+            let layout = (ch > 0).then(|| audio_layout_in(ch, crate::chrome::i18n::language()));
             with(
                 tr("Audio"),
                 tracks
-                    .with(|t| summary_in(t, Track::Audio, crate::i18n::language()))
+                    .with(|t| summary_in(t, Track::Audio, crate::chrome::i18n::language()))
                     .or(layout),
             )
         }
         AudioOffset => with(
             tr("Audio delay"),
             Some(delay_label(
-                crate::i18n::language(),
+                crate::chrome::i18n::language(),
                 ui.playback.media.delay_ms.get(),
             )),
         ),
@@ -128,13 +128,13 @@ fn label(ui: Ui, control: Control) -> String {
             tr("Subtitles"),
             Some(
                 tracks
-                    .with(|t| summary_in(t, Track::Text, crate::i18n::language()))
+                    .with(|t| summary_in(t, Track::Text, crate::chrome::i18n::language()))
                     .unwrap_or_else(|| tr("Off").to_owned()),
             ),
         ),
         Scaling => with(
             tr("Picture size"),
-            Some(crate::chooser::picture_name(ui).into()),
+            Some(crate::chrome::chooser::picture_name(ui).into()),
         ),
         SleepTimer => with(
             tr("Sleep timer"),
@@ -171,10 +171,10 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
         // Where the device offers them (`capabilities::record_now` and
         // `recordings_library`).
         Control::Record => {
-            main && (crate::capabilities::record_now().offered()
+            main && (crate::wiring::capabilities::record_now().offered()
                 || crate::recordings_view::recording_active(ui))
         }
-        Control::Recordings => main && crate::capabilities::recordings_library(ui),
+        Control::Recordings => main && crate::wiring::capabilities::recordings_library(ui),
         Control::Search => main,
         // As the device and its window offer it (#279): a phone upright, a
         // tablet in split screen, an iPad and a browser TV leave it out.
@@ -199,7 +199,7 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
                     .recordings
                     .with(|s| s.busy || s.starting.is_some())
                 && (crate::recordings_view::recording_active(ui)
-                    || (crate::capabilities::record_now().offered()
+                    || (crate::wiring::capabilities::record_now().offered()
                         && ui
                             .playback
                             .playing
@@ -207,7 +207,7 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
                             .is_some_and(crate::recordings_view::available)))
         }
         Control::Recordings => {
-            ui.playback.player_surface == 0 && crate::capabilities::recordings_library(ui)
+            ui.playback.player_surface == 0 && crate::wiring::capabilities::recordings_library(ui)
         }
         Control::Search => ui.playback.player_surface == 0,
         Control::ChannelList | Control::Favorite | Control::Scaling | Control::SleepTimer => true,
@@ -242,7 +242,7 @@ pub(crate) fn bind_auto_hide(app: crate::SharedUi, playback: crate::PlaybackUi) 
     // own pace: while one runs they stay until hidden (WCAG 2.2.1); the
     // play bar does the same (`play_bar::bind`).
     effect(move || {
-        let on = crate::device::assistive();
+        let on = crate::wiring::device::assistive();
         if untracked(|| playback.panels.with(|p| p.waits_for_assistive() != on)) {
             let now = app.now_ms();
             untracked(|| playback.panels.update(|p| p.assistive(on, now)));
@@ -316,9 +316,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 || ui.playback.player.vod.with(Option::is_some))
                     },
                     move || {
-                        let size = crate::scale::Scale::new();
-                        crate::ui_kit::card(ui, size, 620.0)
-                            .child(crate::ui_kit::title(size, move || {
+                        let size = crate::chrome::scale::Scale::new();
+                        crate::chrome::ui_kit::card(ui, size, 620.0)
+                            .child(crate::chrome::ui_kit::title(size, move || {
                                 if let Some(title) = crate::vod_view::title(ui) {
                                     return title;
                                 }
@@ -328,7 +328,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                         .unwrap_or_default()
                                 })
                             }))
-                            .child(crate::ui_kit::body(size, move || {
+                            .child(crate::chrome::ui_kit::body(size, move || {
                                 ui.playback.player.recorded.with(|r| {
                                     r.as_ref()
                                         .map(|(job, _)| job.request.channel_name.clone())
@@ -434,12 +434,12 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         .child(
             text(move || {
                 ui.guide_data();
-                let s = crate::runtime_owner::schedule();
+                let s = crate::wiring::runtime_owner::schedule();
                 let unix = crate::guide::unix_of(&*s, ui.guide.focus.with(|f| f.now));
                 date_time(
                     unix,
                     crate::guide::clock::offset_minutes(unix),
-                    crate::i18n::clock_style(),
+                    crate::chrome::i18n::clock_style(),
                 )
             })
             .text_size(px(OSD_TEXT))
@@ -547,9 +547,9 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
         let replay = matches!(ui.playback.playback.get(), Playback::CatchUp { .. });
         let seek = replay.then(|| {
             ui.app.settings.get();
-            crate::settings::choice(iptv_settings::keys::SEEK_KEYS)
+            crate::wiring::settings::choice(iptv_settings::keys::SEEK_KEYS)
         });
-        words::hint(crate::input::PROFILE, shown.get(), focused, seek)
+        words::hint(crate::chrome::input::PROFILE, shown.get(), focused, seek)
     };
     text(words)
         .px(px(8.0))
@@ -570,7 +570,7 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     // picture report: a control that leaves while focused passes the focus
     // to its nearest neighbor shown.
     effect(move || {
-        let device = crate::device::current();
+        let device = crate::wiring::device::current();
         let shown: Vec<Control> = CONTROLS
             .into_iter()
             .filter(|&control| offered(ui, device, control))

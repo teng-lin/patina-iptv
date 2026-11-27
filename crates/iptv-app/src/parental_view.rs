@@ -1,10 +1,10 @@
 //! Parental modal: the core owns PIN entry and transitions; the runtime owns
 //! credentials and access. Callbacks run only after the authoritative gate.
-use crate::i18n::{tr, trf};
-use crate::input::dismiss_keyboard;
-use crate::navigation::request;
+use crate::chrome::i18n::{tr, trf};
+use crate::chrome::input::dismiss_keyboard;
 use crate::runtime::Runtime;
-use crate::{Ui, scale::Scale, tint, ui_kit};
+use crate::wiring::navigation::request;
+use crate::{Ui, chrome::scale::Scale, chrome::ui_kit, tint};
 use iptv_core::parental::{ContentKind, Target};
 use iptv_nav::{Action, RemoteKey};
 use iptv_presentation::parental::{Phase, PromptState, Submission};
@@ -57,7 +57,7 @@ pub fn close(ui: Ui) {
 pub fn abort(ui: Ui) {
     crate::playback::external_player::cancel_pending(ui);
     ui.screens.parental.set(None);
-    crate::runtime_owner::runtime().parental_lock();
+    crate::wiring::runtime_owner::runtime().parental_lock();
     dismiss_keyboard();
 }
 /// Hiding for background recordings retires verification immediately. A
@@ -75,7 +75,7 @@ pub fn hidden(ui: Ui) {
                 open.state.hide();
             }
         });
-        crate::runtime_owner::runtime().parental_lock();
+        crate::wiring::runtime_owner::runtime().parental_lock();
         dismiss_keyboard();
     } else {
         abort(ui);
@@ -108,7 +108,7 @@ pub(crate) fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + '
 }
 pub fn protected_settings(ui: Ui, done: impl FnOnce() + 'static) {
     request(ui, Target::settings(), move || {
-        if crate::runtime_owner::runtime().parental_has_pin() {
+        if crate::wiring::runtime_owner::runtime().parental_has_pin() {
             done();
         } else {
             show(ui, Target::settings(), Phase::New, done);
@@ -116,8 +116,8 @@ pub fn protected_settings(ui: Ui, done: impl FnOnce() + 'static) {
     });
 }
 pub fn change_pin(ui: Ui) {
-    crate::tasks::spawn_in_app(async move {
-        let owner = crate::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
+        let owner = crate::wiring::runtime_owner::runtime();
         if owner.parental_refresh().await.is_err() {
             notify_message("Parental settings are unavailable");
             return;
@@ -130,14 +130,15 @@ pub fn change_pin(ui: Ui) {
             } else {
                 Phase::New
             },
-            move || crate::settings_wiring::refresh(ui),
+            move || crate::wiring::settings_wiring::refresh(ui),
         );
     });
 }
 pub fn live_target(ui: Ui, channel: usize) -> Option<Target> {
-    let key = crate::runtime_owner::schedule().channel_key(channel)?;
-    if crate::data::combined::active(&crate::runtime_owner::runtime()) {
-        let (source, id) = crate::data::combined::owner(&crate::runtime_owner::runtime(), &key)?;
+    let key = crate::wiring::runtime_owner::schedule().channel_key(channel)?;
+    if crate::wiring::data::combined::active(&crate::wiring::runtime_owner::runtime()) {
+        let (source, id) =
+            crate::wiring::data::combined::owner(&crate::wiring::runtime_owner::runtime(), &key)?;
         Some(Target::live(source.0, id))
     } else {
         Some(Target::live(ui.app.library.shown.get_untracked()?.0, key))
@@ -148,7 +149,7 @@ pub fn live_target(ui: Ui, channel: usize) -> Option<Target> {
 /// [`allow_play`], which then admits it.
 pub fn admitted(ui: Ui, channel: usize, start: impl FnOnce() + 'static) {
     match live_target(ui, channel) {
-        Some(target) if !crate::runtime_owner::runtime().parental_allowed(&target) => {
+        Some(target) if !crate::wiring::runtime_owner::runtime().parental_allowed(&target) => {
             request(ui, target, start)
         }
         _ => start(),
@@ -160,25 +161,27 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
     let Some(target) = live_target(ui, channel) else {
         return true;
     };
-    if crate::runtime_owner::runtime().parental_allowed(&target) {
-        if !crate::runtime_owner::runtime().parental_is_blocked(&target) {
-            crate::runtime_owner::runtime().parental_unblocked_channel_played();
+    if crate::wiring::runtime_owner::runtime().parental_allowed(&target) {
+        if !crate::wiring::runtime_owner::runtime().parental_is_blocked(&target) {
+            crate::wiring::runtime_owner::runtime().parental_unblocked_channel_played();
         }
         return true;
     }
     match playback {
         crate::Playback::CatchUp { start, offset } => {
-            let schedule = crate::runtime_owner::schedule();
+            let schedule = crate::wiring::runtime_owner::schedule();
             if let Some(pending) =
                 crate::playback::player::PendingArchive::capture(&*schedule, channel, start, offset)
             {
                 request(ui, target, move || {
                     if let Some((channel, playback)) =
-                        pending.remap(&*crate::runtime_owner::schedule())
+                        pending.remap(&*crate::wiring::runtime_owner::schedule())
                     {
                         ui.play(channel, playback);
                     } else {
-                        crate::toast::notify(tr("Guide time changed. Choose the program again."));
+                        crate::chrome::toast::notify(tr(
+                            "Guide time changed. Choose the program again.",
+                        ));
                     }
                 });
             }
@@ -189,14 +192,14 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
 }
 pub fn block(ui: Ui, target: Target, blocked: bool) {
     request(ui, Target::settings(), move || {
-        if !crate::runtime_owner::runtime().parental_has_pin() {
+        if !crate::wiring::runtime_owner::runtime().parental_has_pin() {
             show(ui, Target::settings(), Phase::New, move || {
                 block(ui, target, blocked)
             });
             return;
         }
-        crate::tasks::spawn_in_app(async move {
-            let owner = crate::runtime_owner::runtime();
+        crate::wiring::tasks::spawn_in_app(async move {
+            let owner = crate::wiring::runtime_owner::runtime();
             let key = if matches!(target.kind, ContentKind::Live | ContentKind::Group) {
                 "parental.live_enabled"
             } else {
@@ -212,7 +215,7 @@ pub fn block(ui: Ui, target: Target, blocked: bool) {
             }
             match owner.parental_set_blocked(target, blocked).await {
                 Ok(()) => {
-                    crate::settings_wiring::refresh(ui);
+                    crate::wiring::settings_wiring::refresh(ui);
                     notify_message(if blocked {
                         "Content blocked"
                     } else {
@@ -227,7 +230,7 @@ pub fn block(ui: Ui, target: Target, blocked: bool) {
 }
 pub fn manage(ui: Ui) {
     request(ui, Target::settings(), move || {
-        let blocks = crate::runtime_owner::runtime().parental_blocked_targets();
+        let blocks = crate::wiring::runtime_owner::runtime().parental_blocked_targets();
         ui.screens.parental.set(Some(Open {
             state: PromptState::new(Phase::Unlock, Target::settings(), Some(blocks)),
             done: Rc::new(RefCell::new(None)),
@@ -252,7 +255,7 @@ fn manage_pick(ui: Ui, index: usize) {
         finish(ui);
         block(ui, target, false);
     } else {
-        crate::runtime_owner::runtime().parental_lock();
+        crate::wiring::runtime_owner::runtime().parental_lock();
         close(ui);
         enforce(ui);
         notify_message("Parental controls locked");
@@ -267,7 +270,7 @@ pub fn enforce(ui: Ui) {
             .map(|c| &c.key)
             .chain(s.preview.iter().map(|d| &d.item.key))
             .filter(|key| {
-                !crate::runtime_owner::runtime().parental_allowed(&Runtime::vod_target(key))
+                !crate::wiring::runtime_owner::runtime().parental_allowed(&Runtime::vod_target(key))
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -278,7 +281,7 @@ pub fn enforce(ui: Ui) {
     let blocked_details = ui.screens.vod.with_untracked(|s| {
         s.details.as_ref().and_then(|d| {
             let key = &d.item.key;
-            (!crate::runtime_owner::runtime().parental_allowed(&Runtime::vod_target(key)))
+            (!crate::wiring::runtime_owner::runtime().parental_allowed(&Runtime::vod_target(key)))
                 .then(|| key.clone())
         })
     });
@@ -287,7 +290,7 @@ pub fn enforce(ui: Ui) {
     }
 
     if let Some((playing, _)) = ui.playback.player.vod.get_untracked() {
-        let owner = crate::runtime_owner::runtime();
+        let owner = crate::wiring::runtime_owner::runtime();
         if !owner.parental_allowed(&Runtime::vod_target(&playing.key))
             || playing
                 .parent
@@ -299,14 +302,14 @@ pub fn enforce(ui: Ui) {
     }
     if let Some((job, _)) = ui.playback.player.recorded.get_untracked() {
         let target = Target::live(job.request.source, job.request.channel.as_str());
-        if !crate::runtime_owner::runtime().parental_allowed(&target) {
+        if !crate::wiring::runtime_owner::runtime().parental_allowed(&target) {
             crate::playback::player::stop(ui);
         }
     }
     for surface in 0..crate::playback::player::SURFACES {
         if let Some((channel, _)) = crate::playback::player::target(ui, surface)
             && let Some(target) = live_target(ui, channel)
-            && !crate::runtime_owner::runtime().parental_allowed(&target)
+            && !crate::wiring::runtime_owner::runtime().parental_allowed(&target)
         {
             crate::playback::player::stop_surface(ui, surface);
         }
@@ -498,8 +501,8 @@ fn submit(ui: Ui) {
     match submission {
         Submission::None => {}
         Submission::Done => finish(ui),
-        submission => crate::tasks::spawn_in_app(async move {
-            let owner = crate::runtime_owner::runtime();
+        submission => crate::wiring::tasks::spawn_in_app(async move {
+            let owner = crate::wiring::runtime_owner::runtime();
             let result = match submission {
                 Submission::Verify(pin) => {
                     owner.parental_authorize(target, pin).await.map(|()| None)
@@ -593,13 +596,13 @@ fn label(ui: Ui) -> String {
     })
 }
 fn display_target(target: &Target) -> String {
-    let name = crate::runtime_owner::runtime()
+    let name = crate::wiring::runtime_owner::runtime()
         .parental_name(target)
         .unwrap_or_else(|| tr("Unavailable content").into());
     trf("Unblock {name}", &[("name", name.as_str().into())])
 }
 fn notify_message(message: &str) {
-    crate::toast::notify(tr(message));
+    crate::chrome::toast::notify(tr(message));
 }
 fn focused(ui: Ui, index: usize) -> bool {
     ui.screens
@@ -651,7 +654,10 @@ fn manager(ui: Ui, size: Scale) -> View {
                     o.as_ref()
                         .and_then(|o| o.state.blocks.as_ref())
                         .and_then(|blocks| blocks.get(at.index()))
-                        .map_or_else(|| crate::i18n::tr("Lock now").to_owned(), display_target)
+                        .map_or_else(
+                            || crate::chrome::i18n::tr("Lock now").to_owned(),
+                            display_target,
+                        )
                 })
             };
             ui_kit::button(
@@ -685,9 +691,9 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
             let index = row * 3 + column;
             let text = match index {
                 0..=8 => (index + 1).to_string(),
-                9 => crate::i18n::tr("Delete").into(),
+                9 => crate::chrome::i18n::tr("Delete").into(),
                 10 => "0".into(),
-                _ => crate::i18n::tr("Continue").into(),
+                _ => crate::chrome::i18n::tr("Continue").into(),
             };
             cells = cells.child(
                 ui_kit::button(
@@ -715,7 +721,7 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
             ui_kit::button(
                 ui,
                 size,
-                crate::i18n::tr("Forgot PIN?"),
+                crate::chrome::i18n::tr("Forgot PIN?"),
                 move || focused(ui, 12),
                 move || activate(ui, 12),
             )
@@ -725,7 +731,7 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     )
 }
 fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
-    use crate::i18n::tr;
+    use crate::chrome::i18n::tr;
     let recovery = recovery_input(ui).unwrap_or_else(element_ref);
     view().gap(px(8.0))
         .child(ui_kit::body(size,move||ui.screens.parental.with(|o|o.as_ref()
@@ -791,7 +797,7 @@ pub fn layer(ui: Ui) -> View {
                     .max_h(percentage(0.95))
                     .h(move || {
                         px((window().height.0 * 0.95)
-                            .min(size.of(540.0) * crate::settings::text_factor().max(1.0)))
+                            .min(size.of(540.0) * crate::wiring::settings::text_factor().max(1.0)))
                     })
                     .p(move || size.px(16.0))
                     .gap(px(8.0))
@@ -799,7 +805,7 @@ pub fn layer(ui: Ui) -> View {
                     .bg(move || tint(ui.app.theme.with(|t| t.background.panel), 255))
                     .child(ui_kit::heading(size, move || {
                         let title = label(ui);
-                        crate::i18n::tr(&title).to_owned()
+                        crate::chrome::i18n::tr(&title).to_owned()
                     }))
                     .child(when(move || managing(ui), move || manager(ui, size)))
                     .child(when(
@@ -816,7 +822,7 @@ pub fn layer(ui: Ui) -> View {
                         ui_kit::button(
                             ui,
                             size,
-                            crate::i18n::tr("Cancel"),
+                            crate::chrome::i18n::tr("Cancel"),
                             move || cancel_focused(ui),
                             move || close(ui),
                         )

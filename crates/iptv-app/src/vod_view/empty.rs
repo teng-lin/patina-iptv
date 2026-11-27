@@ -3,8 +3,8 @@
 //! playlist, the ones the catalog reads; the actions are the ones the playlists screen and the wizard
 //! already run (refresh a playlist, open its actions, add a playlist).
 use super::*;
-use crate::data::Activity;
 use crate::runtime::model::{ImportErrorKind, SourceId};
+use crate::wiring::data::Activity;
 use iptv_presentation::vod::{EmptyAction, ImportProblem, SourceVod, VodState};
 
 fn problem(kind: ImportErrorKind) -> ImportProblem {
@@ -24,8 +24,8 @@ fn problem(kind: ImportErrorKind) -> ImportProblem {
 /// screen, as the core reads them for `kind`. Tracks what they depend on.
 fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
     ui.app.library.version.get();
-    let settings = crate::settings_wiring::read(ui);
-    let playlists = crate::runtime_owner::runtime()
+    let settings = crate::wiring::settings_wiring::read(ui);
+    let playlists = crate::wiring::runtime_owner::runtime()
         .playlists()
         .unwrap_or_default();
     ui.app.library.activity.with(|activity| {
@@ -44,7 +44,7 @@ fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
 /// What playlist `p` says about its titles of `kind`, its movie and series
 /// import `imports`, and this session's refresh of it.
 fn source_vod(
-    p: &crate::data::Playlist,
+    p: &crate::wiring::data::Playlist,
     kind: Kind,
     imports: bool,
     activity: Option<&Activity>,
@@ -170,7 +170,7 @@ pub(super) fn run(ui: Ui) {
             crate::playlists_view::open_on_demand(ui, SourceId(id));
         }
         EmptyAction::Retry(id) | EmptyAction::Refresh(id) => {
-            crate::data::refresh(&crate::runtime_owner::runtime(), SourceId(id));
+            crate::wiring::data::refresh(&crate::wiring::runtime_owner::runtime(), SourceId(id));
         }
     }
 }
@@ -217,8 +217,8 @@ mod tests {
     use iptv_presentation::wizard::{FailureKind, ImportFailure};
     use iptv_providers::model::SourceKind;
 
-    fn playlist(kind: SourceKind) -> crate::data::Playlist {
-        crate::data::Playlist {
+    fn playlist(kind: SourceKind) -> crate::wiring::data::Playlist {
+        crate::wiring::data::Playlist {
             id: SourceId(1),
             name: "Synthetic".into(),
             kind,

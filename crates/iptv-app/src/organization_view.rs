@@ -1,11 +1,11 @@
 //! Channel and provider-group organization, including hidden-item recovery.
+use crate::chrome::i18n::{tr, trf};
+use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit::entry::{self, TextSheet};
 use crate::guide::list_rows::{self, Mark, ROW};
-use crate::i18n::{tr, trf};
-use crate::input::dismiss_keyboard;
 use crate::runtime::{Error, model::SourceId};
-use crate::scale::Scale;
-use crate::ui_kit::entry::{self, TextSheet};
-use crate::{Ui, data, ui_kit};
+use crate::{Ui, chrome::ui_kit, wiring::data};
 use iptv_core::organization::{Block, BlockKind, Item, Sort};
 use iptv_nav::Action;
 use iptv_presentation::guide::Pane;
@@ -22,7 +22,7 @@ pub use iptv_presentation::organization::Open;
 
 async fn items(source: SourceId, kind: &Kind, order: Option<Sort>) -> Result<Items, Error> {
     crate::runtime::commands::organization_editor(
-        &crate::runtime_owner::runtime(),
+        &crate::wiring::runtime_owner::runtime(),
         source,
         kind.clone(),
         crate::guide::favorites::ordered_keys(),
@@ -77,7 +77,8 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
         return;
     };
     if playlists.is_empty()
-        || (preferred.is_none() && (playlists.len() < 2 || !crate::settings::playlists_by_hand()))
+        || (preferred.is_none()
+            && (playlists.len() < 2 || !crate::wiring::settings::playlists_by_hand()))
     {
         return;
     }
@@ -99,7 +100,7 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
-            .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
         crate::guide::lists::open_groups(ui);
         crate::playback::browse_playback::hold(ui);
         ui.screens
@@ -111,7 +112,7 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
 pub fn open_group_reorder(ui: Ui, source: SourceId, focus: Option<String>, list: ListId) {
     batch(|| {
         leave_fullscreen_for_reorder(ui);
-        if let Some(entry) = list.resolve(&*crate::runtime_owner::schedule()) {
+        if let Some(entry) = list.resolve(&*crate::wiring::runtime_owner::schedule()) {
             crate::guide::lists::preview(ui, entry);
         }
         crate::guide::lists::open_groups(ui);
@@ -155,7 +156,9 @@ fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
     if from_player {
         crate::channels_view::close(ui);
         ui.playback.panels.update(|panels| panels.hide());
-        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.chrome
+            .mode
+            .apply(crate::chrome::mode::Action::ReturnToBrowse);
     }
     from_player
 }
@@ -175,7 +178,7 @@ fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
 
 fn guide_reorder_placement(ui: Ui, list: ListId) -> Placement {
     let return_to_groups = ui.guide.focus.with_untracked(|f| f.pane == Pane::Groups);
-    let entry = list.find(&*crate::runtime_owner::schedule());
+    let entry = list.find(&*crate::wiring::runtime_owner::schedule());
     crate::guide::lists::preview(ui, entry);
     ui.guide.focus.update(|f| {
         f.close_columns();
@@ -212,7 +215,7 @@ fn open_with(
         .screens
         .organization
         .open(Open::new(source, kind.clone(), mode, placement));
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let custom = initial == Some(Edit::Sort(Sort::Manual));
         let loaded = items(source, &kind, custom.then_some(Sort::Manual)).await;
         if !still_open(ui, generation) || !is_open(ui) {
@@ -267,11 +270,11 @@ fn block_state(state: &Open, id: &str) -> Block {
 
 pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked: bool) {
     let generation = ui.screens.organization.epoch();
-    let owner = crate::runtime_owner::runtime();
+    let owner = crate::wiring::runtime_owner::runtime();
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         if save.await.is_err() {
-            crate::toast::notify(tr(
+            crate::chrome::toast::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             ));
             if still_open(ui, generation) {
@@ -279,7 +282,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             }
             return;
         }
-        crate::toast::notify(if blocked {
+        crate::chrome::toast::notify(if blocked {
             tr("Content blocked")
         } else {
             tr("Content unblocked")
@@ -296,7 +299,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             Ok(blocks) => update(ui, |state| state.finish_block(blocks)),
             Err(_) => {
                 close(ui);
-                crate::toast::notify(tr(
+                crate::chrome::toast::notify(tr(
                     "The list could not be reloaded. Reopen it and try again.",
                 ));
             }
@@ -480,11 +483,11 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
 fn save_order(ui: Ui) {
     if state(ui, |s| s.scope.is_none()) == Some(true) {
         let generation = ui.screens.organization.epoch();
-        crate::navigation::settings_guarded(ui, move || {
+        crate::wiring::navigation::settings_guarded(ui, move || {
             if !still_open(ui, generation) {
                 return;
             }
-            if !crate::settings::playlists_by_hand()
+            if !crate::wiring::settings::playlists_by_hand()
                 && let Err(error) = crate::runtime()
                     .check_setting_write(iptv_settings::keys::PLAYLIST_SORT.as_str())
             {
@@ -519,7 +522,7 @@ fn check_playlist_order_catalog(ui: Ui) -> bool {
     });
     if !valid {
         untracked(|| close(ui));
-        crate::toast::notify(tr(
+        crate::chrome::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }
@@ -538,8 +541,8 @@ fn persist_order(ui: Ui) {
         return;
     }
     let generation = ui.screens.organization.epoch();
-    let owner = crate::runtime_owner::runtime();
-    crate::tasks::spawn_in_app(async move {
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
         let mut saved_positions = None;
         let result = match draft {
             OrderSave::Playlists {
@@ -590,7 +593,7 @@ fn persist_order(ui: Ui) {
         };
         if result.is_ok()
             && playlists
-            && !crate::settings::playlists_by_hand()
+            && !crate::wiring::settings::playlists_by_hand()
             && let Err(error) = owner
                 .set_setting_and_wait(
                     iptv_settings::keys::PLAYLIST_SORT.as_str(),
@@ -602,7 +605,7 @@ fn persist_order(ui: Ui) {
                 return;
             }
             match error {
-                error @ crate::settings::SaveError::Durability(_) => {
+                error @ crate::wiring::settings::SaveError::Durability(_) => {
                     crate::settings_view::notify_setting_error(error);
                 }
                 error => {
@@ -618,8 +621,8 @@ fn persist_order(ui: Ui) {
                     if !check_playlist_order_catalog(ui) {
                         return;
                     }
-                    if matches!(error, crate::settings::SaveError::Storage(_)) {
-                        crate::toast::notify(tr(
+                    if matches!(error, crate::wiring::settings::SaveError::Storage(_)) {
+                        crate::chrome::toast::notify(tr(
                             "Playlist positions saved. Could not switch to Custom order. Try saving again.",
                         ));
                     } else {
@@ -639,10 +642,10 @@ fn persist_order(ui: Ui) {
                 update(ui, Open::finish_save);
                 if playlists && error.settings_locked() {
                     crate::settings_view::notify_setting_error(
-                        crate::settings::SaveError::ParentalLocked,
+                        crate::wiring::settings::SaveError::ParentalLocked,
                     );
                 } else {
-                    crate::toast::notify(tr(
+                    crate::chrome::toast::notify(tr(
                         "The change could not be saved. Reopen the list and try again.",
                     ));
                 }
@@ -695,7 +698,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             let kind = block_kind(&scope_kind);
             let blocked = block_state(&s, &item.id);
             if kind == BlockKind::Channel && blocked == Block::Group {
-                crate::toast::notify(tr("This channel is blocked by a group."));
+                crate::chrome::toast::notify(tr("This channel is blocked by a group."));
                 return;
             }
             update(ui, Open::begin_block);
@@ -749,11 +752,11 @@ fn apply_edit(ui: Ui, edit: Edit) {
     if scope_kind == Kind::Favorites && edit == Edit::ResetOrder {
         let keys = crate::guide::favorites::ordered_keys();
         let ordered = crate::runtime::commands::favorite_provider_order(
-            &crate::runtime_owner::runtime(),
+            &crate::wiring::runtime_owner::runtime(),
             source,
             keys,
         );
-        crate::tasks::spawn_in_app(async move {
+        crate::wiring::tasks::spawn_in_app(async move {
             let ordered = ordered.await;
             if !still_open(ui, generation) {
                 return;
@@ -787,7 +790,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         let id = order.remove(at);
         order.insert(to, id);
         let result = crate::runtime::commands::save_organization_order(
-            &crate::runtime_owner::runtime(),
+            &crate::wiring::runtime_owner::runtime(),
             source,
             scope_kind.clone(),
             original,
@@ -796,7 +799,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             false,
         );
         update(ui, Open::begin_save);
-        crate::tasks::spawn_in_app(async move {
+        crate::wiring::tasks::spawn_in_app(async move {
             finish(ui, &s, generation, result.await);
         });
         return;
@@ -811,7 +814,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     update(ui, Open::begin_save);
     let finished = s.clone();
     let result = crate::runtime::commands::edit_organization(
-        &crate::runtime_owner::runtime(),
+        &crate::wiring::runtime_owner::runtime(),
         source,
         scope_kind,
         s.editor.items,
@@ -819,7 +822,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         edit,
         s.editor.selected,
     );
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         finish(ui, &finished, generation, result.await);
     });
 }
@@ -828,19 +831,19 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
         return;
     };
     let result = crate::runtime::commands::set_organization_sort(
-        &crate::runtime_owner::runtime(),
+        &crate::wiring::runtime_owner::runtime(),
         source,
         kind,
         sort,
     );
     let expected = s.clone();
     update(ui, Open::begin_save);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = result.await;
         if still_open(ui, generation) && result.is_ok() {
             if matches!(expected.placement, Placement::Sort(_)) {
                 close(ui);
-                data::organization_changed(&crate::runtime_owner::runtime(), source);
+                data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
                 return;
             }
             update(ui, |s| s.editor.sort_focus = None);
@@ -855,7 +858,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
             update(ui, Open::finish_save);
         }
         log::warn!("iptv organization: change refused: {e}");
-        crate::toast::notify(tr(
+        crate::chrome::toast::notify(tr(
             "The change could not be saved. Reopen the list and try again.",
         ));
         return;
@@ -867,16 +870,16 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
         if still_open(ui, generation) {
             close(ui);
         }
-        data::organization_changed(&crate::runtime_owner::runtime(), source);
+        data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
         return;
     }
     let expected = s.clone();
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let loaded = items(source, &kind, None).await;
         if still_open(ui, generation) {
             update(ui, |s| s.finish_edit(&expected, loaded.ok()));
         }
-        data::organization_changed(&crate::runtime_owner::runtime(), source);
+        data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
     });
 }
 
@@ -898,14 +901,14 @@ fn commit(ui: Ui) {
         }
     ) && text.trim().is_empty()
     {
-        crate::toast::notify(tr("Enter a group name."));
+        crate::chrome::toast::notify(tr("Enter a group name."));
         return;
     }
     let Some((source, kind)) = s.scope.clone() else {
         return;
     };
     let result = crate::runtime::commands::rename_organization_item(
-        &crate::runtime_owner::runtime(),
+        &crate::wiring::runtime_owner::runtime(),
         source,
         kind,
         item.id,
@@ -913,7 +916,7 @@ fn commit(ui: Ui) {
     );
     dismiss_keyboard();
     update(ui, Open::begin_save);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         finish(ui, &s, generation, result.await);
     });
 }
@@ -1449,7 +1452,7 @@ pub(crate) fn guide_order_scope(ui: Ui) -> Option<(SourceId, ListId)> {
 
 pub(crate) fn guide_order_keys(ui: Ui, source: SourceId, list: &ListId) -> HashMap<String, usize> {
     ui.app.data_version.get();
-    let catalog = crate::runtime_owner::schedule();
+    let catalog = crate::wiring::runtime_owner::schedule();
     ui.guide.list.with(|channels| {
         if &ListId::of(channels.entry(), &*catalog) != list {
             return HashMap::new();
@@ -1496,7 +1499,7 @@ pub(crate) fn invalidate_changed_guide_order(ui: Ui, keys: &HashMap<String, usiz
     }) == Some(true);
     if stale {
         close(ui);
-        crate::toast::notify(tr(
+        crate::chrome::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }
@@ -1516,7 +1519,7 @@ pub(crate) fn inline_order_open(ui: Ui) -> bool {
 
 pub(crate) fn guide_order_accessible(ui: Ui) -> bool {
     guide_order_open(ui)
-        && ui.top_overlay() == Some(crate::overlays::Overlay::Organization)
+        && ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
         && !contents_hidden(ui)
 }
 
@@ -1536,7 +1539,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
             if s.kind() == Some(&Kind::Groups) {
                 return String::new();
             }
-            let catalog = crate::runtime_owner::schedule();
+            let catalog = crate::wiring::runtime_owner::schedule();
             crate::guide::lists::entry_name(list.find(&*catalog), &*catalog)
         })
         .unwrap_or_default()
@@ -1546,7 +1549,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
         .absolute()
         .inset_0()
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Organization.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1623,7 +1626,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Organization.accessibility_covered(ui)
+            crate::chrome::overlays::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1646,7 +1649,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .child(ui_kit::caption(size, move || reorder_hint(ui)))
                 .child(when(
                     move || {
-                        ui.top_overlay() == Some(crate::overlays::Overlay::Organization)
+                        ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
                             && ui.drag_editing()
                             && reordering(ui)
                             && !contents_hidden(ui)
@@ -1691,7 +1694,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .absolute()
                 .top(move || px(safe_area().top.0 + crate::playback::panels::header_now().0))
                 .bottom(px(0.0))
-                .left(move || px(crate::rail::width(ui)))
+                .left(move || px(crate::chrome::rail::width(ui)))
                 .w(move || px(crate::playback::panels::groups_width(ui)))
                 .px(px(8.0))
                 .py(px(6.0))
@@ -1791,7 +1794,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .flatten()
         }) {
             let generation = ui.screens.organization.epoch();
-            crate::tasks::spawn_in_app(async move {
+            crate::wiring::tasks::spawn_in_app(async move {
                 if let Ok(loaded) = items(source, &kind, None).await
                     && still_open(ui, generation)
                 {
@@ -1823,7 +1826,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             .inset_0()
                             .test_id("organization-sort")
                             .accessibility_elements_hidden(move || {
-                                crate::overlays::Overlay::Organization.accessibility_covered(ui)
+                                crate::chrome::overlays::Overlay::Organization
+                                    .accessibility_covered(ui)
                             })
                             .child(when(
                                 move || {
@@ -1839,7 +1843,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         ui_kit::screen(ui, size)
                             .test_id("organization-screen")
                             .accessibility_elements_hidden(move || {
-                                crate::overlays::Overlay::Organization.accessibility_covered(ui)
+                                crate::chrome::overlays::Overlay::Organization
+                                    .accessibility_covered(ui)
                             })
                             .child(
                                 ui_kit::header(

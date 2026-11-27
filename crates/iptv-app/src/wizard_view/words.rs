@@ -1,6 +1,6 @@
 //! The wizard's wording (iptv-rs's own).
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 
 use iptv_presentation::wizard::{
     FailureKind, Field, FieldError, ImportFailure, ImportInput, ImportProgress, ImportStage,
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn counts_follow_each_languages_plural_forms() {
-        use crate::i18n::in_language;
+        use crate::chrome::i18n::in_language;
         let c = ImportCounts {
             channels: 3,
             groups: 1,
@@ -273,7 +273,7 @@ mod tests {
     /// its own words: none falls back to English or to another kind's.
     #[test]
     fn every_failure_is_told_in_every_language() {
-        use crate::i18n::in_language;
+        use crate::chrome::i18n::in_language;
         let kinds = [
             FailureKind::Network,
             FailureKind::Storage,

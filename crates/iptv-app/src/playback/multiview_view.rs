@@ -11,7 +11,7 @@
 //! reduces it; the video surfaces are below (`video.rs`). On a detour (a
 //! tile watched full screen) none of this shows.
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 
 mod chrome;
 mod menu;
@@ -21,10 +21,10 @@ use iptv_presentation::multiview::{Dialog, WARNING_CHOICES, WarningChoice};
 
 use nsh_core::prelude::*;
 
-use crate::fonts::{OSD_DETAIL, OSD_TEXT, OSD_TITLE};
+use crate::chrome::fonts::{OSD_DETAIL, OSD_TEXT, OSD_TITLE};
+use crate::chrome::ui_kit::icons::{self, Icon};
 use crate::playback::multiview::{self, State};
 use crate::theme::{FOCUS_ALPHA, RADIUS, RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
-use crate::ui_kit::icons::{self, Icon};
 use crate::{Ui, channel_name, tint};
 
 const WHITE: u32 = 0xFFFFFF;

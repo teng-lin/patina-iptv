@@ -2,7 +2,7 @@
 //! for live TV, and an interactive timeline (`line`) with start/end times for
 //! catch-up and on-demand playback (press or drag seeks, `seek.rs`).
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{TouchEvent, TouchPhase};
@@ -50,7 +50,7 @@ pub(super) fn live_hairline(ui: Ui) -> impl IntoElement {
 /// is waiting to tune, otherwise the currently playing live or replayed program.
 pub(super) fn program(ui: Ui) -> (usize, crate::guide::Program) {
     ui.guide_data();
-    let schedule = crate::runtime_owner::schedule();
+    let schedule = crate::wiring::runtime_owner::schedule();
     if ui.playback.playback.get() == Playback::Live
         && let Some(channel) = crate::playback::browse_playback::pending_channel(ui)
     {

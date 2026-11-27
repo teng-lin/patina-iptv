@@ -9,7 +9,7 @@ use iptv_presentation::player_info::{StreamFormat, badges, minutes_left};
 use nsh_core::prelude::*;
 
 use super::WHITE;
-use crate::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT, OSD_TITLE};
+use crate::chrome::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT, OSD_TITLE};
 use crate::guide::{Airing, Program};
 use crate::theme::{RADIUS, RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, channel_name, clock, tint};
@@ -23,7 +23,7 @@ fn secondary() -> Rgba {
 
 /// The group the playing channel is in (groups start in ascending order).
 pub(super) fn group_of(channel: usize) -> String {
-    let s = crate::runtime_owner::schedule();
+    let s = crate::wiring::runtime_owner::schedule();
     iptv_core::lists::group_of(&*s, channel).map_or_else(String::new, |g| {
         crate::guide::listing_labels::group(s.group_label(g))
     })
@@ -31,7 +31,7 @@ pub(super) fn group_of(channel: usize) -> String {
 
 /// The channel's logo address (imported channels with an http(s) logo).
 fn logo(channel: usize) -> Option<String> {
-    logo_in(&*crate::runtime_owner::schedule(), channel)
+    logo_in(&*crate::wiring::runtime_owner::schedule(), channel)
 }
 
 /// Read through the trait, so a combined ("All playlists") schedule finds
@@ -51,7 +51,7 @@ fn program(ui: Ui) -> (usize, Program) {
         let now = ui.guide.focus.with(|f| f.now);
         return (
             channel,
-            crate::runtime_owner::schedule().program_at(channel, now),
+            crate::wiring::runtime_owner::schedule().program_at(channel, now),
         );
     }
     let channel = ui.playback.playing.get().unwrap_or(0);
@@ -61,7 +61,7 @@ fn program(ui: Ui) -> (usize, Program) {
     };
     (
         channel,
-        crate::runtime_owner::schedule().program_at(channel, minute),
+        crate::wiring::runtime_owner::schedule().program_at(channel, minute),
     )
 }
 
@@ -116,8 +116,8 @@ fn ends(ui: Ui) -> (String, String) {
         _ => {
             let (_, p) = program(ui);
             let at = ui.guide.focus.with(|f| f.now);
-            let left =
-                minutes_left(crate::i18n::language(), p.start, p.end, at).unwrap_or_default();
+            let left = minutes_left(crate::chrome::i18n::language(), p.start, p.end, at)
+                .unwrap_or_default();
             (format!("{}–{}", clock(p.start), clock(p.end)), left)
         }
     }
@@ -191,7 +191,7 @@ fn number_and_name(ui: Ui, channel: usize) -> String {
 pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElement {
     let channel = move || program(ui).0;
     let now = move || program(ui).1;
-    let next = move || crate::runtime_owner::schedule().program_at(channel(), now().end);
+    let next = move || crate::wiring::runtime_owner::schedule().program_at(channel(), now().end);
     let format = move || {
         let main = ui.playback.player.main();
         let (width, height) = main.size.get().unwrap_or((0, 0));
@@ -215,7 +215,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                 .rounded(px(RADIUS))
                 .bg(tint(WHITE, RESTING_ALPHA))
                 .child(
-                    image(crate::content_image::source(move || {
+                    image(crate::chrome::content_image::source(move || {
                         if crate::playback::on_demand::active(ui) {
                             crate::guide::grid::no_logo()
                         } else {
@@ -253,7 +253,8 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                             .with(|r| r.as_ref().map(|(j, _)| j.request.title.clone()))
                             .unwrap_or_else(|| {
                                 crate::guide::listing_labels::listing(
-                                    crate::runtime_owner::schedule().listing(channel(), now()),
+                                    crate::wiring::runtime_owner::schedule()
+                                        .listing(channel(), now()),
                                 )
                             })
                     })
@@ -269,14 +270,15 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                             return String::new();
                         }
                         let p = next();
-                        crate::i18n::trf(
+                        crate::chrome::i18n::trf(
                             "Next  {time}  {title}",
                             &[
                                 ("time", (&clock(p.start)).into()),
                                 (
                                     "title",
                                     (&crate::guide::listing_labels::listing(
-                                        crate::runtime_owner::schedule().listing(channel(), p),
+                                        crate::wiring::runtime_owner::schedule()
+                                            .listing(channel(), p),
                                     ))
                                         .into(),
                                 ),
@@ -316,7 +318,8 @@ pub(super) fn banner(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl 
                 .child(
                     text(move || {
                         crate::guide::listing_labels::listing(
-                            crate::runtime_owner::schedule().listing(channel(), program(ui).1),
+                            crate::wiring::runtime_owner::schedule()
+                                .listing(channel(), program(ui).1),
                         )
                     })
                     .flex_1()

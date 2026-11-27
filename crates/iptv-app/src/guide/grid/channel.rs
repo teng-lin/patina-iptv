@@ -5,8 +5,8 @@
 use nsh_core::prelude::*;
 
 use super::{CELL_H, CELL_RADIUS, fill};
-use crate::fonts::{CHANNEL, SANS};
-use crate::scale::Scale;
+use crate::chrome::fonts::{CHANNEL, SANS};
+use crate::chrome::scale::Scale;
 use crate::theme::BRIGHT_TEXT;
 use crate::{Ui, channel_name};
 
@@ -29,7 +29,7 @@ pub(crate) fn no_logo() -> String {
 }
 
 pub(crate) fn show_channel_logos(ui: Ui) -> bool {
-    crate::settings_wiring::read(ui).bool(
+    crate::wiring::settings_wiring::read(ui).bool(
         iptv_settings::keys::GUIDE_SHOW_LOGOS,
         &iptv_settings::Target::Global,
     )
@@ -38,7 +38,7 @@ pub(crate) fn show_channel_logos(ui: Ui) -> bool {
 pub(crate) fn channel_logo(ui: Ui, channel: Option<usize>) -> String {
     ui.guide_data();
     channel
-        .and_then(|ch| crate::runtime_owner::schedule().channel_logo(ch))
+        .and_then(|ch| crate::wiring::runtime_owner::schedule().channel_logo(ch))
         .unwrap_or_else(no_logo)
 }
 
@@ -89,7 +89,7 @@ pub(super) fn cell(
                 return;
             }
             if let Some(ch) = channel.get() {
-                crate::menu_view::open_at(ui, ch);
+                crate::chrome::menu_view::open_at(ui, ch);
             }
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
@@ -98,7 +98,7 @@ pub(super) fn cell(
             if !crate::organization_view::guide_order_open(ui)
                 && let Some(ch) = channel.get()
             {
-                crate::menu_view::open_at(ui, ch);
+                crate::chrome::menu_view::open_at(ui, ch);
             }
         })
         .role(move || {
@@ -142,8 +142,8 @@ pub(super) fn cell(
         .child(
             // The place in the list on screen.
             text(move || {
-                crate::settings_wiring::read(ui);
-                if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
+                crate::wiring::settings_wiring::read(ui);
+                if crate::wiring::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
                     (at.index() + 1).to_string()
                 } else {
                     String::new()
@@ -168,7 +168,7 @@ pub(super) fn cell(
                 .items_center()
                 .justify_center()
                 .child(
-                    image(crate::content_image::source(logo))
+                    image(crate::chrome::content_image::source(logo))
                         .w(move || px(size.whole(LOGO_W) - 2.0 * size.of(LOGO_PAD)))
                         .h(move || px(size.whole(CELL_H) - 2.0 * size.of(LOGO_PAD)))
                         .object_fit(ResizeMode::Contain)
@@ -186,7 +186,7 @@ pub(super) fn cell(
                 let star = ui.app.favorites.with(|f| f.contains(&ch));
                 let name = format!("{}{}", if star { "★ " } else { "" }, channel_name(ch));
                 let scale = size.get();
-                crate::fonts::fit(
+                crate::chrome::fonts::fit(
                     &name,
                     name_width(column(), number_w.get(), playing(), scale)
                         + if show_logo() { 0.0 } else { size.whole(LOGO_W) }
@@ -195,7 +195,7 @@ pub(super) fn cell(
                         } else {
                             0.0
                         },
-                    CHANNEL * scale * crate::settings::font_factor(),
+                    CHANNEL * scale * crate::wiring::settings::font_factor(),
                 )
             })
             .test_id("guide-channel-name")

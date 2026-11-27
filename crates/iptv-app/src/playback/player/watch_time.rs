@@ -17,7 +17,7 @@ impl Session {
     fn save(&mut self) {
         let elapsed_ms = self.time.take_ms();
         if elapsed_ms > 0 {
-            crate::runtime_owner::runtime().add_channel_watch_time(
+            crate::wiring::runtime_owner::runtime().add_channel_watch_time(
                 self.source,
                 self.key.clone(),
                 elapsed_ms,
@@ -53,8 +53,10 @@ pub(crate) fn bind(ui: Ui) {
             }
             if let Some(token) = token
                 && let Some(key) = stream.key.get_untracked()
-                && let Some((source, key)) =
-                    crate::data::combined::owner(&crate::runtime_owner::runtime(), &key)
+                && let Some((source, key)) = crate::wiring::data::combined::owner(
+                    &crate::wiring::runtime_owner::runtime(),
+                    &key,
+                )
             {
                 *watching = Some(Session {
                     source,
@@ -74,7 +76,7 @@ pub(crate) fn bind(ui: Ui) {
         if guide.get().is_some() {
             // A mode change can schedule this effect before the playback effect.
             flush(ui);
-            crate::runtime_owner::runtime().refresh_watch_order();
+            crate::wiring::runtime_owner::runtime().refresh_watch_order();
         }
     });
 }

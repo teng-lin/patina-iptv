@@ -69,7 +69,7 @@ impl Choice {
     }
 
     fn resolve_in(&self, ui: Ui, handoff: bool) -> Option<(usize, Program)> {
-        let schedule = crate::runtime_owner::schedule();
+        let schedule = crate::wiring::runtime_owner::schedule();
         if !self.playing_context
             && ui
                 .guide
@@ -113,7 +113,7 @@ impl Choice {
     }
 
     pub(crate) fn external_context(&self, ui: Ui) -> bool {
-        let schedule = crate::runtime_owner::schedule();
+        let schedule = crate::wiring::runtime_owner::schedule();
         let Some(entry) = self.list.resolve(&*schedule) else {
             return false;
         };
@@ -143,7 +143,7 @@ pub(crate) fn select(
     playing_context: bool,
 ) {
     let Some(choice) = Choice::capture(
-        &*crate::runtime_owner::schedule(),
+        &*crate::wiring::runtime_owner::schedule(),
         list,
         channel,
         program,
@@ -206,7 +206,9 @@ pub(crate) fn select(
                     offset: 0,
                 })
         {
-            ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
+            ui.chrome
+                .mode
+                .apply(crate::chrome::mode::Action::EnterFullscreen);
             ui.show_playing();
             if let Some(list) = missing_handler {
                 crate::playback::external_player::missing_handler(ui, list);
@@ -214,7 +216,7 @@ pub(crate) fn select(
         }
     };
     if let Some(target) = crate::parental_view::live_target(ui, channel) {
-        crate::navigation::request_if(ui, target, current, play);
+        crate::wiring::navigation::request_if(ui, target, current, play);
     } else {
         // The built-in generated guide has no provider or protected target.
         play();

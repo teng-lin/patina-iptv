@@ -1,12 +1,12 @@
 //! Receiver approval belongs to the window that chose the destination.
 use crate::{
     Ui,
-    i18n::tr,
-    overlays::Overlay,
-    runtime_owner::runtime,
-    scale::Scale,
-    ui_kit,
-    ui_kit::entry::{frame, sheet_buttons, sheet_field},
+    chrome::i18n::tr,
+    chrome::overlays::Overlay,
+    chrome::scale::Scale,
+    chrome::ui_kit,
+    chrome::ui_kit::entry::{frame, sheet_buttons, sheet_field},
+    wiring::runtime_owner::runtime,
 };
 use iptv_core::cast::{Error, Receiver};
 use iptv_presentation::cast::{Effect, Prompt, State};
@@ -15,7 +15,7 @@ use nsh_core::prelude::*;
 
 pub(crate) fn prompt(ui: Ui, ticket: u64) -> PairingPrompt {
     let (prompt, request) = pairing_prompt();
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         if let Ok(request) = request.await
             && runtime().cast_intent_current(ticket)
             && ui.cast.busy.try_get() == Some(true)
@@ -59,7 +59,7 @@ fn submit(ui: Ui) {
     let mut effect = None;
     ui.cast.state.update(|state| effect = state.submit_pin());
     let Some(Effect::SubmitPin { ticket, pin }) = effect else {
-        crate::toast::notify(tr("Enter the four digits shown on the receiver."));
+        crate::chrome::toast::notify(tr("Enter the four digits shown on the receiver."));
         return;
     };
     if let Some(request) = ui.cast.pairing.replace(None) {
@@ -82,12 +82,12 @@ fn forget(ui: Ui) {
         return;
     }
     ui.cast.state.update(|state| state.busy = true);
-    crate::tasks::spawn_in_app(async move {
+    crate::wiring::tasks::spawn_in_app(async move {
         let result = runtime().forget_cast_pairing(receiver).await;
         if ui.cast.busy.try_get().is_some() {
             ui.cast.state.update(|state| state.busy = false);
             if result.is_err() {
-                crate::toast::notify(tr("Could not forget the AirPlay pairing."));
+                crate::chrome::toast::notify(tr("Could not forget the AirPlay pairing."));
             }
             crate::casting::finish_pending_stop(ui);
         }

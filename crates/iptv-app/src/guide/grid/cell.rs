@@ -17,9 +17,9 @@
 use nsh_core::prelude::*;
 
 use super::{CELL_GAP, CELL_H, CELL_INSET, CELL_RADIUS, PAST_DIM, WHITE, pan::Pan};
-use crate::fonts::{CELL_TITLE, CONDENSED};
+use crate::chrome::fonts::{CELL_TITLE, CONDENSED};
+use crate::chrome::scale::Scale;
 use crate::guide::{Program, floor_of};
-use crate::scale::Scale;
 use crate::theme::{
     BRIGHT_TEXT, FOCUSED_CELL, FOCUSED_TEXT, GuideColors, TEXT_SECONDARY_ALPHA, blend, with_alpha,
 };
@@ -131,9 +131,9 @@ pub(super) fn cell(
     });
     let colors = computed(move || {
         let overlay = match ui.chrome.mode.get() {
-            ViewMode::Overlay => Some(crate::theme::overlay_alpha(&crate::settings_wiring::read(
-                ui,
-            ))),
+            ViewMode::Overlay => Some(crate::theme::overlay_alpha(
+                &crate::wiring::settings_wiring::read(ui),
+            )),
             ViewMode::Guide | ViewMode::Fullscreen => None,
         };
         let (g, window) = ui.app.theme.with(|t| (t.guide(), t.background.window));
@@ -147,7 +147,7 @@ pub(super) fn cell(
                 "{}{}",
                 crate::recordings_view::badge(ui, ch, p),
                 crate::guide::listing_labels::listing(
-                    crate::runtime_owner::schedule().listing(ch, p)
+                    crate::wiring::runtime_owner::schedule().listing(ch, p)
                 )
             ),
             _ => String::new(),
@@ -172,7 +172,7 @@ pub(super) fn cell(
         };
         ui.touched();
         if focus_program(p) {
-            crate::menu_view::open_timeline_context(ui);
+            crate::chrome::menu_view::open_timeline_context(ui);
         }
     };
     view()

@@ -1,6 +1,6 @@
 //! Apple owns the named-device picker. Its transient controls share one
 //! persistent runtime player; the play bar remains the playback remote.
-use crate::{Ui, runtime_owner::runtime};
+use crate::{Ui, wiring::runtime_owner::runtime};
 use nsh_core::prelude::*;
 use serde_json::json;
 
@@ -20,7 +20,7 @@ pub(crate) fn button(ui: Ui, size: f32, id: &'static str) -> View {
             })
             .w(px(size))
             .h(px(size))
-            .label(move || crate::i18n::tr("Cast to TV"))
+            .label(move || crate::chrome::i18n::tr("Cast to TV"))
             .prop("owner", move || json!(runtime().native_cast_view()))
             .prop("accent", move || {
                 json!(ui.app.theme.with(|t| t.accent.light))
@@ -67,7 +67,7 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                     "routes-closed" => {
                         ui.cast.state.update(|state| state.picker_open = false);
                         if !ui.cast.busy.get_untracked() {
-                            crate::chooser::close(ui);
+                            crate::chrome::chooser::close(ui);
                         }
                     }
                     "route-selected" => {

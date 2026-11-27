@@ -18,7 +18,7 @@ use iptv_presentation::touch_zap::{Direction, Outcome, Swipe};
 use iptv_settings::keys;
 use nsh_core::prelude::*;
 
-use crate::fonts::OSD_TEXT;
+use crate::chrome::fonts::OSD_TEXT;
 use crate::theme::RADIUS_LARGE;
 use crate::{Playback, Ui, ViewMode, channel_name, tint};
 
@@ -124,7 +124,7 @@ fn takes_swipes(ui: Ui) -> bool {
     live(ui)
         && !ui.any_overlay_open()
         && crate::playback::pip::ui_shown(ui)
-        && crate::settings::flag(keys::SWIPE_TO_ZAP)
+        && crate::wiring::settings::flag(keys::SWIPE_TO_ZAP)
 }
 
 /// Changes channel the way `direction` goes, as Ch± does, from a touch:
@@ -145,7 +145,7 @@ pub(crate) fn zap(ui: Ui, direction: Direction) {
     // details), which are about the channel it leaves: they go, so the
     // player owns input again and the pending zap tunes.
     if ui.screens.chooser.with_untracked(Option::is_some) {
-        crate::chooser::close(ui);
+        crate::chrome::chooser::close(ui);
     }
     if ui.screens.description.with_untracked(Option::is_some) {
         ui.screens.description.set(None);
@@ -295,11 +295,11 @@ pub(crate) fn actions() -> Vec<nsh_core::AccessibilityActionDef> {
     let mut actions = vec![
         nsh_core::AccessibilityActionDef {
             name: "next_channel".into(),
-            label: Some(crate::i18n::tr("Next channel").into()),
+            label: Some(crate::chrome::i18n::tr("Next channel").into()),
         },
         nsh_core::AccessibilityActionDef {
             name: "previous_channel".into(),
-            label: Some(crate::i18n::tr("Previous channel").into()),
+            label: Some(crate::chrome::i18n::tr("Previous channel").into()),
         },
     ];
     if crate::IOS {
@@ -327,16 +327,16 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
     let (id, icon) = match direction {
         Direction::Next => (
             "play-bar-next-channel",
-            crate::ui_kit::icons::Icon::ChannelNext,
+            crate::chrome::ui_kit::icons::Icon::ChannelNext,
         ),
         Direction::Previous => (
             "play-bar-previous-channel",
-            crate::ui_kit::icons::Icon::ChannelPrevious,
+            crate::chrome::ui_kit::icons::Icon::ChannelPrevious,
         ),
     };
     let label = move || match direction {
-        Direction::Next => crate::i18n::tr("Next channel"),
-        Direction::Previous => crate::i18n::tr("Previous channel"),
+        Direction::Next => crate::chrome::i18n::tr("Next channel"),
+        Direction::Previous => crate::chrome::i18n::tr("Previous channel"),
     };
     view()
         .test_id(id)
@@ -357,7 +357,7 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
             zap(ui, direction);
         })
         .child(
-            svg(move || crate::ui_kit::icons::src(icon))
+            svg(move || crate::chrome::ui_kit::icons::src(icon))
                 .size(px(18.0))
                 .text_color(rgb(WHITE)),
         )
@@ -426,7 +426,7 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
                             text(move || {
                                 ui.guide_data();
                                 let channel = channel();
-                                let schedule = crate::runtime_owner::schedule();
+                                let schedule = crate::wiring::runtime_owner::schedule();
                                 let now = ui.guide.focus.with(|f| f.now);
                                 crate::guide::listing_labels::listing(
                                     schedule.listing(channel, schedule.program_at(channel, now)),

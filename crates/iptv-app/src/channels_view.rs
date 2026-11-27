@@ -9,19 +9,19 @@
 //! persistent layer: preview mode only changes its rectangle
 //! ([`preview_rect`]).
 
+use crate::chrome::i18n::tr;
 use crate::guide::lists::{browser_entry_name, visible_entries};
-use crate::i18n::tr;
 
-use crate::layout::ListPanel;
+use crate::chrome::layout::ListPanel;
 use iptv_nav::Action;
 use iptv_presentation::channel_list::{ChannelList, ListMode, ListPane, Outcome};
 use iptv_presentation::lists::{ALL, ChannelList as Rows, FAVORITES, VisibleEntries};
 use nsh_core::prelude::*;
 
-use crate::fonts::{CONDENSED, HEADER_TIMES, MEDIUM, SANS, SECTION, TITLE};
+use crate::chrome::fonts::{CONDENSED, HEADER_TIMES, MEDIUM, SANS, SECTION, TITLE};
+use crate::chrome::scale::Scale;
 use crate::guide::list_rows::{self, INSET, Mark, ROW, ROW_TWO};
 use crate::playback::panels::GROUPS_W;
-use crate::scale::Scale;
 use crate::theme::BRIGHT_TEXT;
 use crate::{Ui, ViewMode, clock, tint};
 
@@ -38,7 +38,7 @@ pub fn is_open(ui: Ui) -> bool {
 /// Opens the list over (or beside) full-screen video.
 pub fn open(ui: Ui, mode: ListMode) {
     let mode = if mode == ListMode::Overlay
-        && crate::settings::choice(iptv_settings::keys::GUIDE_LIST_BROWSE_MODE) == "preview"
+        && crate::wiring::settings::choice(iptv_settings::keys::GUIDE_LIST_BROWSE_MODE) == "preview"
     {
         ListMode::Preview
     } else {
@@ -77,9 +77,9 @@ fn groups_shown(ui: Ui) -> bool {
 }
 
 /// The columns at the left in a window `width` points wide, kept inside
-/// it (`crate::layout::ListPanel`).
+/// it (`crate::chrome::layout::ListPanel`).
 fn panel(ui: Ui, width: f32) -> ListPanel {
-    let scale = crate::scale::now();
+    let scale = crate::chrome::scale::now();
     let groups = if groups_shown(ui) {
         (GROUPS_W * scale).round()
     } else {
@@ -103,7 +103,7 @@ pub fn preview_rect(ui: Ui, width: f32, _height: f32) -> Option<(f32, f32, f32, 
     let preview = ui.playback.channels.with(|c| {
         c.is_some_and(|c| {
             c.mode == ListMode::Preview
-                || crate::device::window_class() == crate::layout::Class::Compact
+                || crate::wiring::device::window_class() == crate::chrome::layout::Class::Compact
         })
     });
     if !preview {
@@ -176,7 +176,7 @@ pub fn key(ui: Ui, action: Action) {
             if let Some(list) = ui.playback.channels.get_untracked() {
                 match list.pane {
                     ListPane::Groups => {
-                        crate::menu_view::open_group_options(ui, list.entry);
+                        crate::chrome::menu_view::open_group_options(ui, list.entry);
                     }
                     ListPane::Channels => open_channel_menu(ui, list.row),
                 }
@@ -216,7 +216,7 @@ fn open_channel_menu(ui: Ui, row: usize) {
                 }
             });
             crate::playback::browse_playback::hold(ui);
-            crate::menu_view::open_channel(ui, channel);
+            crate::chrome::menu_view::open_channel(ui, channel);
         });
     }
 }
@@ -348,7 +348,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .inset_0()
         .flex_row()
         .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::ChannelList.accessibility_hidden(ui)
+            crate::chrome::overlays::Overlay::ChannelList.accessibility_hidden(ui)
         })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
@@ -391,7 +391,7 @@ fn entry_row(
     };
     let name = move || {
         visible().map_or_else(String::new, |entry| {
-            browser_entry_name(entry, &*crate::runtime_owner::schedule())
+            browser_entry_name(entry, &*crate::wiring::runtime_owner::schedule())
         })
     };
     let mark = move || Mark::of(focused(), current());
@@ -414,7 +414,7 @@ fn entry_row(
             if !crate::playback::multiview::picking(ui)
                 && let Some(entry) = visible()
             {
-                crate::menu_view::open_group_options(ui, entry);
+                crate::chrome::menu_view::open_group_options(ui, entry);
             }
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
@@ -422,7 +422,7 @@ fn entry_row(
             if !crate::playback::multiview::picking(ui)
                 && let Some(entry) = visible()
             {
-                crate::menu_view::open_group_options(ui, entry);
+                crate::chrome::menu_view::open_group_options(ui, entry);
             }
         })
         .child(
@@ -465,7 +465,7 @@ pub(crate) fn group_more(
             current()
                 && allowed()
                 && !ui.keys_shown()
-                && crate::menu_view::has_group_options(ui, entry())
+                && crate::chrome::menu_view::has_group_options(ui, entry())
         },
         move || {
             view()
@@ -475,14 +475,14 @@ pub(crate) fn group_more(
                 .right(move || size.px(4.0))
                 .justify_center()
                 .child(
-                    crate::ui_kit::round_more(
+                    crate::chrome::ui_kit::round_more(
                         || GROUP_MORE,
                         crate::playback::play_bar::back_bg(ui),
                         {
                             let name = name.clone();
                             move || {
                                 let name = name();
-                                crate::i18n::trf(
+                                crate::chrome::i18n::trf(
                                     "More options for {name}",
                                     &[("name", name.as_str().into())],
                                 )
@@ -490,7 +490,7 @@ pub(crate) fn group_more(
                         },
                         move || {
                             ui.touched();
-                            crate::menu_view::open_group_options(ui, entry());
+                            crate::chrome::menu_view::open_group_options(ui, entry());
                         },
                     )
                     .test_id("group-more"),
@@ -504,7 +504,7 @@ const GROUP_MORE: f32 = 28.0;
 /// The room a group's name leaves at its end for the ⋯ on its row:
 /// `shown` when [`group_more`]'s row and `allowed` conditions hold.
 pub(crate) fn group_more_room(ui: Ui, shown: bool, entry: usize) -> f32 {
-    if shown && !ui.keys_shown() && crate::menu_view::has_group_options(ui, entry) {
+    if shown && !ui.keys_shown() && crate::chrome::menu_view::has_group_options(ui, entry) {
         GROUP_MORE + 4.0
     } else {
         0.0
@@ -523,7 +523,7 @@ fn channel_row(
     let entry = move || {
         ui.app.data_version.get();
         let ch = channel()?;
-        let s = crate::runtime_owner::schedule();
+        let s = crate::wiring::runtime_owner::schedule();
         let now = ui.guide.focus.with(|f| f.now);
         let playing = if ui.playback.playing.get() == Some(ch) {
             "  ▶"
@@ -574,7 +574,7 @@ fn channel_row(
         .child(when(
             move || is_open(ui) && crate::guide::grid::show_channel_logos(ui),
             move || {
-                image(crate::content_image::source(move || {
+                image(crate::chrome::content_image::source(move || {
                     crate::guide::grid::channel_logo(ui, channel())
                 }))
                 .test_id("player-channel-logo")
@@ -622,12 +622,12 @@ fn channel_row(
                     .right(move || size.px(INSET))
                     .justify_center()
                     .child(
-                        crate::ui_kit::round_more(
+                        crate::chrome::ui_kit::round_more(
                             || MORE,
                             crate::playback::play_bar::back_bg(ui),
                             move || {
                                 let channel = name();
-                                crate::i18n::trf(
+                                crate::chrome::i18n::trf(
                                     "More options for {channel}",
                                     &[("channel", channel.as_str().into())],
                                 )
@@ -666,7 +666,7 @@ fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
         ui.app.data_version.get();
         let row = ui.playback.channels.get()?.row;
         let ch = ui.guide.list.with(|l| l.channel(row))?;
-        let s = crate::runtime_owner::schedule();
+        let s = crate::wiring::runtime_owner::schedule();
         let now = ui.guide.focus.with(|f| f.now);
         let p = s.program_at(ch, now);
         Some((

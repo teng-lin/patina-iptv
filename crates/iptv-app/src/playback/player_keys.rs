@@ -42,7 +42,7 @@ pub(crate) fn remap(
         action
     };
     up_down_key(
-        crate::settings::choice(iptv_settings::keys::PLAYER_UP_DOWN),
+        crate::wiring::settings::choice(iptv_settings::keys::PLAYER_UP_DOWN),
         key,
         action,
     )
@@ -59,7 +59,7 @@ pub(crate) fn seeks(ui: &Ui, ctx: Context, key: RemoteKey) -> bool {
 }
 
 fn seek_scheme() -> &'static str {
-    crate::settings::choice(iptv_settings::keys::SEEK_KEYS)
+    crate::wiring::settings::choice(iptv_settings::keys::SEEK_KEYS)
 }
 
 /// Seeking in a replay: whether OK plays and pauses (the arrows seek, as
@@ -121,7 +121,9 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat
         }
         Action::ShowControls => ui.update_panels(|p, now| p.show_controls(now)),
         Action::ShowInfo if fullscreen => ui.update_panels(|p, now| p.show_info(now)),
-        Action::ShowHistory => crate::chooser::open(ui, crate::chooser::Kind::History),
+        Action::ShowHistory => {
+            crate::chrome::chooser::open(ui, crate::chrome::chooser::Kind::History)
+        }
         Action::PlayPause => play_pause(ui, key, press),
         // Catch-up seeking (`seek.rs`); nothing to seek in a live stream.
         Action::SeekBack => seek(-crate::playback::seek::steps().rewind),
@@ -144,7 +146,11 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat
 /// Only the toggle key (and the play-bar button) reverses the current state.
 pub(crate) fn play_pause(ui: Ui, key: RemoteKey, press: Press) {
     // Keep an owner's explicit Play-or-pause remapping a toggle.
-    if crate::remote_editor::media_toggle_override(crate::input::context(&ui), key, press) {
+    if crate::chrome::remote_editor::media_toggle_override(
+        crate::chrome::input::context(&ui),
+        key,
+        press,
+    ) {
         crate::playback::player::toggle_pause(ui);
         return;
     }
@@ -158,8 +164,8 @@ pub(crate) fn play_pause(ui: Ui, key: RemoteKey, press: Press) {
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
-    crate::runtime_owner::runtime().next_cast_intent();
-    crate::runtime_owner::runtime().cancel_pending_native_cast();
+    crate::wiring::runtime_owner::runtime().next_cast_intent();
+    crate::wiring::runtime_owner::runtime().cancel_pending_native_cast();
     if ui.cast.remote.get_untracked() {
         crate::casting::stop(ui);
         return;
@@ -186,7 +192,9 @@ fn stop_to_guide(ui: Ui, stop: impl FnOnce(Ui)) {
     crate::playback::multiview::close(ui);
     ui.playback.playing.set(None);
     stop(ui);
-    ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
+    ui.chrome
+        .mode
+        .apply(crate::chrome::mode::Action::ReturnToBrowse);
 }
 
 /// Channel up/down: switches playback and keeps the focus on it. Wraps
@@ -218,7 +226,7 @@ pub(crate) fn zap_target(ui: Ui, step: isize) -> Option<usize> {
         |channel| list.row_of(channel),
         || ui.guide.focus.with(|f| f.channel),
     );
-    let catalog = crate::runtime_owner::schedule();
+    let catalog = crate::wiring::runtime_owner::schedule();
     zap_from_list(&*catalog, &list, from, step, |channel| {
         catalog.channel_block(channel) == iptv_core::organization::Block::None
     })
@@ -232,9 +240,13 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
             if let Some(ch) = ui.playback.playing.get() {
                 crate::guide::lists::show_channel(ui, ch);
             }
-            ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
+            ui.chrome
+                .mode
+                .apply(crate::chrome::mode::Action::ReturnToBrowse);
         }
-        QuickAction::History => crate::chooser::open(ui, crate::chooser::Kind::History),
+        QuickAction::History => {
+            crate::chrome::chooser::open(ui, crate::chrome::chooser::Kind::History)
+        }
         QuickAction::Channels => crate::channels_view::open(ui, ListMode::Overlay),
         QuickAction::Favorite => press_control(ui, Control::Favorite),
         QuickAction::Multiview => press_control(ui, Control::Multiview),
@@ -244,7 +256,7 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
 
 /// OK (or a tap) on a control-strip button.
 pub fn press_control(ui: Ui, control: Control) {
-    use crate::chooser::Kind;
+    use crate::chrome::chooser::Kind;
     ui.update_panels(|p, now| p.touch(now));
     if !crate::playback::player_panels::enabled(ui, control) {
         log::info!("iptv control {control:?} not available");
@@ -254,7 +266,7 @@ pub fn press_control(ui: Ui, control: Control) {
                 nsh_core::prelude::untracked(|| crate::playback::multiview::availability(ui))
                     .reason()
         {
-            crate::toast::notify(crate::capabilities::reason(reason));
+            crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
         }
         return;
     }
@@ -264,12 +276,12 @@ pub fn press_control(ui: Ui, control: Control) {
         Control::Search => crate::search_view::open(ui),
         Control::Multiview => crate::playback::multiview::open(ui),
         Control::ChannelList => crate::channels_view::open(ui, ListMode::Overlay),
-        Control::Scaling => crate::chooser::open(ui, Kind::Picture),
-        Control::SleepTimer => crate::chooser::open(ui, Kind::Sleep),
-        Control::VideoTracks => crate::chooser::open(ui, Kind::Track(Track::Video)),
-        Control::AudioTracks => crate::chooser::open(ui, Kind::Track(Track::Audio)),
-        Control::Captions => crate::chooser::open(ui, Kind::Track(Track::Text)),
-        Control::AudioOffset => crate::chooser::open(ui, Kind::AudioDelay),
+        Control::Scaling => crate::chrome::chooser::open(ui, Kind::Picture),
+        Control::SleepTimer => crate::chrome::chooser::open(ui, Kind::Sleep),
+        Control::VideoTracks => crate::chrome::chooser::open(ui, Kind::Track(Track::Video)),
+        Control::AudioTracks => crate::chrome::chooser::open(ui, Kind::Track(Track::Audio)),
+        Control::Captions => crate::chrome::chooser::open(ui, Kind::Track(Track::Text)),
+        Control::AudioOffset => crate::chrome::chooser::open(ui, Kind::AudioDelay),
         Control::PictureInPicture => crate::playback::pip::enter(ui),
         Control::Favorite => {
             if let Some(ch) = ui.playback.playing.get() {

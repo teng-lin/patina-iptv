@@ -8,14 +8,14 @@ use iptv_nav::Action;
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::fonts::MEDIUM;
-use crate::i18n::tr;
-use crate::overlays::Overlay;
-use crate::scale::Scale;
+use crate::chrome::fonts::MEDIUM;
+use crate::chrome::i18n::tr;
+use crate::chrome::overlays::Overlay;
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit::icons::{self, Icon};
+use crate::chrome::ui_kit::{self, FocusScroll};
 use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS};
-use crate::ui_kit::icons::{self, Icon};
-use crate::ui_kit::{self, FocusScroll};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Choice {

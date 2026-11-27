@@ -103,7 +103,7 @@ not times of day, and are the same in every language.
 
 The portable lookup, formatting and language resolution live in
 `crates/iptv-presentation/src/i18n.rs` and `crates/iptv-presentation/src/i18n/`; platform
-locale discovery is confined to `crates/iptv-app/src/i18n.rs`. `sys-locale`
+locale discovery is confined to `crates/iptv-app/src/chrome/i18n.rs`. `sys-locale`
 supplies the native device locale. No network service is involved in
 translating messages, and the portable catalog needs no dependency for it.
 

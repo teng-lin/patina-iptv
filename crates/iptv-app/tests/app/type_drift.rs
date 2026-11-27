@@ -21,7 +21,7 @@ const LATER: &[&str] = &[
 ];
 
 /// Where the sizes are defined.
-const OWNERS: &[&str] = &["fonts.rs", "ui_kit.rs", "guide/list_rows.rs"];
+const OWNERS: &[&str] = &["chrome/fonts.rs", "chrome/ui_kit.rs", "guide/list_rows.rs"];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap() {

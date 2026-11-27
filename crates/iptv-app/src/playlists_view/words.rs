@@ -1,6 +1,6 @@
 //! The playlists screen's wording (iptv-rs's own).
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 
 use crate::runtime::model::ImportErrorKind;
 use iptv_presentation::wizard::{FailureKind, ImportFailure};
@@ -8,7 +8,7 @@ use iptv_providers::model::SourceKind;
 
 use super::details::{Form, Param};
 use super::state::{Act, Notice};
-use crate::data::{Activity, Playlist};
+use crate::wiring::data::{Activity, Playlist};
 
 pub fn kind(kind: SourceKind) -> &'static str {
     match kind {
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn the_guide_line_names_its_sources_and_a_failure() {
-        use crate::data::guides;
+        use crate::wiring::data::guides;
         use iptv_providers::SecretUrl;
         let mut p = playlist();
         assert_eq!(guide_line(&p), "Guide: none");
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn rows_and_refresh_failures_follow_the_language() {
-        use crate::i18n::in_language;
+        use crate::chrome::i18n::in_language;
         let mut p = playlist();
         p.kind = SourceKind::M3u;
         p.channels = 3;
@@ -620,7 +620,7 @@ mod tests {
     /// in its own words.
     #[test]
     fn every_refresh_failure_is_told_in_every_language() {
-        use crate::i18n::in_language;
+        use crate::chrome::i18n::in_language;
         use ImportErrorKind as K;
         let stored = [
             K::Network,

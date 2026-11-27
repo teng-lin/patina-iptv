@@ -8,8 +8,8 @@ use nsh_core::prelude::*;
 use super::words;
 use crate::{
     Ui,
-    input::dismiss_keyboard,
-    ui_kit::entry::{Sheet, panel},
+    chrome::input::dismiss_keyboard,
+    chrome::ui_kit::entry::{Sheet, panel},
 };
 
 /// The field being typed into and its text so far.

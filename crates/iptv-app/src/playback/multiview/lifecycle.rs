@@ -17,7 +17,7 @@ pub fn follow(ui: Ui) -> bool {
     if !session(ui) {
         return false;
     }
-    let schedule = crate::runtime_owner::schedule();
+    let schedule = crate::wiring::runtime_owner::schedule();
     let mut moved = Vec::new();
     let mut gone = Vec::new();
     let mut any = true;
@@ -56,7 +56,9 @@ pub fn follow(ui: Ui) -> bool {
     }
     if !any {
         ui.playback.multiview.set(None);
-        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.chrome
+            .mode
+            .apply(crate::chrome::mode::Action::ReturnToBrowse);
     }
     true
 }
@@ -101,7 +103,7 @@ pub fn bind(ui: Ui) {
     // another tile. Account limits do not revoke already admitted streams;
     // the actual offer above separately handles metered-network gating.
     let capacity = computed(move || {
-        let device = crate::device::current();
+        let device = crate::wiring::device::current();
         let bounds = window();
         match iptv_presentation::capabilities::multiview_offer(
             device,

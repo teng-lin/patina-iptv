@@ -40,7 +40,7 @@ pub fn steps_of(s: &Settings) -> Steps {
 
 /// The current steps.
 pub fn steps() -> Steps {
-    steps_of(&crate::settings::get())
+    steps_of(&crate::wiring::settings::get())
 }
 /// The archive reopens this long after the last seek key.
 const COMMIT_AFTER: Duration = Duration::from_millis(900);
@@ -62,7 +62,7 @@ fn program(ui: Ui) -> Option<(i32, i32, i32)> {
     let Playback::CatchUp { start, offset } = ui.playback.playback.get_untracked() else {
         return None;
     };
-    let schedule = crate::runtime_owner::schedule();
+    let schedule = crate::wiring::runtime_owner::schedule();
     let p = schedule.program_at(channel, start);
     let length = (p.end - p.start) * 60;
     let aired = crate::guide::clock::wall_unix() - crate::guide::unix_of(&*schedule, p.start);
@@ -84,7 +84,7 @@ pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
         return None;
     };
     let channel = ui.playback.playing.get()?;
-    let p = crate::runtime_owner::schedule().program_at(channel, start);
+    let p = crate::wiring::runtime_owner::schedule().program_at(channel, start);
     let length = (p.end - p.start) * 60;
     let at = ui.playback.seek_target.get().unwrap_or_else(|| {
         let played =

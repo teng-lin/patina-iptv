@@ -4,7 +4,7 @@
 //! command. Each says what it is about; the remote drives them through
 //! `iptv_presentation::settings::screen`, taps directly.
 
-use crate::i18n::{tr, trf};
+use crate::chrome::i18n::{tr, trf};
 
 use std::rc::Rc;
 
@@ -15,12 +15,12 @@ use nsh_core::prelude::*;
 
 use super::view::swatch_color;
 use super::{WHITE, state, update, words};
-use crate::fonts::TITLE;
+use crate::chrome::fonts::TITLE;
+use crate::chrome::scale::Scale;
+use crate::chrome::ui_kit;
+use crate::chrome::ui_kit::entry::{self, Sheet};
 use crate::guide::list_rows::{self, Mark, ROW};
-use crate::scale::Scale;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
-use crate::ui_kit;
-use crate::ui_kit::entry::{self, Sheet};
 use crate::{Ui, tint};
 
 /// The side panels' widths and the dialogs' (dp at full size).
@@ -364,7 +364,7 @@ fn text_sheet(ui: Ui) -> View {
 fn question(key: &str) -> &'static str {
     match key {
         // Its review keeps, cancels or (with a picker) replaces it.
-        "general.restore" if crate::runtime_owner::runtime().restore_is_pending() => {
+        "general.restore" if crate::wiring::runtime_owner::runtime().restore_is_pending() => {
             tr("A restore is already scheduled. Next, choose what happens to it.")
         }
         "general.restore" => tr(
