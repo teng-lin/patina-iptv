@@ -43,56 +43,6 @@ impl CastUi {
     }
 }
 
-#[cfg(test)]
-mod projection_tests {
-    use super::*;
-    use nsh_core::prelude::*;
-
-    #[component]
-    fn CastProjections() -> impl IntoElement {
-        let cast = CastUi::new();
-        let remote_updates = signal(0);
-        effect(move || {
-            cast.remote.get();
-            cast.controls.get();
-            untracked(|| remote_updates.update(|updates| *updates += 1));
-        });
-        view()
-            .child(text(move || {
-                format!("Remote updates {}", remote_updates.get())
-            }))
-            .child(text(move || {
-                format!("Discovery {}", cast.discovering.get())
-            }))
-            .child(
-                view()
-                    .label("Start discovery")
-                    .h(px(40.0))
-                    .on_press(move || cast.state.update(|state| state.discovering = true)),
-            )
-            .child(
-                view()
-                    .label("Connect remotely")
-                    .h(px(40.0))
-                    .on_press(move || cast.state.update(|state| state.remote = true)),
-            )
-    }
-
-    #[test]
-    fn receiver_discovery_does_not_notify_remote_controls() {
-        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
-            nsh_core::element::Root::of::<CastProjections>(),
-        ))
-        .unwrap();
-        app.wait_for("text:Remote updates 1").unwrap();
-        app.press("label:Start discovery").unwrap();
-        app.wait_for("text:Discovery true").unwrap();
-        assert!(app.screen().matches("text:Remote updates 1").unwrap());
-        app.press("label:Connect remotely").unwrap();
-        app.wait_for("text:Remote updates 2").unwrap();
-    }
-}
-
 pub(super) fn available(ui: Ui) -> bool {
     runtime().cast_available()
         && crate::device::host().form_factor != FormFactor::Tv
@@ -615,5 +565,55 @@ fn report(error: Error) {
         Error::Denied => notify(tr("Playback is no longer authorized.")),
         Error::Unsupported => notify(tr("This channel cannot be cast.")),
         Error::StopUnconfirmed => notify(tr("Could not confirm that the TV stopped playback.")),
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use nsh_core::prelude::*;
+
+    #[component]
+    fn CastProjections() -> impl IntoElement {
+        let cast = CastUi::new();
+        let remote_updates = signal(0);
+        effect(move || {
+            cast.remote.get();
+            cast.controls.get();
+            untracked(|| remote_updates.update(|updates| *updates += 1));
+        });
+        view()
+            .child(text(move || {
+                format!("Remote updates {}", remote_updates.get())
+            }))
+            .child(text(move || {
+                format!("Discovery {}", cast.discovering.get())
+            }))
+            .child(
+                view()
+                    .label("Start discovery")
+                    .h(px(40.0))
+                    .on_press(move || cast.state.update(|state| state.discovering = true)),
+            )
+            .child(
+                view()
+                    .label("Connect remotely")
+                    .h(px(40.0))
+                    .on_press(move || cast.state.update(|state| state.remote = true)),
+            )
+    }
+
+    #[test]
+    fn receiver_discovery_does_not_notify_remote_controls() {
+        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+            nsh_core::element::Root::of::<CastProjections>(),
+        ))
+        .unwrap();
+        app.wait_for("text:Remote updates 1").unwrap();
+        app.press("label:Start discovery").unwrap();
+        app.wait_for("text:Discovery true").unwrap();
+        assert!(app.screen().matches("text:Remote updates 1").unwrap());
+        app.press("label:Connect remotely").unwrap();
+        app.wait_for("text:Remote updates 2").unwrap();
     }
 }
