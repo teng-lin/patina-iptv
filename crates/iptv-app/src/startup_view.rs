@@ -47,12 +47,14 @@ pub(crate) fn store_failed(
 ) {
     let retryable = error.retryable_open();
     let diagnostic = || {
-        error
+        if let Some(reason) = error
             .unavailable_reason()
             .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-            .map(crate::i18n::tr)
-            .unwrap_or_else(|| crate::i18n::tr("The saved library could not be opened"))
-            .to_owned()
+        {
+            crate::i18n::tr(reason).to_owned()
+        } else {
+            crate::i18n::tr("The saved library could not be opened").to_owned()
+        }
     };
     let cause = if let Some((found, supported)) = error.newer_schema() {
         Cause::Newer { found, supported }

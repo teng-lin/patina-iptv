@@ -198,7 +198,7 @@ pub fn worker_spawn_refusal(payload: &(dyn std::any::Any + Send)) -> Option<&str
         .downcast_ref::<String>()
         .map(String::as_str)
         .or_else(|| payload.downcast_ref::<&str>().copied())
-        .filter(|reason| reason.starts_with("OS can't spawn worker thread: "))
+        .filter(|reason| reason.starts_with("OS can't spawn worker thread:"))
 }
 
 /// The output of spawned work, awaited by whoever spawned it. Dropping it

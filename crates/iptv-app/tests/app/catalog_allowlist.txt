@@ -370,6 +370,7 @@ iptv-app/src/ui_kit/icons.rs	<path d='M12 3L2 21h20zM12 9v5'/><circle cx='12' cy
 iptv-app/src/ui_kit/icons.rs	<path d='M4 12l5 5L20 6'/>
 iptv-app/src/ui_kit/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>
 # Execution and entropy port failures are diagnostics; operations report typed errors.
+iptv-runtime/src/execution.rs	OS can't spawn worker thread:
 iptv-runtime/src/execution.rs	the task ended without an output
 iptv-runtime/src/execution/cooperative.rs	a cooperative executor has no workers
 iptv-runtime/src/inspection/probe.rs	staged probes need a native store
