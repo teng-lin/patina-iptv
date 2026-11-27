@@ -7,6 +7,31 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-11-27
+
+### Added
+
+- Cast live TV to a Chromecast from the play bar on Linux, macOS, and
+  Windows. Use Patina to pause, resume, or change channels. Choose **Play
+  here** to return playback to your computer.
+- Send live TV to an AirPlay display from the play bar on iPad and Mac.
+  Choose your iPad or Mac again in the AirPlay picker to return playback to
+  it.
+- Delete a playlist with confirmation, or hide it from the guide and restore
+  it later in **Settings → Playlists**.
+
+### Changed
+
+- The guide menus show how playlists, groups, and channels are sorted and
+  let you change the order. Your custom positions are saved when you switch
+  to another sort order.
+
+### Fixed
+
+- On phones and tablets, drag a playlist, group, or channel by its handle
+  to reorder it. You can drag diagonally across the guide and drop it where
+  you lift your finger. Swiping elsewhere on the row scrolls the list.
+
 ## [0.1.10] - 2026-11-26
 
 ### Changed
@@ -570,7 +595,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/teng-lin/patina-iptv/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/teng-lin/patina-iptv/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/teng-lin/patina-iptv/compare/v0.1.7...v0.1.8
