@@ -855,15 +855,18 @@ pub fn cached_guide_state(
     owner: &super::Runtime,
     source: SourceId,
 ) -> Option<iptv_library::GuideSnapshot> {
-    owner
-        .imports
-        .status
-        .with(|status| status.borrow().guides.get(&source).map(guide_snapshot))
+    owner.imports.status.with(|status| {
+        status
+            .borrow()
+            .guides
+            .get(&source)
+            .map(|guide| guide.summary.clone())
+    })
 }
 
 /// What the views see of a stored guide: how its last update went, without
 /// its feeds or their configuration.
-fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
+pub(crate) fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
     iptv_library::GuideSnapshot {
         replaced_at: guide.replaced_at,
         attempted_at: guide.attempted_at,

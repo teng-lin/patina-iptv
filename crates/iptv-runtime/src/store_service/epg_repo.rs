@@ -2,10 +2,11 @@
 
 use super::{Services, StoreError};
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
+use iptv_import::EpgSourceConfig;
 use iptv_library::{Choice, Current, SourceId};
 use iptv_providers::ContentId;
 use iptv_search::{ChannelId, ProgramIndex, ProgramIndexBuilder};
-use iptv_store_sqlite::{EpgOverride, EpgWindow, GuideChannel, GuideSource, Store, StoredGuide};
+use iptv_store_sqlite::{EpgOverride, EpgWindow, GuideChannel, GuideSource, Store};
 use std::future::Future;
 
 fn held_window(window: iptv_guide::pages::PagedWindow) -> EpgWindow<'static> {
@@ -43,12 +44,21 @@ pub(crate) struct EpgRepo {
 }
 
 impl EpgRepo {
-    pub(crate) async fn guide_sources_snapshot(
+    pub(crate) async fn guide_sources_with_legacy_configs(
         self,
         source: SourceId,
-    ) -> Result<(Option<StoredGuide>, Vec<GuideSource>), StoreError> {
+    ) -> Result<(Vec<EpgSourceConfig>, Vec<GuideSource>), StoreError> {
         self.services
-            .call(move |store| Ok((store.epg_guide(source)?, store.guide_sources(source)?)))
+            .call(move |store| {
+                let stored = store.epg_guide(source)?;
+                let sources = store.guide_sources(source)?;
+                let fallback = if sources.is_empty() {
+                    stored.map(|guide| guide.configs()).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                Ok((fallback, sources))
+            })
             .await
     }
 

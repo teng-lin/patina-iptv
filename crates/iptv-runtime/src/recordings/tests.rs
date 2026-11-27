@@ -121,7 +121,7 @@ fn a_queued_registration_cannot_outlive_its_application_owner() {
     };
     let owner = Runtime::new(ports);
     owner.start_services();
-    owner.recordings.lock().ready = true;
+    owner.recordings.shared().lock().ready = true;
     let state = owner.recordings.shared().clone();
     let publication = state.publication.lock().unwrap();
     let queued = state.clone();
@@ -150,7 +150,7 @@ fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
     ports.recording_schedule = register;
     let owner = Runtime::new(ports);
     owner.start_services();
-    owner.recordings.lock().ready = true;
+    owner.recordings.shared().lock().ready = true;
     let (entered, seen) = sync_channel(1);
     let (release, parked) = sync_channel(1);
     *GATE.lock().unwrap() = Some((entered, parked));
@@ -159,10 +159,10 @@ fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
     let worker = std::thread::spawn(move || state.publish_schedule(&services, 0, true));
     seen.recv_timeout(Duration::from_secs(10)).unwrap();
     // The execution gate changes this identity before a successor can load.
-    owner.recordings.execution().generation += 1;
+    owner.recordings.shared().execution().generation += 1;
     release.send(()).unwrap();
     assert!(!worker.join().unwrap());
-    assert_eq!(owner.recordings.lock().published_schedule, None);
+    assert_eq!(owner.recordings.shared().lock().published_schedule, None);
     assert!(owner.drain_services());
 }
 
@@ -198,13 +198,14 @@ async fn the_host_is_told_whether_a_capture_is_due_and_a_late_poll_cannot_replac
         message: String::new(),
     };
     {
-        let mut data = owner.recordings.lock();
+        let mut data = owner.recordings.shared().lock();
         data.ready = true;
         data.jobs = vec![job.clone()];
     }
     assert!(
         owner
             .recordings
+            .shared()
             .publish_schedule(&owner.services(), 0, false)
     );
     assert_eq!(*PUBLISHED.lock().unwrap(), [false]);
@@ -212,13 +213,14 @@ async fn the_host_is_told_whether_a_capture_is_due_and_a_late_poll_cannot_replac
     assert!(
         owner
             .recordings
+            .shared()
             .publish_schedule(&owner.services(), 0, false)
     );
     assert_eq!(PUBLISHED.lock().unwrap().len(), 1);
     job.request.start = at - 1;
     job.request.end = at + 60;
     {
-        let mut data = owner.recordings.lock();
+        let mut data = owner.recordings.shared().lock();
         data.intent_revision += 1;
         data.jobs = vec![job];
     }
@@ -227,6 +229,7 @@ async fn the_host_is_told_whether_a_capture_is_due_and_a_late_poll_cannot_replac
     assert!(
         !owner
             .recordings
+            .shared()
             .publish_schedule(&owner.services(), 0, false)
     );
     assert_eq!(
@@ -298,10 +301,11 @@ async fn record_now_uses_the_reported_spare_connection_and_preserves_viewing() {
     let mut request = seed(&owner, &server()).await;
     owner
         .recordings
+        .shared()
         .lock()
         .provider_limits
         .insert(request.source, 3);
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     assert!(owner.reserve_viewing(0, SourceId(request.source)));
@@ -312,11 +316,11 @@ async fn record_now_uses_the_reported_spare_connection_and_preserves_viewing() {
         job.status == Status::Recording && job.bytes > 0
     })
     .await;
-    assert_eq!(owner.recordings.lock().viewers.len(), 1);
+    assert_eq!(owner.recordings.shared().lock().viewers.len(), 1);
     owner.stop_recording(id).await.unwrap();
     let job = until(&owner, id, |job| job.status == Status::Completed).await;
     assert!(job.bytes >= 188);
-    assert_eq!(owner.recordings.lock().viewers.len(), 1);
+    assert_eq!(owner.recordings.shared().lock().viewers.len(), 1);
     assert!(owner.drain_services());
 }
 
@@ -396,7 +400,7 @@ async fn a_capture_the_host_stops_early_keeps_its_partial_file_and_the_reason() 
     let job = until(&owner, id, |job| job.status == Status::Partial).await;
     assert!(job.bytes >= 188, "the partial file is kept");
     assert_eq!(job.message, host::EarlyStop::TvOff.reason());
-    assert!(owner.recordings.lock().stop_reasons.is_empty());
+    assert!(owner.recordings.shared().lock().stop_reasons.is_empty());
     assert!(owner.drain_services());
 }
 
@@ -566,13 +570,14 @@ async fn a_reused_playlist_id_does_not_inherit_an_old_connection_allowance() {
     let request = seed(&owner, "https://example.test/generated.ts").await;
     owner
         .recordings
+        .shared()
         .lock()
         .provider_limits
         .insert(request.source, 3);
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
-    assert_eq!(owner.recordings.lock().limits[&request.source], 3);
+    assert_eq!(owner.recordings.shared().lock().limits[&request.source], 3);
     let source = SourceId(request.source);
     owner
         .services()
@@ -581,10 +586,13 @@ async fn a_reused_playlist_id_does_not_inherit_an_old_connection_allowance() {
         .unwrap();
     let replacement = seed(&owner, "https://example.test/generated.ts").await;
     assert_eq!(replacement.source, request.source);
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
-    assert_eq!(owner.recordings.lock().limits[&replacement.source], 1);
+    assert_eq!(
+        owner.recordings.shared().lock().limits[&replacement.source],
+        1
+    );
     assert!(owner.drain_services());
 }
 
@@ -595,7 +603,7 @@ async fn an_isolated_recording_owner_can_restart_without_a_native_background_ser
     let mut request = seed(&owner, &server()).await;
     owner.start_recordings();
     for _ in 0..100 {
-        if owner.recordings.lock().ready {
+        if owner.recordings.shared().lock().ready {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -683,7 +691,7 @@ async fn a_reused_playlist_id_is_rejected_before_resolving_recording_media() {
     assert!(
         resolve(
             &owner.services(),
-            &owner.recordings,
+            owner.recordings.shared(),
             &job,
             &CancelToken::new()
         )
@@ -766,7 +774,7 @@ async fn record_stop_play_and_delete_preserve_real_media_and_its_lease() {
     owner.close_recording_playback();
     // Hold admission, queue deletion before a competing playback request, then
     // release it. A new reader cannot acquire a lease during the file awaits.
-    let operation = owner.recordings.media_ops.lock().await;
+    let operation = owner.recordings.shared().media_ops.lock().await;
     let mut deleting = Box::pin(owner.delete_recording(id));
     let mut opening = Box::pin(owner.open_recording(id));
     std::future::poll_fn(|cx| {
@@ -797,12 +805,12 @@ async fn startup_retries_a_transient_catalog_failure_without_restarting_the_app(
         .unwrap();
     owner.start_recordings();
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(!owner.recordings.lock().ready);
+    assert!(!owner.recordings.shared().lock().ready);
     conn.execute_batch("ALTER TABLE generated_unavailable_jobs RENAME TO recording_jobs")
         .unwrap();
     drop(conn);
     let id = owner.schedule_recording(request).await.unwrap();
-    assert!(owner.recordings.lock().ready);
+    assert!(owner.recordings.shared().lock().ready);
     owner.stop_recording(id).await.unwrap();
     assert!(owner.drain_services());
 }
@@ -928,7 +936,7 @@ async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
     let id = owner.schedule_recording(request).await.unwrap();
     let job = until(&owner, id, |j| j.status == Status::Failed).await;
     assert!(job.message.contains("connection"));
-    assert_eq!(owner.recordings.lock().viewers.len(), 1);
+    assert_eq!(owner.recordings.shared().lock().viewers.len(), 1);
     assert!(owner.drain_services());
     assert_eq!(CAPACITY_FAILURE_NOTICES.load(Ordering::Relaxed), 1);
 }
@@ -1097,7 +1105,7 @@ fn a_drained_ui_cannot_release_its_successors_viewing_lease() {
     assert!(new.reserve_viewing(0, SourceId(1)));
     old.release_viewing(0);
     drop(old);
-    assert!(new.recordings.lock().viewers.contains_key(&0));
+    assert!(new.recordings.shared().lock().viewers.contains_key(&0));
     new.drain_services();
 }
 
@@ -1196,7 +1204,7 @@ async fn a_surviving_ui_and_a_restarted_host_keep_one_recording_budget() {
     let mut request = seed(&owner, &server()).await;
     owner.start_recordings();
     for _ in 0..100 {
-        if owner.recordings.lock().ready {
+        if owner.recordings.shared().lock().ready {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1204,6 +1212,7 @@ async fn a_surviving_ui_and_a_restarted_host_keep_one_recording_budget() {
     assert!(owner.reserve_viewing(0, SourceId(request.source)));
     let first_services = owner
         .recordings
+        .shared()
         .host
         .lock()
         .unwrap()
@@ -1484,7 +1493,12 @@ async fn recording_file_and_relay_reject_relock_after_their_last_service_await()
         protect_recording(&owner, &request).await;
         let (arrived, waiting) = tokio::sync::oneshot::channel();
         let (release, held) = tokio::sync::oneshot::channel();
-        *owner.recordings.playback_completion.lock().unwrap() = Some((stage, arrived, held));
+        *owner
+            .recordings
+            .shared()
+            .playback_completion
+            .lock()
+            .unwrap() = Some((stage, arrived, held));
         let opening = async {
             if stage == "file" {
                 owner.recording_file(id).await.map(drop)
@@ -1504,7 +1518,7 @@ async fn recording_file_and_relay_reject_relock_after_their_last_service_await()
             "{stage} must not return a revoked capability"
         );
         assert!(
-            owner.recordings.playback.lock().unwrap().is_none(),
+            owner.recordings.shared().playback.lock().unwrap().is_none(),
             "an unaccepted relay must not acquire the playback lease"
         );
         assert!(owner.drain_services());

@@ -11,11 +11,8 @@ pub use iptv_library::{
 /// The sole adapter-owned boundary value: the credential broker supplies an
 /// opaque, redacting key; commands never return storage records or errors.
 pub use iptv_store_sqlite::DatabaseKey;
-pub(crate) use iptv_store_sqlite::InspectionAccess;
 #[cfg(feature = "native")]
 pub(crate) use iptv_store_sqlite::RecordingCompletion;
-pub(crate) use iptv_store_sqlite::SourceSummary;
-pub(crate) use iptv_store_sqlite::StoredGuide;
 
 /// The maximum number of past program days a stored guide can contain.
 pub const MAX_STORED_GUIDE_PAST_DAYS: u32 = iptv_import::KEEP_PAST_MAX_DAYS;

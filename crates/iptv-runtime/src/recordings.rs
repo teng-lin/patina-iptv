@@ -423,14 +423,8 @@ impl State {
 }
 
 pub(crate) struct OwnerState {
-    pub(crate) shared: Arc<State>,
+    shared: Arc<State>,
     detached: std::cell::Cell<bool>,
-}
-impl std::ops::Deref for OwnerState {
-    type Target = State;
-    fn deref(&self) -> &State {
-        &self.shared
-    }
 }
 impl OwnerState {
     pub(crate) fn new(shared: Arc<State>) -> Self {
@@ -518,7 +512,7 @@ impl Runtime {
     /// The allowance the recording host learned for `source`'s provider.
     pub(crate) fn recorded_provider_limit(&self, source: SourceId) -> Option<u32> {
         self.recordings
-            .shared
+            .shared()
             .lock()
             .provider_limits
             .get(&source.0)
@@ -535,6 +529,7 @@ impl Runtime {
         }
         if let Some(host) = self
             .recordings
+            .shared()
             .host
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -560,6 +555,7 @@ impl Runtime {
         }
         let mut contexts = self
             .recordings
+            .shared()
             .contexts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -638,7 +634,7 @@ impl Runtime {
         }
         let id = self
             .recordings
-            .shared
+            .shared()
             .next_input
             .fetch_add(1, Ordering::Relaxed);
         let lease = data.lease(source.0);
@@ -742,7 +738,7 @@ impl Runtime {
             let root = self.services().directory().to_owned();
             let active: Vec<_> = self
                 .recordings
-                .shared
+                .shared()
                 .lock()
                 .active
                 .keys()
@@ -779,12 +775,12 @@ impl Runtime {
             })?;
         #[cfg(feature = "test-support")]
         self.recordings
-            .shared
+            .shared()
             .observe_operation(id, "intent persisted");
         self.acknowledge_recording(id).await?;
         #[cfg(feature = "test-support")]
         self.recordings
-            .shared
+            .shared()
             .observe_operation(id, "start acknowledged");
         Ok(id)
     }
@@ -828,7 +824,7 @@ impl Runtime {
     pub async fn stop_recording(&self, id: JobId) -> Result<(), Error> {
         #[cfg(feature = "test-support")]
         self.recordings
-            .shared
+            .shared()
             .observe_operation(id, "stop requested");
         if let Some(job) = self
             .services()
@@ -883,7 +879,7 @@ impl Runtime {
             .await?;
         #[cfg(feature = "test-support")]
         self.recordings
-            .shared
+            .shared()
             .observe_operation(id, "stop request processed");
         Ok(())
     }
@@ -912,7 +908,7 @@ impl Runtime {
             if job.status.active()
                 && self
                     .recordings
-                    .shared
+                    .shared()
                     .lock()
                     .finalization_errors
                     .contains(&job.id)
@@ -927,7 +923,7 @@ impl Runtime {
     #[cfg(test)]
     async fn recording_playback_checkpoint(&self, stage: &'static str) {
         let held = {
-            let mut completion = self.recordings.playback_completion.lock().unwrap();
+            let mut completion = self.recordings.shared().playback_completion.lock().unwrap();
             if completion
                 .as_ref()
                 .is_some_and(|(expected, _, _)| *expected == stage)
@@ -983,6 +979,7 @@ impl Runtime {
         source.public_only = false;
         *self
             .recordings
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id, relay));
@@ -1015,6 +1012,7 @@ impl Runtime {
     ) {
         let playback = self
             .recordings
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1030,7 +1028,7 @@ impl Runtime {
     }
     pub fn close_recording_playback(&self) {
         self.recordings
-            .shared
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1088,6 +1086,7 @@ impl Runtime {
         let _operation = self.recordings.shared().media_ops.lock().await;
         if self
             .recordings
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
