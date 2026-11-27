@@ -16,6 +16,11 @@ pub fn read(ui: Ui) -> Arc<Settings> {
     settings::get()
 }
 
+/// Refreshes UI observers after a settings-dependent screen action.
+pub(crate) fn refresh(ui: Ui) {
+    ui.app.settings.update(|v| *v += 1);
+}
+
 /// Applies the settings that live in `Ui` state: colors and panel
 /// timeouts, now and after every change.
 pub fn bind(ui: Ui) {

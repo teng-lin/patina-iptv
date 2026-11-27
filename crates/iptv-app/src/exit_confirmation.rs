@@ -53,7 +53,7 @@ pub(crate) fn press(ui: Ui) -> bool {
 }
 
 pub(crate) fn layer(ui: Ui) -> impl IntoElement {
-    crate::settings_view::notice("exit-confirmation", move || {
+    crate::toast::line("exit-confirmation", move || {
         ui.chrome
             .exit_deadline
             .with(Option::is_some)

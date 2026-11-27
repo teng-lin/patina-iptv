@@ -97,7 +97,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("pip.rs", "PIP_SUPPORTED"), // The host's picture-in-picture report, for the settings offer.
     ("settings_view.rs", "PAGES"), // Immutable screen definitions.
     ("settings_view.rs", "LAST"), // Last selected settings tab.
-    ("settings_view.rs", "NOTICE"), // Toast signal handle.
+    ("toast.rs", "NOTICE"),      // Toast signal handle.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
     ("startup.rs", "MARKED"),                                  // Startup phase instrumentation.
     ("startup.rs", "FALLBACK"),                                // Startup clock instrumentation.

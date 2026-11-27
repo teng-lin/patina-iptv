@@ -11,7 +11,7 @@
 
 use crate::i18n::tr;
 
-pub(crate) mod entry;
+mod entry;
 pub(crate) mod words;
 
 use iptv_nav::Action;
@@ -61,7 +61,7 @@ fn imports_unavailable() -> bool {
     if crate::host::IMPORTS {
         return false;
     }
-    crate::settings_view::notify(crate::i18n::tr("This device cannot import playlists yet."));
+    crate::toast::notify(crate::i18n::tr("This device cannot import playlists yet."));
     true
 }
 
@@ -84,7 +84,7 @@ pub fn open_add(ui: Ui) {
     if crate::runtime_owner::runtime().parental_has_pin()
         && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
             open_add(ui)
         });
         return;
@@ -111,7 +111,7 @@ pub fn send(ui: Ui, event: WizardEvent) {
         && crate::runtime_owner::runtime().parental_has_pin()
         && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
             send(ui, event)
         });
         return;

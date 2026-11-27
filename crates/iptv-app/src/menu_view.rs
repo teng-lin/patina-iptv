@@ -583,7 +583,7 @@ fn show_group_options(ui: Ui, list: ListId, entry: GroupMenuEntry) -> bool {
         if playlist_by_id(id).is_none() {
             return false;
         }
-        crate::settings_view::settings_guarded(ui, move || {
+        crate::navigation::settings_guarded(ui, move || {
             crate::playlists_view::open_only(ui, id, crate::playlists_view::Only::GuideActions)
         });
         return true;
@@ -779,7 +779,7 @@ fn set_group_preference(target: iptv_core::parental::Target, preference: GroupPr
     crate::tasks::spawn_in_app(async move {
         match save.await {
             Ok(()) => crate::data::organization_changed(&owner, source),
-            Err(_) => crate::settings_view::notify(tr(
+            Err(_) => crate::toast::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             )),
         }

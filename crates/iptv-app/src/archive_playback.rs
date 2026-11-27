@@ -209,7 +209,7 @@ pub(crate) fn select(
         }
     };
     if let Some(target) = crate::parental_view::live_target(ui, channel) {
-        crate::parental_view::request_if(ui, target, current, play);
+        crate::navigation::request_if(ui, target, current, play);
     } else {
         // The built-in generated guide has no provider or protected target.
         play();

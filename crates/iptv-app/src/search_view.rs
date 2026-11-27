@@ -248,9 +248,7 @@ pub(crate) fn clear_history(ui: Ui) {
     });
     crate::tasks::spawn_in_app(async move {
         if saved.await.is_err() {
-            crate::settings_view::notify(tr(
-                "Recent channel changes could not be saved; try again",
-            ));
+            crate::toast::notify(tr("Recent channel changes could not be saved; try again"));
         }
     });
 }

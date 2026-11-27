@@ -2,6 +2,7 @@
 //! credentials and access. Callbacks run only after the authoritative gate.
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
+use crate::navigation::request;
 use crate::runtime::Runtime;
 use crate::{Ui, scale::Scale, tint, ui_kit};
 use iptv_core::parental::{ContentKind, Target};
@@ -98,49 +99,12 @@ fn finish(ui: Ui) {
         done();
     }
 }
-fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + 'static) {
+pub(crate) fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + 'static) {
     ui.screens.parental.set(Some(Open {
         state: PromptState::new(phase, target, None),
         done: Rc::new(RefCell::new(Some(Box::new(done)))),
         recovery_input: element_ref(),
     }));
-}
-/// Always re-resolve durable ancestry before executing a content action.
-pub fn request(ui: Ui, target: Target, done: impl FnOnce() + 'static) {
-    request_if(ui, target, || true, done);
-}
-
-/// A superseded content choice must not open a late PIN prompt or resume it.
-pub(crate) fn request_if(
-    ui: Ui,
-    target: Target,
-    current: impl Fn() -> bool + 'static,
-    done: impl FnOnce() + 'static,
-) {
-    crate::tasks::spawn_in_app(async move {
-        let owner = crate::runtime_owner::runtime();
-        let result = owner.parental_check(&target).await;
-        if !current() {
-            return;
-        }
-        let done = move || {
-            if current() {
-                done();
-            }
-        };
-        match result {
-            Ok(()) => done(),
-            Err(crate::runtime::parental::Error::Locked) => {
-                let phase = if owner.parental_has_pin() {
-                    Phase::Unlock
-                } else {
-                    Phase::New
-                };
-                show(ui, target, phase, done);
-            }
-            Err(_) => notify_message("Parental settings are unavailable"),
-        }
-    });
 }
 pub fn protected_settings(ui: Ui, done: impl FnOnce() + 'static) {
     request(ui, Target::settings(), move || {
@@ -166,7 +130,7 @@ pub fn change_pin(ui: Ui) {
             } else {
                 Phase::New
             },
-            move || crate::settings_view::refresh(ui),
+            move || crate::settings_wiring::refresh(ui),
         );
     });
 }
@@ -214,9 +178,7 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
                     {
                         ui.play(channel, playback);
                     } else {
-                        crate::settings_view::notify(tr(
-                            "Guide time changed. Choose the program again.",
-                        ));
+                        crate::toast::notify(tr("Guide time changed. Choose the program again."));
                     }
                 });
             }
@@ -250,7 +212,7 @@ pub fn block(ui: Ui, target: Target, blocked: bool) {
             }
             match owner.parental_set_blocked(target, blocked).await {
                 Ok(()) => {
-                    crate::settings_view::refresh(ui);
+                    crate::settings_wiring::refresh(ui);
                     notify_message(if blocked {
                         "Content blocked"
                     } else {
@@ -637,7 +599,7 @@ fn display_target(target: &Target) -> String {
     trf("Unblock {name}", &[("name", name.as_str().into())])
 }
 fn notify_message(message: &str) {
-    crate::settings_view::notify(tr(message));
+    crate::toast::notify(tr(message));
 }
 fn focused(ui: Ui, index: usize) -> bool {
     ui.screens

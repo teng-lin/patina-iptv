@@ -20,7 +20,7 @@ use crate::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::ui_kit;
-use crate::wizard_view::entry::{self, Sheet};
+use crate::ui_kit::entry::{self, Sheet};
 use crate::{Ui, tint};
 
 /// The side panels' widths and the dialogs' (dp at full size).

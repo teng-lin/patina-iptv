@@ -63,7 +63,7 @@ fn announce_retired(ui: Ui) {
             .await
             .unwrap_or(false)
         {
-            crate::settings_view::notify(tr(
+            crate::toast::notify(tr(
                 "Scheduled recording was removed. Open Recordings to see what was canceled.",
             ));
         }
@@ -131,7 +131,7 @@ pub fn try_reserve_viewing(surface: usize, channel: usize, live: bool) -> bool {
 }
 pub fn reserve_viewing(_ui: Ui, surface: usize, channel: usize, live: bool) -> bool {
     if !try_reserve_viewing(surface, channel, live) {
-        crate::settings_view::notify(tr(
+        crate::toast::notify(tr(
             "No provider connection available while recording; stop a recording or check Streams at once",
         ));
         return false;
@@ -188,7 +188,7 @@ pub fn current(ui: Ui) {
     // Record starts recording a program on now. A future or ended one is not
     // scheduled: recording future programs is retired (#273).
     if !can_record_now(origin, crate::clock::now_minute()) {
-        crate::settings_view::notify(tr("Only a program on now can be recorded"));
+        crate::toast::notify(tr("Only a program on now can be recorded"));
         return;
     }
     remember(ui, origin);
@@ -314,7 +314,7 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
         })
         .flatten();
     let Some(mut request) = context.or_else(|| request(origin)) else {
-        crate::settings_view::notify(tr("Choose an available channel"));
+        crate::toast::notify(tr("Choose an available channel"));
         return;
     };
     let now = crate::clock::wall_unix();
@@ -331,7 +331,7 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
                 && job.request.end > now
         })
     {
-        crate::settings_view::notify(tr("Recording started"));
+        crate::toast::notify(tr("Recording started"));
         return;
     }
     request.start = now;
@@ -339,7 +339,7 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
         request.end = now + 3600;
     }
     let target = iptv_core::parental::Target::live(request.source, request.channel.clone());
-    crate::parental_view::request(ui, target, move || start(ui, request));
+    crate::navigation::request(ui, target, move || start(ui, request));
 }
 fn request(origin: Origin) -> Option<Request> {
     let schedule = crate::runtime_owner::schedule();
@@ -435,7 +435,7 @@ fn start(ui: Ui, mut request: Request) {
     request.start = request.start.max(now);
     if let Err(refusal) = request.validate(now) {
         let message = iptv_presentation::recording::request_refusal_message(refusal);
-        crate::settings_view::notify(tr(message));
+        crate::toast::notify(tr(message));
         ui.screens.recordings.update(|s| s.show_error(message));
         return;
     }
@@ -448,7 +448,7 @@ fn start(ui: Ui, mut request: Request) {
         match &result {
             // What can stop it, said as it starts (#275).
             Ok(_) => {
-                crate::settings_view::notify(&crate::capture_limits::start_notice());
+                crate::toast::notify(&crate::capture_limits::start_notice());
                 if crate::host::ANDROID {
                     // The system prompt must not delay Start or Stop.
                     crate::tasks::spawn_in_app(
@@ -456,7 +456,7 @@ fn start(ui: Ui, mut request: Request) {
                     );
                 }
             }
-            Err(error) => crate::settings_view::notify(translated_reason(
+            Err(error) => crate::toast::notify(translated_reason(
                 error_message(error).unwrap_or("Recording action failed"),
             )),
         }
@@ -608,7 +608,7 @@ fn perform(ui: Ui, index: usize) {
     ) {
         let target =
             iptv_core::parental::Target::live(job.request.source, job.request.channel.clone());
-        crate::parental_view::request(ui, target, move || execute(ui, job, confirm, action));
+        crate::navigation::request(ui, target, move || execute(ui, job, confirm, action));
     } else {
         execute(ui, job, confirm, action);
     }
@@ -683,7 +683,7 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
             .recordings
             .update(|s| failure_notice = s.finish_action(jobs, outcome));
         if failure_notice {
-            crate::settings_view::notify(tr("Recording action failed"));
+            crate::toast::notify(tr("Recording action failed"));
         }
         reload(ui);
     });

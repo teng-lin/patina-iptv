@@ -35,8 +35,8 @@ use crate::data::stored::{self, GuideStatus};
 use crate::list_rows::{self, Mark};
 use crate::scale::Scale;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
+use crate::ui_kit::entry;
 use crate::ui_kit::{self, ERROR, ROW_THREE, TOUCH};
-use crate::wizard_view::entry;
 use crate::{Ui, tint};
 
 const WHITE: u32 = 0xFFFFFF;
@@ -169,7 +169,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
                 playlist,
                 move |completed| {
                     if completed {
-                        crate::settings_view::notify(tr("Guide updated"));
+                        crate::toast::notify(tr("Guide updated"));
                     }
                 },
             );
@@ -177,12 +177,12 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
                 // Shows tr("Updating…").
                 ui.app.library.version.update(|v| *v += 1);
             } else {
-                crate::settings_view::notify(tr("No guide source is switched on"));
+                crate::toast::notify(tr("No guide source is switched on"));
             }
         }
         Effect::Clear => {
             stored::clear_source(&crate::runtime_owner::runtime(), playlist, move |deleted| {
-                crate::settings_view::notify(if deleted {
+                crate::toast::notify(if deleted {
                     tr("Guide data deleted")
                 } else {
                     tr("The guide data could not be deleted")

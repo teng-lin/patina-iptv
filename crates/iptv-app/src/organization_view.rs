@@ -4,7 +4,7 @@ use crate::input::dismiss_keyboard;
 use crate::list_rows::{self, Mark, ROW};
 use crate::runtime::{Error, model::SourceId};
 use crate::scale::Scale;
-use crate::wizard_view::entry::{self, TextSheet};
+use crate::ui_kit::entry::{self, TextSheet};
 use crate::{Ui, data, ui_kit};
 use iptv_core::organization::{Block, BlockKind, Item, Sort};
 use iptv_nav::Action;
@@ -271,7 +271,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
     crate::tasks::spawn_in_app(async move {
         if save.await.is_err() {
-            crate::settings_view::notify(tr(
+            crate::toast::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             ));
             if still_open(ui, generation) {
@@ -279,7 +279,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             }
             return;
         }
-        crate::settings_view::notify(if blocked {
+        crate::toast::notify(if blocked {
             tr("Content blocked")
         } else {
             tr("Content unblocked")
@@ -296,7 +296,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             Ok(blocks) => update(ui, |state| state.finish_block(blocks)),
             Err(_) => {
                 close(ui);
-                crate::settings_view::notify(tr(
+                crate::toast::notify(tr(
                     "The list could not be reloaded. Reopen it and try again.",
                 ));
             }
@@ -480,7 +480,7 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
 fn save_order(ui: Ui) {
     if state(ui, |s| s.scope.is_none()) == Some(true) {
         let generation = ui.screens.organization.epoch();
-        crate::settings_view::settings_guarded(ui, move || {
+        crate::navigation::settings_guarded(ui, move || {
             if !still_open(ui, generation) {
                 return;
             }
@@ -519,7 +519,7 @@ fn check_playlist_order_catalog(ui: Ui) -> bool {
     });
     if !valid {
         untracked(|| close(ui));
-        crate::settings_view::notify(tr(
+        crate::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }
@@ -619,7 +619,7 @@ fn persist_order(ui: Ui) {
                         return;
                     }
                     if matches!(error, crate::settings::SaveError::Storage(_)) {
-                        crate::settings_view::notify(tr(
+                        crate::toast::notify(tr(
                             "Playlist positions saved. Could not switch to Custom order. Try saving again.",
                         ));
                     } else {
@@ -642,7 +642,7 @@ fn persist_order(ui: Ui) {
                         crate::settings::SaveError::ParentalLocked,
                     );
                 } else {
-                    crate::settings_view::notify(tr(
+                    crate::toast::notify(tr(
                         "The change could not be saved. Reopen the list and try again.",
                     ));
                 }
@@ -695,7 +695,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             let kind = block_kind(&scope_kind);
             let blocked = block_state(&s, &item.id);
             if kind == BlockKind::Channel && blocked == Block::Group {
-                crate::settings_view::notify(tr("This channel is blocked by a group."));
+                crate::toast::notify(tr("This channel is blocked by a group."));
                 return;
             }
             update(ui, Open::begin_block);
@@ -855,7 +855,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
             update(ui, Open::finish_save);
         }
         log::warn!("iptv organization: change refused: {e}");
-        crate::settings_view::notify(tr(
+        crate::toast::notify(tr(
             "The change could not be saved. Reopen the list and try again.",
         ));
         return;
@@ -898,7 +898,7 @@ fn commit(ui: Ui) {
         }
     ) && text.trim().is_empty()
     {
-        crate::settings_view::notify(tr("Enter a group name."));
+        crate::toast::notify(tr("Enter a group name."));
         return;
     }
     let Some((source, kind)) = s.scope.clone() else {
@@ -1496,7 +1496,7 @@ pub(crate) fn invalidate_changed_guide_order(ui: Ui, keys: &HashMap<String, usiz
     }) == Some(true);
     if stale {
         close(ui);
-        crate::settings_view::notify(tr(
+        crate::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }

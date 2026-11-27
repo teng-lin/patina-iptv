@@ -127,7 +127,7 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
     ("iptv-app/src/settings_view/editors.rs", "button", 2),
     ("iptv-app/src/settings_view/words.rs", "with_unit", 0),
     ("iptv-app/src/wizard_view.rs", "button", 2),
-    ("iptv-app/src/wizard_view/entry.rs", "button", 2),
+    ("iptv-app/src/ui_kit/entry.rs", "button", 2),
 ];
 
 /// Files whose every literal that reads as text is a message shown later
@@ -204,7 +204,7 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/settings_view/editors.rs", "label"),
     ("iptv-app/src/settings_view/words.rs", "message"),
     ("iptv-app/src/wizard_view.rs", "label"),
-    ("iptv-app/src/wizard_view/entry.rs", "label"),
+    ("iptv-app/src/ui_kit/entry.rs", "label"),
 ];
 
 /// Calls whose text goes to the log, a panic or the platform, never to

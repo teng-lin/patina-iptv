@@ -8,7 +8,7 @@ use crate::{
     Ui, data,
     scale::Scale,
     ui_kit,
-    wizard_view::entry::{self, Sheet},
+    ui_kit::entry::{self, Sheet},
 };
 use iptv_library::{ChannelScope, SourceId};
 use iptv_nav::Action;

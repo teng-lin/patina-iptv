@@ -42,16 +42,14 @@ pub(crate) fn export_ui() {
             return;
         }
         if !crate::favorites::flush().await {
-            crate::settings_view::notify(tr(
-                "Recent channel changes could not be saved; try again",
-            ));
+            crate::toast::notify(tr("Recent channel changes could not be saved; try again"));
             return;
         }
         let settings = crate::settings::get().to_json_string();
         let root = crate::data::data_dir();
-        crate::settings_view::notify(tr("Writing backup…"));
+        crate::toast::notify(tr("Writing backup…"));
         let result = documents::save_export(&busy, root, settings, tr("Patina backup")).await;
-        crate::settings_view::notify(tr(match result {
+        crate::toast::notify(tr(match result {
             Ok(true) => "Backup saved",
             Ok(false) => "Backup canceled",
             Err(error) => report("writing a backup", error),
@@ -161,7 +159,7 @@ pub(crate) fn available() -> bool {
 
 pub(crate) fn request_restore(ui: crate::Ui) {
     if available() {
-        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
             restore_ui(ui)
         });
     }
@@ -190,8 +188,8 @@ fn restore_ui(ui: crate::Ui) {
             match answer.ok().and_then(|a| a.action) {
                 Some(action) if action.as_str() == "cancel" => {
                     let result = busy.worker(|archive| archive.cancel()).await;
-                    crate::settings_view::refresh(ui);
-                    crate::settings_view::notify(tr(match result {
+                    crate::settings_wiring::refresh(ui);
+                    crate::toast::notify(tr(match result {
                         Ok(()) => "Scheduled restore canceled",
                         Err(error) => report("canceling the scheduled restore", error),
                     }));
@@ -208,14 +206,14 @@ fn restore_ui(ui: crate::Ui) {
             Ok(Some(file)) => file,
             Ok(None) => return,
             Err(error) => {
-                crate::settings_view::notify(tr(report("choosing a backup", error)));
+                crate::toast::notify(tr(report("choosing a backup", error)));
                 return;
             }
         };
         if !review::confirm(ui, file.name.take()).await {
             return;
         }
-        crate::settings_view::notify(tr("Checking backup…"));
+        crate::toast::notify(tr("Checking backup…"));
         let result = busy
             .worker(move |archive| {
                 let mut input =
@@ -223,14 +221,12 @@ fn restore_ui(ui: crate::Ui) {
                 archive.stage(&mut input)
             })
             .await;
-        crate::settings_view::refresh(ui);
+        crate::settings_wiring::refresh(ui);
         // Release operation ownership before presenting a dismissible failure.
         drop(busy);
         match result {
             Ok(()) => {
-                crate::settings_view::notify(tr(
-                    "Restore scheduled. Close and reopen Patina to apply it",
-                ));
+                crate::toast::notify(tr("Restore scheduled. Close and reopen Patina to apply it"));
                 offer_restart().await;
             }
             Err(error) => {
@@ -243,7 +239,7 @@ fn restore_ui(ui: crate::Ui) {
                         .show()
                         .await;
                 } else {
-                    crate::settings_view::notify(tr(report("scheduling a restore", error)));
+                    crate::toast::notify(tr(report("scheduling a restore", error)));
                 }
             }
         }

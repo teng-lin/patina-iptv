@@ -31,7 +31,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             crate::player::resume::early(ui, &source).await;
             let _ = done.send(());
         }),
-        RuntimeEvent::Message(message) => crate::settings_view::notify(&message),
+        RuntimeEvent::Message(message) => crate::toast::notify(&message),
         RuntimeEvent::SettingsSaveFailed(failure) => crate::settings_view::save_failed(failure),
         RuntimeEvent::BackupProgress(phase) => {
             log::debug!("iptv backup: {phase:?}");
@@ -88,7 +88,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::StoreStartupFailed { path, error } => {
             crate::startup_view::store_failed(ui, path, error)
         }
-        RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
+        RuntimeEvent::Notify(message) => crate::toast::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
             if ui.playback.playing.get_untracked().is_some() {
                 ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);

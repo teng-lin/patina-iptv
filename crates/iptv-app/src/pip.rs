@@ -124,7 +124,7 @@ pub fn bind(ui: Ui) {
 /// desktops, opens the app's own).
 pub fn enter(ui: Ui) {
     if ui.cast.remote.get_untracked() {
-        crate::settings_view::notify(crate::i18n::tr("Stop casting to open picture in picture."));
+        crate::toast::notify(crate::i18n::tr("Stop casting to open picture in picture."));
         return;
     }
     let playing = untracked(|| playing(ui));
@@ -136,7 +136,7 @@ pub fn enter(ui: Ui) {
             .pip
             .with_untracked(|p| iptv_presentation::capabilities::pip(p, playing).reason())
         {
-            crate::settings_view::notify(crate::capabilities::reason(reason));
+            crate::toast::notify(crate::capabilities::reason(reason));
         }
         return;
     }

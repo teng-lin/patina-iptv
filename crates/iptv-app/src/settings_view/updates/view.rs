@@ -62,7 +62,7 @@ struct Prompts(Ui);
 
 impl UpdatePrompts for Prompts {
     fn notify(&self, key: &'static str) {
-        crate::settings_view::notify(tr(key));
+        crate::toast::notify(tr(key));
     }
 
     fn translate(&self, key: &'static str) -> &'static str {
@@ -227,7 +227,7 @@ fn check(ui: Ui, trigger: Trigger) {
         if let Err(error) = service.persist().await {
             log::warn!("iptv update schedule save failed: {error}");
             if trigger == Trigger::Manual {
-                crate::settings_view::notify(tr("Could not save update preferences. Try again."));
+                crate::toast::notify(tr("Could not save update preferences. Try again."));
             }
         }
     });
@@ -238,7 +238,7 @@ fn persist(ui: Ui) {
     crate::tasks::spawn_in_app(async move {
         if let Err(error) = service().persist().await {
             log::warn!("iptv update preferences save failed: {error}");
-            crate::settings_view::notify(tr("Could not save update preferences. Try again."));
+            crate::toast::notify(tr("Could not save update preferences. Try again."));
         }
     });
 }
@@ -260,7 +260,7 @@ fn acknowledge(ui: Ui) {
 }
 
 fn review(ui: Ui) {
-    crate::settings_view::settings_guarded(ui, move || {
+    crate::navigation::settings_guarded(ui, move || {
         acknowledge(ui);
         update_ui(ui).focus.set(0);
         update_ui(ui).notes_scroll.reset();

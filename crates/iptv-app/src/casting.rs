@@ -3,7 +3,7 @@ use crate::{
     Playback, Ui, chooser,
     i18n::{tr, trf},
     runtime_owner::{runtime, schedule},
-    settings_view::notify,
+    toast::notify,
 };
 use iptv_core::{
     capabilities::FormFactor,

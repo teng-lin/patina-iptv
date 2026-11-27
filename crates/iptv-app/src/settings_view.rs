@@ -11,10 +11,13 @@
 //! device-level features of TV boxes are left out (`settings_offer::offer`). Remote: Up/Down move, Right/OK
 //! enter a page, OK changes a row, Left/Back go back, Back on the pages
 //! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
-//! own (`words`). Also the short notices of the app (`notify`).
+//! own (`words`).
 
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
+use crate::navigation::{request, settings_guarded};
+use crate::settings_wiring::refresh;
+use crate::toast::notify;
 
 mod editors;
 pub(crate) mod remote_keys;
@@ -24,11 +27,9 @@ mod words;
 
 pub(crate) use view::focused_playlist;
 pub use view::layer;
-pub(crate) use view::{notice, notice_layer};
 pub(crate) use words::choice as choice_label;
 
 use std::cell::Cell;
-use std::time::Duration;
 
 use iptv_nav::Action;
 use iptv_presentation::settings::screen::{
@@ -39,14 +40,13 @@ use iptv_settings::{Section, Settings, Value};
 use nsh_core::prelude::*;
 
 use crate::data::stored::{self, GuideStatus};
-use crate::theme::{RADIUS, TEXT_DISABLED_ALPHA};
+use crate::theme::TEXT_DISABLED_ALPHA;
 use crate::{Ui, tint};
 
 const WHITE: u32 = 0xFFFFFF;
 /// Titles of rows the app does not act on.
 const DIM_ALPHA: u8 = 0x80;
 const PRIVACY_POLICY_URL: &str = "https://teng-lin.github.io/patina-iptv/privacy-policy/";
-const NOTICE_FOR: Duration = Duration::from_millis(2_500);
 
 /// The pages, in the order the reference shows its settings.
 pub static PAGES: &[Page] = &[
@@ -131,28 +131,6 @@ pub static PAGES: &[Page] = &[
 thread_local! {
     /// The page shown last: the screen opens on it again.
     static LAST: Cell<&'static str> = const { Cell::new("general") };
-    /// The notice line of the layer made last (made with it, under its owner).
-    static NOTICE: Cell<Option<Notice>> = const { Cell::new(None) };
-}
-
-/// The settings layer's notice line: its text, how many notices it has
-/// shown, and the layer's owner, which its timers run under.
-#[derive(Clone, Copy)]
-pub(crate) struct Notice {
-    pub(crate) text: Signal<Option<String>>,
-    shown: Signal<u64>,
-    owner: Owner,
-}
-
-impl Notice {
-    /// Made with the layer, under its owner.
-    pub(crate) fn new() -> Self {
-        Self {
-            text: signal(None),
-            shown: signal(0),
-            owner: Owner::current(),
-        }
-    }
 }
 
 // --- State ---------------------------------------------------------------------
@@ -162,7 +140,7 @@ pub fn open(ui: Ui) {
         == "blocked_content_and_settings"
         && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+        request(ui, iptv_core::parental::Target::settings(), move || {
             open(ui)
         });
         return;
@@ -348,19 +326,6 @@ pub(crate) fn save_setting(key: &str, value: Value) -> Result<(), crate::setting
     crate::settings::set(key, value)
 }
 
-/// Runs `then` now, or after the PIN while the settings are protected
-/// and locked (as [`run`] does for commands).
-pub(crate) fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
-    if crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
-        == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed()
-    {
-        crate::parental_view::protected_settings(ui, then);
-    } else {
-        then();
-    }
-}
-
 pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
     use crate::runtime::model::SaveFailure;
     match error {
@@ -378,10 +343,6 @@ pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
 }
 
 /// Tells the rows to read their status again.
-pub(crate) fn refresh(ui: Ui) {
-    ui.app.settings.update(|v| *v += 1);
-}
-
 /// Runs a command (`settings_offer::COMMANDS`).
 fn run(ui: Ui, key: &'static str) {
     if key != "parental.change_pin"
@@ -421,7 +382,7 @@ fn run(ui: Ui, key: &'static str) {
                 }
             });
         }
-        "general.backup" => crate::parental_view::request(
+        "general.backup" => request(
             ui,
             iptv_core::parental::Target::settings(),
             crate::backup::export_ui,
@@ -436,10 +397,7 @@ fn run(ui: Ui, key: &'static str) {
         }
         // The combined view chooses a playlist before opening its Guide data.
         "epg.manage_sources" | "epg.add_source" => {
-            match crate::runtime_owner::runtime().shown_source() {
-                Some(playlist) => crate::epg_sources_view::open(ui, playlist),
-                None => crate::playlists_view::open(ui),
-            }
+            crate::navigation::guide_sources(ui, crate::runtime().shown_source());
         }
         "epg.clear" => {
             let cleared = stored::clear(&crate::runtime_owner::runtime(), move |deleted| {
@@ -456,27 +414,16 @@ fn run(ui: Ui, key: &'static str) {
         }
         "remote.customize" => crate::remote_editor::open(ui),
         // The playlists screen, over the settings screen.
-        "playlists.manage" => crate::playlists_view::choose_for_management(ui),
+        "playlists.manage" => crate::navigation::manage_playlists(ui),
         "playlists.show_all" => {
             close(ui);
             crate::data::switch_all(&crate::runtime());
         }
         // As the playlists screen's Add: behind the PIN once one is set.
-        "playlists.add" => {
-            if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed()
-            {
-                crate::parental_view::request(
-                    ui,
-                    iptv_core::parental::Target::settings(),
-                    move || crate::wizard_view::open_add(ui),
-                );
-            } else {
-                crate::wizard_view::open_add(ui);
-            }
-        }
+        "playlists.add" => crate::navigation::add_playlist(ui),
         "playlists.update_all" => crate::data::refresh_all(&crate::runtime()),
         // The playlists in their manual order, the first one focused.
-        "playlists.reorder" => crate::organization_view::open_playlist_reorder(ui, None),
+        "playlists.reorder" => crate::navigation::reorder_playlists(ui),
         other => log::info!("iptv settings: {other} is not implemented yet"),
     }
 }
@@ -614,33 +561,6 @@ fn time_label(unix: i64) -> String {
 /// in the current interface language, including changes made since the save.
 pub(crate) fn save_failed(failure: crate::runtime::model::SaveFailure) {
     notify(words::save_failure(failure));
-}
-
-/// Shows `text` briefly at the bottom of the screen.
-pub fn notify(text: &str) {
-    announce_for_accessibility(text);
-    let Some(notice) = NOTICE.with(Cell::get) else {
-        return;
-    };
-    // A layer already gone (its window closed) shows nothing more.
-    if !notice.text.try_set(Some(text.to_owned())) {
-        return;
-    }
-    // The notice is told apart by when it was shown, not by its text: an
-    // earlier notice with the same words (blocking a channel, then its
-    // group) must not cut this one short when its own time is up.
-    notice.shown.update(|n| *n = n.wrapping_add(1));
-    let shown = notice.shown.get_untracked();
-    // Under the layer's owner, not whatever runs now (a row that closes, a
-    // task): NSH cancels the timer with its owner, so it neither stops early
-    // nor writes the line after the layer is gone. Its handle is not needed.
-    notice.owner.run(|| {
-        drop(set_timeout(NOTICE_FOR, move || {
-            if notice.shown.get_untracked() == shown {
-                notice.text.set(None);
-            }
-        }));
-    });
 }
 
 #[cfg(test)]

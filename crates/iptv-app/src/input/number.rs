@@ -67,7 +67,7 @@ fn arm(ui: Ui) {
         .channel_number
         .with(|entry| entry.digits().to_owned());
     if !digits.is_empty() {
-        crate::settings_view::notify(&digits);
+        crate::toast::notify(&digits);
     }
     let _task = set_timeout(Duration::from_millis(timeout()), move || {
         if ui.top_overlay().is_some() || crate::multiview::is_open(ui) {

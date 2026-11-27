@@ -320,7 +320,7 @@ pub(crate) fn open_archive(ui: Ui, choice: Rc<crate::archive_playback::Choice>) 
 /// Archive fallback calls this only after authorization starts playback.
 pub(crate) fn missing_handler(ui: Ui, list: ListId) {
     crate::menu_view::offer_external_player_reset(ui, list);
-    crate::settings_view::notify(tr(
+    crate::toast::notify(tr(
         "No external player is installed, so this channel plays here.",
     ));
 }
@@ -548,7 +548,7 @@ fn open_from(
             }
             let Some(lease) = owner.reserve_external_viewing(iptv_library::SourceId(target.source))
             else {
-                crate::settings_view::notify(tr(
+                crate::toast::notify(tr(
                     "No provider connection available while recording; stop a recording or check Streams at once",
                 ));
                 return;
@@ -605,7 +605,7 @@ fn open_from(
             }
         });
     };
-    crate::parental_view::request_if(
+    crate::navigation::request_if(
         ui,
         protected,
         move || !archive_choice || before_prompt(),
@@ -615,5 +615,5 @@ fn open_from(
 }
 
 fn unavailable() {
-    crate::settings_view::notify(tr("Could not open this channel in an external player."));
+    crate::toast::notify(tr("Could not open this channel in an external player."));
 }

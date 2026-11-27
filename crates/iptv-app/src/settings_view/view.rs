@@ -4,6 +4,8 @@
 //! below and the editors over it (`editors`). The global notice is mounted above
 //! the screens so tasks started in setup can report their result.
 
+use std::time::Duration;
+
 use crate::i18n::{tr, trf};
 
 use super::*;
@@ -35,41 +37,6 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
         .child(when(move || is_open(ui), move || screen(ui, size)))
-}
-
-pub(crate) fn notice_layer() -> impl IntoElement {
-    let state = Notice::new();
-    NOTICE.with(|n| n.set(Some(state)));
-    notice("app-notice", move || state.text.get())
-}
-
-pub(crate) fn notice(
-    id: &'static str,
-    text: impl Fn() -> Option<String> + Copy + 'static,
-) -> impl IntoElement {
-    let size = Scale::new();
-    when(
-        move || text().is_some(),
-        move || {
-            view()
-                .test_id(id)
-                .role(AccessibilityRole::Alert)
-                .absolute()
-                .left(px(0.0))
-                .w_full()
-                .bottom(move || size.px(28.0))
-                .items_center()
-                .pointer_events(PointerEvents::None)
-                .child(
-                    ui_kit::body(size, move || text().unwrap_or_default())
-                        .px(move || size.px(18.0))
-                        .py(move || size.px(12.0))
-                        .rounded(px(RADIUS))
-                        .text_color(rgb(LIST_TEXT))
-                        .bg(tint(0x000000, 0xC0)),
-                )
-        },
-    )
 }
 
 fn screen(ui: Ui, size: Scale) -> impl IntoElement {

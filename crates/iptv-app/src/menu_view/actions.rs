@@ -28,7 +28,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     };
     if let Some(value) = playlist_order {
         ui.screens.menu.set(None);
-        crate::settings_view::settings_guarded(ui, move || {
+        crate::navigation::settings_guarded(ui, move || {
             if let Err(error) = crate::settings_view::save_setting(
                 iptv_settings::keys::PLAYLIST_SORT.as_str(),
                 iptv_settings::Value::Enum(value.to_owned()),
@@ -158,7 +158,7 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
                     crate::runtime_owner::schedule().channel_block(ch) == Block::Group
                 })
             {
-                crate::settings_view::notify(tr("This channel is blocked by a group."));
+                crate::toast::notify(tr("This channel is blocked by a group."));
                 return;
             }
             if let Some(target) = block_target(ui, item, channel, scope.as_ref()) {
@@ -357,7 +357,7 @@ fn hide_channel(ui: Ui, channel: Option<usize>) {
                 Ok(()) => {
                     crate::data::organization_changed(&crate::runtime_owner::runtime(), source)
                 }
-                Err(_) => crate::settings_view::notify(tr(
+                Err(_) => crate::toast::notify(tr(
                     "The change could not be saved. Reopen the list and try again.",
                 )),
             }
@@ -408,7 +408,7 @@ fn group(
         }
         MenuItem::ReorderPlaylists => {
             let preferred = heading_playlist(&list);
-            crate::settings_view::settings_guarded(ui, move || {
+            crate::navigation::settings_guarded(ui, move || {
                 organization_view::open_playlist_reorder(ui, preferred);
             });
         }
@@ -431,7 +431,7 @@ fn group(
                 crate::tasks::spawn_in_app(async move {
                     match save.await {
                         Ok(()) => crate::data::organization_changed(&owner, source),
-                        Err(_) => crate::settings_view::notify(tr(
+                        Err(_) => crate::toast::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
                     }
@@ -460,7 +460,7 @@ fn group(
                 crate::tasks::spawn_in_app(async move {
                     match save.await {
                         Ok(()) => crate::data::organization_changed(&owner, source),
-                        Err(_) => crate::settings_view::notify(tr(
+                        Err(_) => crate::toast::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
                     }

@@ -9,6 +9,7 @@
 
 pub(crate) mod icons;
 
+pub(crate) mod entry;
 use crate::i18n::tr;
 
 use nsh_core::element::ImageSrc;

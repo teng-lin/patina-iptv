@@ -97,6 +97,7 @@ use iptv_runtime as runtime;
 mod multiview;
 mod multiview_picker;
 mod multiview_view;
+mod navigation;
 mod numbers;
 mod on_demand;
 mod organization_view;
@@ -131,6 +132,7 @@ pub mod time {
     pub use crate::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
     pub use crate::guide_clock::{start, tick};
 }
+mod toast;
 mod touch_zap;
 mod ui_kit;
 mod video;
@@ -955,7 +957,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             move || chooser::is_open(ui, true),
             move || chooser::layer(ui, true),
         ))
-        .child(settings_view::notice_layer())
+        .child(toast::layer())
         .child(exit_confirmation::layer(ui))
 }
 

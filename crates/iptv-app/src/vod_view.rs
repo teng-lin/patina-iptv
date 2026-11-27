@@ -324,7 +324,7 @@ fn retry(ui: Ui) {
 /// without first closing the content as choosing another title does.
 fn retry_details(ui: Ui, key: Key) {
     let generation = ui.screens.vod.with_untracked(|s| s.generation);
-    crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
+    crate::navigation::request(ui, Runtime::vod_target(&key), move || {
         if ui
             .screens
             .vod
@@ -342,7 +342,7 @@ fn retry_details(ui: Ui, key: Key) {
 /// the same id is refused, and its title must be chosen again.
 fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
     let generation = ui.screens.vod.with_untracked(|s| s.generation);
-    crate::parental_view::request(ui, Runtime::vod_target(&item), move || {
+    crate::navigation::request(ui, Runtime::vod_target(&item), move || {
         if !ui
             .screens
             .vod
@@ -424,7 +424,7 @@ fn select(ui: Ui, key: Key) {
         crate::runtime_owner::runtime().parental_content_closed();
     }
     let generation = ui.screens.vod.with_untracked(|s| s.generation);
-    crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
+    crate::navigation::request(ui, Runtime::vod_target(&key), move || {
         if ui
             .screens
             .vod
@@ -477,7 +477,7 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
     let generation = edit(ui, Screen::supersede_operation);
     let parent = (key.kind == Kind::Episode).then(|| details.item.key.clone());
     let run = move || {
-        crate::parental_view::request(ui, Runtime::vod_target(&key), move || {
+        crate::navigation::request(ui, Runtime::vod_target(&key), move || {
             if ui
                 .screens
                 .vod
@@ -488,7 +488,7 @@ fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
         })
     };
     if let Some(parent) = parent {
-        crate::parental_view::request(ui, Runtime::vod_target(&parent), run);
+        crate::navigation::request(ui, Runtime::vod_target(&parent), run);
     } else {
         run();
     }

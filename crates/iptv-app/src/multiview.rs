@@ -249,7 +249,7 @@ pub fn surface_rect(ui: Ui, surface: usize) -> Option<(f32, f32, f32, f32)> {
 /// On a detour it goes back to the grid.
 pub fn open(ui: Ui) {
     if let Some(reason) = untracked(|| crate::multiview::availability(ui)).reason() {
-        crate::settings_view::notify(crate::capabilities::reason(reason));
+        crate::toast::notify(crate::capabilities::reason(reason));
         return;
     }
     if untracked(|| detour(ui)) {

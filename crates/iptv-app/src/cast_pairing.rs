@@ -6,7 +6,7 @@ use crate::{
     runtime_owner::runtime,
     scale::Scale,
     ui_kit,
-    wizard_view::entry::{frame, sheet_buttons, sheet_field},
+    ui_kit::entry::{frame, sheet_buttons, sheet_field},
 };
 use iptv_core::cast::{Error, Receiver};
 use iptv_presentation::cast::{Effect, Prompt, State};
@@ -59,7 +59,7 @@ fn submit(ui: Ui) {
     let mut effect = None;
     ui.cast.state.update(|state| effect = state.submit_pin());
     let Some(Effect::SubmitPin { ticket, pin }) = effect else {
-        crate::settings_view::notify(tr("Enter the four digits shown on the receiver."));
+        crate::toast::notify(tr("Enter the four digits shown on the receiver."));
         return;
     };
     if let Some(request) = ui.cast.pairing.replace(None) {
@@ -87,7 +87,7 @@ fn forget(ui: Ui) {
         if ui.cast.busy.try_get().is_some() {
             ui.cast.state.update(|state| state.busy = false);
             if result.is_err() {
-                crate::settings_view::notify(tr("Could not forget the AirPlay pairing."));
+                crate::toast::notify(tr("Could not forget the AirPlay pairing."));
             }
             crate::casting::finish_pending_stop(ui);
         }

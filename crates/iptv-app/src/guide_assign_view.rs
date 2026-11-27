@@ -40,7 +40,7 @@ pub fn open(ui: Ui, channel: usize) {
         .and_then(|k| crate::data::combined::owner(&crate::runtime_owner::runtime(), &k))
     else {
         ui.screens.guide_assign.next_request();
-        crate::settings_view::notify(tr("No playlist on screen"));
+        crate::toast::notify(tr("No playlist on screen"));
         return;
     };
     let request = ui.screens.guide_assign.open(Picker::new(Subject {
@@ -58,7 +58,7 @@ pub fn open(ui: Ui, channel: usize) {
         }
         if channels.is_empty() {
             close(ui);
-            crate::settings_view::notify(tr("No guide data is stored yet: update the guide first"));
+            crate::toast::notify(tr("No guide data is stored yet: update the guide first"));
             return;
         }
         let feeds: Vec<_> = crate::runtime_owner::runtime()
@@ -155,7 +155,7 @@ fn perform(ui: Ui, playlist: SourceId, key: String, effect: Effect) {
                 choice,
                 move |applied| {
                     if ui.screens.guide_assign.is_current(request) {
-                        crate::settings_view::notify(applied_words(applied));
+                        crate::toast::notify(applied_words(applied));
                         close(ui);
                     }
                 },

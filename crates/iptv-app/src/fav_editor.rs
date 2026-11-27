@@ -334,7 +334,7 @@ fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                 .with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some()))
         },
         move || {
-            let (outer, card) = crate::wizard_view::entry::frame(ui, size);
+            let (outer, card) = crate::ui_kit::entry::frame(ui, size);
             outer
                 .on_press(|| {})
                 .test_id("favorites-clear-confirmation")

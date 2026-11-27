@@ -261,7 +261,7 @@ pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
     when(
         move || ui.screens.recordings.with(|s| s.confirm_delete),
         move || {
-            let (outer, card) = crate::wizard_view::entry::frame(ui, size);
+            let (outer, card) = crate::ui_kit::entry::frame(ui, size);
             outer.test_id("recording-delete-confirmation").child(
                 card.child(ui_kit::title(
                     size,

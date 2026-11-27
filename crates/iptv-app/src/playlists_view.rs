@@ -13,7 +13,7 @@
 //! Remote: Up/Down move, OK acts, Menu opens a playlist's actions, Back
 //! closes the open sheet, then the screen. Touch and mouse: every row and
 //! action is tappable; a tap beside a sheet closes it. Text entry uses the
-//! wizard's sheet (`wizard_view::entry`). Wording is iptv-rs's own.
+//! wizard's sheet (`ui_kit::entry`). Wording is iptv-rs's own.
 
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
@@ -35,8 +35,8 @@ pub(crate) use words::masked_link;
 use crate::data::{self, Activity, Playlist};
 use crate::list_rows::{self, Mark};
 use crate::scale::Scale;
+use crate::ui_kit::entry::{self, TextSheet};
 use crate::ui_kit::{self, ERROR, ROW_THREE};
-use crate::wizard_view::entry::{self, TextSheet};
 use crate::{Ui, ViewMode, tint};
 
 const WHITE: u32 = 0xFFFFFF;
@@ -212,7 +212,7 @@ fn cancel(ui: Ui) {
 
 fn perform(ui: Ui, effect: Effect) {
     if matches!(effect, Effect::Policy(..)) {
-        crate::settings_view::settings_guarded(ui, move || apply_effect(ui, effect));
+        crate::navigation::settings_guarded(ui, move || apply_effect(ui, effect));
         return;
     }
     if matches!(
@@ -227,7 +227,7 @@ fn perform(ui: Ui, effect: Effect) {
     ) && crate::runtime_owner::runtime().parental_has_pin()
         && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+        crate::navigation::request(ui, iptv_core::parental::Target::settings(), move || {
             perform(ui, effect)
         });
         return;
@@ -361,7 +361,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                     crate::settings::SaveError::ParentalLocked,
                 );
             } else if changes_library {
-                crate::settings_view::notify(tr(
+                crate::toast::notify(tr(
                     "The change could not be saved. Reopen the list and try again.",
                 ));
             }

@@ -151,7 +151,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         let info = match result {
             Ok(info) => info,
             Err(_) => {
-                crate::settings_view::notify(tr("Guide changes could not be saved"));
+                crate::toast::notify(tr("Guide changes could not be saved"));
                 return;
             }
         };
@@ -162,7 +162,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         })
         .unwrap_or(false)
         {
-            crate::settings_view::notify(tr("Finish the current guide changes first"));
+            crate::toast::notify(tr("Finish the current guide changes first"));
             return;
         }
         if state(ui, |s| {

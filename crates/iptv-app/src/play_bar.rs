@@ -776,7 +776,7 @@ pub(super) fn activate(
         if explains(ui, control)
             && let Some(reason) = untracked(|| crate::multiview::availability(ui)).reason()
         {
-            crate::settings_view::notify(crate::capabilities::reason(reason));
+            crate::toast::notify(crate::capabilities::reason(reason));
         }
         return;
     }

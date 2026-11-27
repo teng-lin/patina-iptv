@@ -101,7 +101,7 @@ impl Ui {
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
         if self.cast.busy.get_untracked() {
-            crate::settings_view::notify(crate::i18n::tr(
+            crate::toast::notify(crate::i18n::tr(
                 "Wait for the current cast request to finish.",
             ));
             return;
@@ -486,13 +486,11 @@ pub fn allow_guide_channel(channel: usize) -> bool {
     match crate::runtime_owner::schedule().channel_block(channel) {
         Block::None => true,
         Block::Channel => {
-            crate::settings_view::notify(crate::i18n::tr("Unblock this channel to play it."));
+            crate::toast::notify(crate::i18n::tr("Unblock this channel to play it."));
             false
         }
         Block::Group => {
-            crate::settings_view::notify(crate::i18n::tr(
-                "Unblock the group to play this channel.",
-            ));
+            crate::toast::notify(crate::i18n::tr("Unblock the group to play this channel."));
             false
         }
     }
@@ -722,7 +720,7 @@ pub(crate) fn reauthorize(ui: Ui, surface: usize, allowed: bool) {
     let stream = ui.playback.player.stream(surface);
     if !allowed {
         stop_surface(ui, surface);
-        crate::settings_view::notify(crate::i18n::tr(
+        crate::toast::notify(crate::i18n::tr(
             "Provider connection reserved for recording",
         ));
         return;

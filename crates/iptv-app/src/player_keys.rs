@@ -247,7 +247,7 @@ pub fn press_control(ui: Ui, control: Control) {
             && let Some(reason) =
                 nsh_core::prelude::untracked(|| crate::multiview::availability(ui)).reason()
         {
-            crate::settings_view::notify(crate::capabilities::reason(reason));
+            crate::toast::notify(crate::capabilities::reason(reason));
         }
         return;
     }
