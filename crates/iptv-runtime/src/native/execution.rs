@@ -131,20 +131,6 @@ impl TokioTasks {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::TokioTasks;
-
-    #[test]
-    fn failed_tokio_runtime_initialization_is_returned_without_panicking() {
-        let tasks = TokioTasks::default();
-        let result = tasks
-            .try_runtime_with(|| Err(std::io::Error::other("synthetic runtime spawn refusal")));
-        assert!(result.is_err());
-        assert!(tasks.runtime.get().is_none());
-    }
-}
-
 impl Drop for TokioTasks {
     fn drop(&mut self) {
         if let Some(runtime) = self.runtime.take() {
@@ -203,5 +189,19 @@ impl Tasks for TokioTasks {
                 Box::pin(std::future::ready(()))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TokioTasks;
+
+    #[test]
+    fn failed_tokio_runtime_initialization_is_returned_without_panicking() {
+        let tasks = TokioTasks::default();
+        let result = tasks
+            .try_runtime_with(|| Err(std::io::Error::other("synthetic runtime spawn refusal")));
+        assert!(result.is_err());
+        assert!(tasks.runtime.get().is_none());
     }
 }

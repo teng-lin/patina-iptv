@@ -387,7 +387,7 @@ impl Service {
         limit
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "test-support"))]
     fn drain_on_shutdown_with_limit(
         self: &Arc<Self>,
         limit: std::time::Duration,
