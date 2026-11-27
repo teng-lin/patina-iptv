@@ -18,10 +18,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
-use tokio::{
-    runtime::Handle,
-    time::{Instant, timeout, timeout_at},
-};
+use tokio::runtime::Handle;
+use tokio::time::{Instant, timeout, timeout_at};
 
 #[derive(Default)]
 pub(super) struct Sender {
