@@ -242,6 +242,37 @@ impl ReceiverState {
     }
 }
 
+async fn fetch_relay(url: &str) -> io::Result<()> {
+    let url = url::Url::parse(url).map_err(io::Error::other)?;
+    let address = SocketAddr::new(
+        url.host_str()
+            .unwrap_or("")
+            .parse()
+            .map_err(io::Error::other)?,
+        url.port().ok_or(io::ErrorKind::InvalidInput)?,
+    );
+    if !address.ip().is_loopback() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let mut socket = TcpStream::connect(address).await?;
+    socket
+        .write_all(
+            format!(
+                "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+                url.path(),
+                address
+            )
+            .as_bytes(),
+        )
+        .await?;
+    let mut reply = Vec::new();
+    socket.read_to_end(&mut reply).await?;
+    if !reply.starts_with(b"HTTP/1.1 200") || !reply.windows(7).any(|line| line == b"#EXTM3U") {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,35 +305,4 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
     }
-}
-
-async fn fetch_relay(url: &str) -> io::Result<()> {
-    let url = url::Url::parse(url).map_err(io::Error::other)?;
-    let address = SocketAddr::new(
-        url.host_str()
-            .unwrap_or("")
-            .parse()
-            .map_err(io::Error::other)?,
-        url.port().ok_or(io::ErrorKind::InvalidInput)?,
-    );
-    if !address.ip().is_loopback() {
-        return Err(io::ErrorKind::InvalidInput.into());
-    }
-    let mut socket = TcpStream::connect(address).await?;
-    socket
-        .write_all(
-            format!(
-                "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-                url.path(),
-                address
-            )
-            .as_bytes(),
-        )
-        .await?;
-    let mut reply = Vec::new();
-    socket.read_to_end(&mut reply).await?;
-    if !reply.starts_with(b"HTTP/1.1 200") || !reply.windows(7).any(|line| line == b"#EXTM3U") {
-        return Err(io::ErrorKind::InvalidData.into());
-    }
-    Ok(())
 }
