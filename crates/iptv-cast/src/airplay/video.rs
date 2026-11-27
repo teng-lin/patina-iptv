@@ -3,7 +3,10 @@ use super::{
     hap::{self, AuthFault, Verified},
     wire::{Fault, Version, Wire},
 };
-use plist::{Dictionary, Value};
+use plist::{
+    Dictionary, Value,
+    stream::{Event, Reader},
+};
 use std::{
     io::Cursor,
     net::{SocketAddr, SocketAddrV6},
@@ -27,6 +30,9 @@ const FEEDBACK_PERIOD: Duration = Duration::from_secs(2);
 const PLIST_TYPE: &str = "application/x-apple-binary-plist";
 const RTSP_AGENT: (&str, &str) = ("User-Agent", "AirPlay/550.10");
 const VIDEO_AGENT: (&str, &str) = ("User-Agent", "AirPlay/870.14.1");
+const MAX_PLIST_EVENTS: usize = 4_096;
+const MAX_PLIST_DEPTH: usize = 24;
+const MAX_PLIST_DATA: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum VideoFault {
@@ -71,7 +77,37 @@ fn unpack(data: &[u8]) -> Result<Value> {
     if !data.starts_with(b"bplist00") {
         return Err(Fault::InvalidMessage.into());
     }
-    Value::from_reader(Cursor::new(data)).map_err(|_| Fault::InvalidMessage.into())
+    // A short object table can reference the same subtree many times. Bound
+    // the expanded event stream, including repeated payloads, before the
+    // Value builder allocates its arrays and dictionaries.
+    let mut events = Vec::new();
+    let mut depth = 0usize;
+    let mut total_bytes = 0usize;
+    for event in Reader::new(Cursor::new(data)) {
+        if events.len() == MAX_PLIST_EVENTS {
+            return Err(Fault::InvalidMessage.into());
+        }
+        let event = event.map_err(|_| Fault::InvalidMessage)?;
+        match &event {
+            Event::StartArray(_) | Event::StartDictionary(_) => {
+                depth += 1;
+                if depth > MAX_PLIST_DEPTH {
+                    return Err(Fault::InvalidMessage.into());
+                }
+            }
+            Event::EndCollection => {
+                depth = depth.checked_sub(1).ok_or(Fault::InvalidMessage)?;
+            }
+            Event::Data(bytes) => total_bytes += bytes.len(),
+            Event::String(text) => total_bytes += text.len(),
+            _ => {}
+        }
+        if total_bytes > MAX_PLIST_DATA {
+            return Err(Fault::InvalidMessage.into());
+        }
+        events.push(event);
+    }
+    Value::from_events(events.into_iter().map(Ok)).map_err(|_| Fault::InvalidMessage.into())
 }
 
 fn find<'a>(value: &'a Value, field: &str) -> Option<&'a Value> {
@@ -110,7 +146,11 @@ fn same_host(left: SocketAddr, right: SocketAddr) -> bool {
     }
 }
 
-async fn timing_loop(socket: UdpSocket, peer: SocketAddr) -> std::io::Result<()> {
+async fn timing_loop(
+    socket: UdpSocket,
+    peer: SocketAddr,
+    replied: &AtomicBool,
+) -> std::io::Result<()> {
     let mut data = [0; 33];
     loop {
         let (len, source) = socket.recv_from(&mut data).await?;
@@ -118,6 +158,7 @@ async fn timing_loop(socket: UdpSocket, peer: SocketAddr) -> std::io::Result<()>
             && let Some(response) = timing_reply(&data[..len], SystemTime::now())
         {
             socket.send_to(&response, source).await?;
+            replied.store(true, Ordering::Release);
         }
     }
 }
@@ -269,7 +310,12 @@ fn time_property(dictionary: &Dictionary, property: &str) -> Option<Duration> {
     Duration::try_from_secs_f64(seconds).ok()
 }
 
-fn parse_event(body: &[u8], item_id: &str) -> Option<Evidence> {
+fn parse_event(
+    body: &[u8],
+    item_id: &str,
+    allow_stream_status: bool,
+    observed_active: bool,
+) -> Option<Evidence> {
     let packet = unpack(body).ok()?;
     let bytes = find(find(&packet, "params")?, "data")?.as_data()?;
     let event = unpack(bytes).ok()?;
@@ -279,9 +325,15 @@ fn parse_event(body: &[u8], item_id: &str) -> Option<Evidence> {
     let parameters = find(&event, "params").and_then(Value::as_dictionary);
     // The event socket and stream belong exclusively to this load. When the
     // receiver also supplies an explicit item ID, reject a different item.
-    if let Some(item) = parameters.and_then(|fields| fields.get("item"))
-        && find(item, "uuid")?.as_string()? != item_id
-    {
+    let explicitly_owned = if let Some(item) = parameters.and_then(|fields| fields.get("item")) {
+        if find(item, "uuid")?.as_string()? != item_id {
+            return None;
+        }
+        true
+    } else {
+        false
+    };
+    if !explicitly_owned && !allow_stream_status {
         return None;
     }
     let observed = parameters
@@ -295,6 +347,12 @@ fn parse_event(body: &[u8], item_id: &str) -> Option<Evidence> {
         "stopped" => MediaState::Absent,
         _ => return None,
     };
+    if !explicitly_owned
+        && !observed_active
+        && matches!(state, MediaState::Ended | MediaState::Absent)
+    {
+        return None;
+    }
     Some(Evidence {
         state,
         position: parameters.and_then(|fields| time_property(fields, "position")),
@@ -306,16 +364,25 @@ async fn event_loop(
     mut wire: Wire,
     item: String,
     dispatched: Arc<AtomicBool>,
+    queue_accepted: Arc<AtomicBool>,
     evidence: watch::Sender<Option<Result<Evidence>>>,
 ) -> Result<()> {
+    let mut observed_active = false;
     loop {
         let message = wire.receive().await?;
+        let was_dispatched = dispatched.load(Ordering::Acquire);
+        let was_accepted = queue_accepted.load(Ordering::Acquire);
         timeout(EXCHANGE_TIMEOUT, wire.ack_event(&message))
             .await
             .map_err(|_| VideoFault::TimedOut)??;
-        if dispatched.load(Ordering::Acquire)
-            && let Some(observation) = parse_event(&message.body, &item)
+        if was_dispatched
+            && let Some(observation) =
+                parse_event(&message.body, &item, was_accepted, observed_active)
         {
+            observed_active |= matches!(
+                observation.state,
+                MediaState::Playing | MediaState::Buffering | MediaState::Paused
+            );
             publish(&evidence, Ok(observation));
         }
     }
@@ -411,6 +478,7 @@ pub(super) struct Video {
     addresses: (SocketAddr, SocketAddr),
     item: String,
     dispatched: Arc<AtomicBool>,
+    queue_accepted: Arc<AtomicBool>,
     evidence: watch::Receiver<Option<Result<Evidence>>>,
     updates: watch::Sender<Option<Result<Evidence>>>,
     tasks: Vec<Task>,
@@ -426,6 +494,7 @@ impl Video {
             addresses,
             item: hap::uuid()?,
             dispatched: Arc::new(AtomicBool::new(false)),
+            queue_accepted: Arc::new(AtomicBool::new(false)),
             evidence,
             updates,
             tasks: Vec::new(),
@@ -467,8 +536,10 @@ impl Video {
             timed_out: false,
         })?;
         let updates = self.updates.clone();
+        let timing_replied = Arc::new(AtomicBool::new(false));
+        let timing_observed = Arc::clone(&timing_replied);
         self.tasks.push(Task(tokio::spawn(async move {
-            if timing_loop(socket, remote).await.is_err() {
+            if timing_loop(socket, remote, &timing_observed).await.is_err() {
                 publish(
                     &updates,
                     Err(VideoFault::Timing {
@@ -482,7 +553,7 @@ impl Video {
         let control = self.control.as_mut().ok_or(VideoFault::Unavailable)?;
         let body = base_fields(&control.wire.device_id, &control.session, local.port())?;
         let session = control.setup(&body).await.map_err(|fault| match fault {
-            VideoFault::TimedOut => VideoFault::Timing {
+            VideoFault::TimedOut if !timing_replied.load(Ordering::Acquire) => VideoFault::Timing {
                 local,
                 timed_out: true,
             },
@@ -491,9 +562,12 @@ impl Video {
         let event = event_connection(remote, event_port(&session)?, &control.wire).await?;
         let updates = self.updates.clone();
         let dispatched = Arc::clone(&self.dispatched);
+        let queue_accepted = Arc::clone(&self.queue_accepted);
         let item = self.item.clone();
         self.tasks.push(Task(tokio::spawn(async move {
-            if let Err(error) = event_loop(event, item, dispatched, updates.clone()).await {
+            if let Err(error) =
+                event_loop(event, item, dispatched, queue_accepted, updates.clone()).await
+            {
                 publish(&updates, Err(error));
             }
         })));
@@ -540,7 +614,10 @@ impl Video {
     pub(super) async fn start(&mut self, queue: Queue) -> Result<()> {
         let control = self.control.as_mut().ok_or(VideoFault::Unavailable)?;
         self.dispatched.store(true, Ordering::Release);
-        for command in queue.commands {
+        let [insert, rest @ ..] = queue.commands;
+        control.command(&queue.stream, &insert).await?;
+        self.queue_accepted.store(true, Ordering::Release);
+        for command in rest {
             control.command(&queue.stream, &command).await?;
         }
         let mut control = self.control.take().expect("control still owned");

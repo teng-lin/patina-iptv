@@ -99,6 +99,18 @@ pub(in crate::airplay) async fn serve(
     let media_url = find(item, "Content-Location").unwrap().as_string().unwrap();
     let item_uuid = find(item, "uuid").unwrap().as_string().unwrap();
     assert_eq!(media_url, format!("http://{origin}/generated.m3u8"));
+    events
+        .request(
+            Version::Http,
+            "POST",
+            "/event",
+            &[],
+            &unaddressed_state("stopped"),
+        )
+        .await
+        .unwrap()
+        .require_ok()
+        .unwrap();
     let mut upstream = TcpStream::connect(origin).await.unwrap();
     upstream
         .write_all(b"GET /generated.m3u8 HTTP/1.1\r\nHost: synthetic-origin\r\n\r\n")
@@ -198,7 +210,7 @@ async fn send_state(socket: &mut Wire, item: &str, state: &str) {
 
 #[test]
 fn media_observations_require_owned_state_and_finite_times() {
-    assert!(parse_event(b"", "item").is_none());
+    assert!(parse_event(b"", "item", true, true).is_none());
     for (wire, state) in [
         ("buffering", MediaState::Buffering),
         ("paused", MediaState::Paused),
@@ -207,13 +219,13 @@ fn media_observations_require_owned_state_and_finite_times() {
         ("stopped", MediaState::Absent),
     ] {
         let event = state_event("item", wire);
-        assert!(parse_event(&event, "other").is_none());
-        let evidence = parse_event(&event, "item").unwrap();
+        assert!(parse_event(&event, "other", true, true).is_none());
+        let evidence = parse_event(&event, "item", true, true).unwrap();
         assert_eq!(evidence.state, state);
         assert_eq!(evidence.duration, Some(Duration::from_secs(21)));
         assert_eq!(evidence.position, Some(Duration::from_millis(5_500)));
     }
-    assert!(parse_event(&state_event("item", "unrecognized"), "item").is_none());
+    assert!(parse_event(&state_event("item", "unrecognized"), "item", true, true).is_none());
     let mut values = Dictionary::new();
     values.insert("position".into(), (-1.5).into());
     assert!(time_property(&values, "position").is_none());
@@ -268,4 +280,58 @@ fn validates_timing_datagram_and_uses_ntp_timestamp() {
         "[fe80::1%2]:1".parse().unwrap(),
         "[fe80::1%3]:1".parse().unwrap()
     ));
+}
+
+fn unaddressed_state(state: &str) -> Vec<u8> {
+    command_body(dictionary([
+        ("type", "playbackState".into()),
+        ("name", state.into()),
+    ]))
+    .unwrap()
+}
+
+#[test]
+fn unaddressed_events_need_queue_acceptance_and_terminal_needs_earlier_activity() {
+    let stopped = unaddressed_state("stopped");
+    let playing = unaddressed_state("playing");
+    assert!(parse_event(&stopped, "current", false, false).is_none());
+    assert!(parse_event(&playing, "current", false, false).is_none());
+    assert!(parse_event(&stopped, "current", true, false).is_none());
+    assert_eq!(
+        parse_event(&playing, "current", true, false).unwrap().state,
+        MediaState::Playing
+    );
+    assert_eq!(
+        parse_event(&stopped, "current", true, true).unwrap().state,
+        MediaState::Absent
+    );
+    assert_eq!(
+        parse_event(&state_event("current", "playing"), "current", false, false)
+            .unwrap()
+            .state,
+        MediaState::Playing
+    );
+}
+
+#[test]
+fn plist_rejects_expansion_before_materializing_an_aggregate_value() {
+    let mut deep = Value::Boolean(true);
+    for _ in 0..=MAX_PLIST_DEPTH {
+        deep = Value::Array(vec![deep]);
+    }
+    let many_nodes = Value::Array(vec![Value::Boolean(true); MAX_PLIST_EVENTS]);
+    let repeated_data = Value::Array(vec![Value::Data(vec![7; 32 * 1024]); 24]);
+    for value in [deep, many_nodes, repeated_data] {
+        let bytes = pack(&value).unwrap();
+        assert!(
+            bytes.len() < 256 * 1024,
+            "exercise actual wire-sized messages"
+        );
+        assert!(matches!(
+            unpack(&bytes),
+            Err(VideoFault::Wire(Fault::InvalidMessage))
+        ));
+    }
+    let valid = pack(&Value::Data(vec![7; 32 * 1024])).unwrap();
+    assert_eq!(unpack(&valid).unwrap().as_data().unwrap().len(), 32 * 1024);
 }

@@ -30,7 +30,8 @@ def check(artifact, abis):
             with package.open(entry) as stream:
                 if entry.file_size <= 4 or stream.read(4) != b"\x7fELF":
                     raise ValueError(f"{artifact}: invalid native library {library}")
-        for name in ("THIRD-PARTY.html", "components.json", "NSH-RUNNERS.html", "runner-components.json"):
+        for name in ("THIRD-PARTY.html", "components.json", "NSH-RUNNERS.html",
+                     "runner-components.json", "NOTICE-pyatv.md"):
             entry = package.getinfo(prefix + "assets/notices/" + name)
             if not entry.file_size:
                 raise ValueError(f"{artifact}: empty notice {name}")

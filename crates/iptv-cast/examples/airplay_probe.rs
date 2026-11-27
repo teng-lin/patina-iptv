@@ -1,5 +1,7 @@
 //! An interactive sender for physical checks with generated HLS or MP4.
-use iptv_cast::{Cast, Connect, Connection, Media, PeerTrust, PinCode, Playback, Route};
+use iptv_cast::{
+    Cast, Connect, Connection, Diagnostic, Link, Media, PeerTrust, PinCode, Playback, Route,
+};
 use std::{error::Error, io, num::NonZeroU16, time::Duration};
 use zeroize::Zeroizing;
 
@@ -95,6 +97,7 @@ async fn main() -> Result<()> {
     let mut updates = session.subscribe();
     let mut playing = false;
     let mut terminal = false;
+    let mut live_playback = false;
     let observed = tokio::time::timeout(Duration::from_secs(seconds.get().into()), async {
         while let Some(snapshot) = updates.next().await {
             println!(
@@ -104,10 +107,18 @@ async fn main() -> Result<()> {
                 snapshot.position(),
                 snapshot.duration()
             );
-            if let Some(error) = snapshot.link_error() {
+            let error = match snapshot.playback() {
+                Playback::Failed(error) => Some(error),
+                _ => snapshot.link_error(),
+            };
+            if let Some(error) = error {
                 eprintln!("{error}");
+                if let Some(Diagnostic::TimingListener { local_addr }) = error.diagnostic() {
+                    eprintln!("Check whether the receiver can reach the sender's UDP timing listener at {local_addr}.");
+                }
             }
             playing |= matches!(snapshot.playback(), Playback::Playing);
+            live_playback = snapshot.link() == Link::Connected && matches!(snapshot.playback(), Playback::Playing);
             terminal |= matches!(
                 snapshot.playback(),
                 Playback::Ended | Playback::NoLongerPresent
@@ -132,6 +143,9 @@ async fn main() -> Result<()> {
         return Err(
             "VOD session did not reach a terminal media state within the observation window".into(),
         );
+    }
+    if mode == "live" && (observed.is_ok() || !live_playback) {
+        return Err("Live playback did not stay active through the observation window".into());
     }
     Ok(())
 }

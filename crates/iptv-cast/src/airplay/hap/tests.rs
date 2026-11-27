@@ -345,7 +345,7 @@ async fn rejects_pin_refusal_and_preserves_identity_on_replacement() {
         .unwrap();
     assert!(matches!(
         first.finish("1234").await,
-        Err(AuthFault::InvalidPin)
+        Err(AuthFailure(AuthFault::InvalidPin, Delivery::Acknowledged))
     ));
     let second = challenge(start_pairing(address).await.unwrap())
         .await
@@ -365,7 +365,10 @@ async fn rejects_pin_refusal_and_preserves_identity_on_replacement() {
     for _ in 0..2 {
         assert!(matches!(
             verify(address, &keys).await,
-            Err(AuthFault::IdentityMismatch)
+            Err(AuthFailure(
+                AuthFault::IdentityMismatch,
+                Delivery::Acknowledged
+            ))
         ));
     }
     server.await.unwrap();
@@ -385,9 +388,83 @@ async fn approval_can_be_denied_or_expire() {
     });
     let wire = start_pairing(address).await.unwrap();
     let denied = Challenge::receive(wire, address, Instant::now() + Duration::from_secs(15)).await;
-    assert!(matches!(denied, Err(AuthFault::ApprovalDenied)));
+    assert!(matches!(
+        denied,
+        Err(AuthFailure(
+            AuthFault::ApprovalDenied,
+            Delivery::Acknowledged
+        ))
+    ));
     let wire = start_pairing(address).await.unwrap();
     let expired = Challenge::receive(wire, address, Instant::now() + Duration::from_secs(1)).await;
-    assert!(matches!(expired, Err(AuthFault::TimedOut)));
+    assert!(matches!(
+        expired,
+        Err(AuthFailure(
+            AuthFault::TimedOut,
+            Delivery::MayHaveReachedReceiver
+        ))
+    ));
+    server.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn distinguishes_connect_failure_timeout_after_auth_write_and_explicit_reply() {
+    let dead = Accessory::bind().await;
+    let dead_address = dead.address();
+    drop(dead);
+    assert!(matches!(
+        start_pairing(dead_address).await,
+        Err(AuthFailure(
+            AuthFault::Wire(Fault::Unreachable),
+            Delivery::NotSent
+        ))
+    ));
+
+    let accessory = Accessory::bind().await;
+    let address = accessory.address();
+    let server = tokio::spawn(async move {
+        let mut pair = accessory.accept().await;
+        let approval = pair.receive().await.unwrap();
+        pair.respond(&approval, 200, &[]).await;
+        let request = pair.receive().await.unwrap();
+        assert_eq!(request.request_target, "POST /pair-setup");
+        assert!(matches!(pair.receive().await, Err(Fault::Closed)));
+        let mut verify = accessory.accept().await;
+        let request = verify.receive().await.unwrap();
+        assert_eq!(request.request_target, "POST /pair-verify");
+        assert!(matches!(verify.receive().await, Err(Fault::Closed)));
+        let mut refusal = accessory.accept().await;
+        let request = refusal.receive().await.unwrap();
+        refusal.respond(&request, 403, &[]).await;
+    });
+
+    let wire = start_pairing(address).await.unwrap();
+    assert!(matches!(
+        Challenge::receive(wire, address, Instant::now() + Duration::from_secs(15)).await,
+        Err(AuthFailure(
+            AuthFault::TimedOut,
+            Delivery::MayHaveReachedReceiver
+        ))
+    ));
+    let record = StoredKeys {
+        seed: Zeroizing::new([5; 32]),
+        peer_key: [9; 32],
+        peer_id: ACCESSORY_ID.into(),
+        client_id: b"synthetic-id".into(),
+    };
+    assert!(matches!(
+        verify(address, &record).await,
+        Err(AuthFailure(
+            AuthFault::TimedOut,
+            Delivery::MayHaveReachedReceiver
+        ))
+    ));
+    assert!(matches!(
+        verify(address, &record).await,
+        Err(AuthFailure(
+            AuthFault::Wire(Fault::Integrity),
+            Delivery::Acknowledged
+        ))
+    ));
     server.await.unwrap();
 }

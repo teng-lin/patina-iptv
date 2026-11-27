@@ -1,5 +1,6 @@
 //! PIN-approved AirPlay pair-setup and identity-bound pair-verify.
 use super::wire::{self, Fault, Version, Wire};
+use crate::sender::Delivery;
 use num_bigint::BigUint;
 use ring::{
     agreement::{self, EphemeralPrivateKey, UnparsedPublicKey, X25519},
@@ -54,6 +55,31 @@ impl From<Fault> for AuthFault {
 }
 
 type Result<T> = std::result::Result<T, AuthFault>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct AuthFailure(pub(super) AuthFault, pub(super) Delivery);
+
+impl From<AuthFault> for AuthFailure {
+    fn from(fault: AuthFault) -> Self {
+        Self(fault, Delivery::NotSent)
+    }
+}
+
+impl From<Fault> for AuthFailure {
+    fn from(fault: Fault) -> Self {
+        AuthFault::from(fault).into()
+    }
+}
+
+type Reported<T> = std::result::Result<T, AuthFailure>;
+
+fn acknowledged<T>(response: Result<T>) -> Reported<T> {
+    response.map_err(|fault| AuthFailure(fault, Delivery::Acknowledged))
+}
+
+fn in_flight(fault: impl Into<AuthFault>) -> AuthFailure {
+    AuthFailure(fault.into(), Delivery::MayHaveReachedReceiver)
+}
 
 fn pair_nonce(label: &[u8; 8]) -> [u8; 12] {
     let mut nonce = [0; 12];
@@ -295,17 +321,22 @@ async fn auth_request(
     path: &str,
     data: &[u8],
     authentication_error: AuthFault,
-) -> Result<Fields> {
+    expected_state: u8,
+) -> Reported<Fields> {
     let response = timeout(
         HANDSHAKE_TIMEOUT,
         wire.request(Version::Http, "POST", path, AUTH_HEADERS, data),
     )
     .await
-    .map_err(|_| AuthFault::TimedOut)??;
+    .map_err(|_| in_flight(AuthFault::TimedOut))?
+    .map_err(in_flight)?;
     match response.require_ok() {
-        Err(Fault::Refused(401 | 403 | 470)) => Err(authentication_error),
-        Err(error) => Err(error.into()),
-        Ok(response) => Fields::parse(&response.body),
+        Err(Fault::Refused(401 | 403 | 470)) => acknowledged(Err(authentication_error)),
+        Err(error) => acknowledged(Err(error.into())),
+        Ok(response) => acknowledged(
+            Fields::parse(&response.body)
+                .and_then(|fields| fields.require_state(expected_state, authentication_error)),
+        ),
     }
 }
 
@@ -322,7 +353,7 @@ pub(super) struct Challenge {
     salt: [u8; 16],
 }
 
-pub(super) async fn start_pairing(address: SocketAddr) -> Result<Wire> {
+pub(super) async fn start_pairing(address: SocketAddr) -> Reported<Wire> {
     let mut wire = open(address).await?;
     // The receiver may wait for approval before replying. Return after the
     // request is sent so the caller can display the pending approval prompt.
@@ -331,7 +362,8 @@ pub(super) async fn start_pairing(address: SocketAddr) -> Result<Wire> {
         wire.send_request(Version::Http, "POST", "/pair-pin-start", AUTH_HEADERS, &[]),
     )
     .await
-    .map_err(|_| AuthFault::TimedOut)??;
+    .map_err(|_| in_flight(AuthFault::TimedOut))?
+    .map_err(in_flight)?;
     Ok(wire)
 }
 
@@ -340,13 +372,16 @@ impl Challenge {
         mut wire: Wire,
         address: SocketAddr,
         deadline: Instant,
-    ) -> Result<Self> {
+    ) -> Reported<Self> {
         let response = timeout_at(deadline, wire.receive_response(Version::Http))
             .await
-            .map_err(|_| AuthFault::TimedOut)??;
+            .map_err(|_| in_flight(AuthFault::TimedOut))?
+            .map_err(in_flight)?;
         match response.require_ok() {
-            Err(Fault::Refused(401 | 403 | 470)) => return Err(AuthFault::ApprovalDenied),
-            Err(error) => return Err(error.into()),
+            Err(Fault::Refused(401 | 403 | 470)) => {
+                return acknowledged(Err(AuthFault::ApprovalDenied));
+            }
+            Err(error) => return acknowledged(Err(error.into())),
             Ok(_) => {}
         }
         let request = tlv(&[(METHOD, &[0]), (STATE, &[1])]);
@@ -355,13 +390,13 @@ impl Challenge {
             "/pair-setup",
             &request,
             AuthFault::ApprovalDenied,
+            2,
         )
-        .await?
-        .require_state(2, AuthFault::ApprovalDenied)?;
-        let salt = fields.array(SALT)?;
-        let public = fields.get(PUBLIC_KEY)?;
+        .await?;
+        let salt = acknowledged(fields.array(SALT))?;
+        let public = acknowledged(fields.get(PUBLIC_KEY))?;
         if public.len() > SRP_BYTES {
-            return Err(Fault::InvalidMessage.into());
+            return acknowledged(Err(Fault::InvalidMessage.into()));
         }
         Ok(Self {
             wire,
@@ -371,9 +406,9 @@ impl Challenge {
         })
     }
 
-    pub(super) async fn finish(mut self, pin: &str) -> Result<(Verified, StoredKeys)> {
+    pub(super) async fn finish(mut self, pin: &str) -> Reported<(Verified, StoredKeys)> {
         if pin.len() != 4 || !pin.bytes().all(|digit| digit.is_ascii_digit()) {
-            return Err(AuthFault::InvalidPin);
+            return Err(AuthFault::InvalidPin.into());
         }
         let srp_secret = Zeroizing::new(random::<32>()?);
         let exchange = SrpExchange::start(&srp_secret, pin.as_bytes(), &self.salt, &self.public)?;
@@ -388,10 +423,14 @@ impl Challenge {
             "/pair-setup",
             &request,
             AuthFault::InvalidPin,
+            4,
         )
-        .await?
-        .require_state(4, AuthFault::InvalidPin)?;
-        exchange.verify_server(response.get(PROOF)?)?;
+        .await?;
+        acknowledged(
+            response
+                .get(PROOF)
+                .and_then(|proof| exchange.verify_server(proof)),
+        )?;
 
         let seed = Zeroizing::new(random::<32>()?);
         let signing = Ed25519KeyPair::from_seed_unchecked(seed.as_ref())
@@ -425,28 +464,30 @@ impl Challenge {
             "/pair-setup",
             &tlv(&[(STATE, &[5]), (ENCRYPTED, &ciphertext)]),
             AuthFault::InvalidPin,
+            6,
         )
-        .await?
-        .require_state(6, AuthFault::InvalidPin)?;
-        let mut ciphertext = response.get(ENCRYPTED)?.to_vec();
-        let plain = wire::decrypt(&aead, pair_nonce(b"PS-Msg06"), b"", &mut ciphertext)?;
-        let fields = Fields::parse(plain)?;
+        .await?;
+        let mut ciphertext = acknowledged(response.get(ENCRYPTED))?.to_vec();
+        let plain = acknowledged(
+            wire::decrypt(&aead, pair_nonce(b"PS-Msg06"), b"", &mut ciphertext).map_err(Into::into),
+        )?;
+        let fields = acknowledged(Fields::parse(plain))?;
 
-        let peer_key = fields.array::<32>(PUBLIC_KEY)?;
-        let peer_id = fields.get(IDENTIFIER)?;
+        let peer_key = acknowledged(fields.array::<32>(PUBLIC_KEY))?;
+        let peer_id = acknowledged(fields.get(IDENTIFIER))?;
         if peer_id.len() > u8::MAX.into() {
-            return Err(Fault::InvalidMessage.into());
+            return acknowledged(Err(Fault::InvalidMessage.into()));
         }
         let signing_material = derive(
             exchange.shared.as_ref(),
             b"Pair-Setup-Accessory-Sign-Salt",
             b"Pair-Setup-Accessory-Sign-Info",
         );
-        verify_signature(
+        acknowledged(verify_signature(
             &peer_key,
             &[signing_material.as_ref(), peer_id, &peer_key],
-            fields.get(SIGNATURE)?,
-        )?;
+            acknowledged(fields.get(SIGNATURE))?,
+        ))?;
         let keys = StoredKeys {
             seed,
             peer_key,
@@ -492,7 +533,7 @@ fn verify_signature(key: &[u8; 32], message: &[&[u8]], signature: &[u8]) -> Resu
         .map_err(|_| AuthFault::IdentityMismatch)
 }
 
-pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Result<Verified> {
+pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Reported<Verified> {
     let mut wire = open(address).await?;
     let private = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
         .map_err(|_| AuthFault::Unavailable)?;
@@ -504,33 +545,37 @@ pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Result<Ver
         "/pair-verify",
         &tlv(&[(STATE, &[1]), (PUBLIC_KEY, public.as_ref())]),
         Fault::Integrity.into(),
+        2,
     )
-    .await?
-    .require_state(2, Fault::Integrity.into())?;
-    let peer_public = response.array::<32>(PUBLIC_KEY)?;
-    let shared = agreement::agree_ephemeral(
-        private,
-        &UnparsedPublicKey::new(&X25519, peer_public),
-        |secret| Zeroizing::new(<[u8; 32]>::try_from(secret).expect("X25519 output length")),
-    )
-    .map_err(|_| Fault::Integrity)?;
+    .await?;
+    let peer_public = acknowledged(response.array::<32>(PUBLIC_KEY))?;
+    let shared = acknowledged(
+        agreement::agree_ephemeral(
+            private,
+            &UnparsedPublicKey::new(&X25519, peer_public),
+            |secret| Zeroizing::new(<[u8; 32]>::try_from(secret).expect("X25519 output length")),
+        )
+        .map_err(|_| Fault::Integrity.into()),
+    )?;
     let aead = wire::key(&derive(
         shared.as_ref(),
         b"Pair-Verify-Encrypt-Salt",
         b"Pair-Verify-Encrypt-Info",
     ));
-    let mut ciphertext = response.get(ENCRYPTED)?.to_vec();
-    let plain = wire::decrypt(&aead, pair_nonce(b"PV-Msg02"), b"", &mut ciphertext)?;
-    let fields = Fields::parse(plain)?;
-    let peer_id = fields.get(IDENTIFIER)?;
+    let mut ciphertext = acknowledged(response.get(ENCRYPTED))?.to_vec();
+    let plain = acknowledged(
+        wire::decrypt(&aead, pair_nonce(b"PV-Msg02"), b"", &mut ciphertext).map_err(Into::into),
+    )?;
+    let fields = acknowledged(Fields::parse(plain))?;
+    let peer_id = acknowledged(fields.get(IDENTIFIER))?;
     if peer_id != keys.peer_id {
-        return Err(AuthFault::IdentityMismatch);
+        return acknowledged(Err(AuthFault::IdentityMismatch));
     }
-    verify_signature(
+    acknowledged(verify_signature(
         &keys.peer_key,
         &[&peer_public, peer_id, public.as_ref()],
-        fields.get(SIGNATURE)?,
-    )?;
+        acknowledged(fields.get(SIGNATURE))?,
+    ))?;
 
     let key = keys.signing_key()?;
     let signature = key.sign(&[public.as_ref(), &keys.client_id, &peer_public].concat());
@@ -544,9 +589,9 @@ pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Result<Ver
         "/pair-verify",
         &tlv(&[(STATE, &[3]), (ENCRYPTED, &ciphertext)]),
         Fault::Integrity.into(),
+        4,
     )
-    .await?
-    .require_state(4, Fault::Integrity.into())?;
+    .await?;
 
     wire.enable_encryption(
         &derive(

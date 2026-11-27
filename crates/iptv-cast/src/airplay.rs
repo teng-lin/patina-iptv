@@ -13,7 +13,7 @@ use crate::sender::{
     Observation, PairDriver, PeerTrust, PinCode, Playback, ProtocolId, Route, ScanSink, Stage,
     StopOutcome, VerifiedConnection,
 };
-use hap::{AuthFault, Challenge, StoredKeys, Verified};
+use hap::{AuthFailure, AuthFault, Challenge, StoredKeys, Verified};
 use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent};
 use std::{
     collections::BTreeMap,
@@ -92,7 +92,7 @@ impl AirPlay {
     ) -> Result<BackendConnect, Error> {
         if let Some(credential) = credential {
             let keys = StoredKeys::decode(credential.as_bytes())
-                .map_err(|fault| auth_error(fault, Stage::Connect))?;
+                .map_err(|fault| auth_error(fault.into(), Stage::Connect))?;
             let verified = hap::verify(address, &keys)
                 .await
                 .map_err(|fault| auth_error(fault, Stage::Connect))?;
@@ -345,7 +345,7 @@ fn wire_kind(fault: Fault) -> ErrorKind {
     }
 }
 
-fn auth_error(fault: AuthFault, stage: Stage) -> Error {
+fn auth_error(AuthFailure(fault, delivery): AuthFailure, stage: Stage) -> Error {
     let kind = match fault {
         AuthFault::Wire(fault) => wire_kind(fault),
         AuthFault::TimedOut => ErrorKind::TimedOut,
@@ -355,7 +355,7 @@ fn auth_error(fault: AuthFault, stage: Stage) -> Error {
         AuthFault::InvalidCredential => ErrorKind::Storage,
         AuthFault::Unavailable => ErrorKind::Unavailable,
     };
-    failure(kind, stage)
+    Error::new(kind, stage, delivery)
 }
 
 fn video_error(fault: VideoFault, stage: Stage, delivery: Delivery) -> Error {
@@ -379,7 +379,7 @@ fn video_error(fault: VideoFault, stage: Stage, delivery: Delivery) -> Error {
 }
 
 struct AirPairing {
-    challenge: Option<JoinHandle<Result<Challenge, AuthFault>>>,
+    challenge: Option<JoinHandle<Result<Challenge, AuthFailure>>>,
     expires: Instant,
     timing_port: Option<NonZeroU16>,
 }

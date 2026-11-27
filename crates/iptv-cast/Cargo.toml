@@ -25,7 +25,8 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 mdns-sd = { version = "0.21", optional = true }
 mime = "0.3"
 num-bigint = { version = "0.4", optional = true }
-plist = { version = "1.10", default-features = false, optional = true }
+# The event reader lets us limit decoded object expansion before constructing a Value.
+plist = { version = "~1.10.4", default-features = false, features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"], optional = true }
 prost = { version = "0.14", optional = true }
 ring = { version = "0.17", optional = true }
 serde_json = { workspace = true, optional = true }
@@ -46,7 +47,6 @@ dbus = { version = "0.9", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 rcgen = { version = "0.13", default-features = false, features = ["ring"] }
-
 rpassword = "7"
 
 [[example]]

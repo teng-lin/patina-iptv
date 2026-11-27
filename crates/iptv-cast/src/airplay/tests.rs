@@ -525,7 +525,7 @@ fn pairing_failures_are_typed_without_peer_details() {
             ErrorKind::ReceiverRefused,
         ),
     ] {
-        let error = auth_error(fault, Stage::Pair);
+        let error = auth_error(fault.into(), Stage::Pair);
         assert_eq!(error.kind(), kind);
         assert_eq!(error.stage(), Stage::Pair);
         assert_eq!(error.delivery(), Delivery::NotSent);
