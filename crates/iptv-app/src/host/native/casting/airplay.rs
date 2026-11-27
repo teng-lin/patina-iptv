@@ -65,7 +65,11 @@ fn timing_port(value: Option<&OsStr>) -> Result<Option<NonZeroU16>, Error> {
         .transpose()
 }
 
-pub(super) async fn pair(pairing: Pairing, prompt: PairingPrompt) -> Result<Connection, Error> {
+pub(super) async fn pair(
+    pairing: Pairing,
+    prompt: PairingPrompt,
+    current: impl FnOnce() -> Result<(), Error>,
+) -> Result<Connection, Error> {
     let deadline = pairing.expires_at().map_or_else(
         || Instant::now() + Duration::from_secs(30),
         Instant::from_std,
@@ -88,6 +92,10 @@ pub(super) async fn pair(pairing: Pairing, prompt: PairingPrompt) -> Result<Conn
             return Err(super::map_error(&error));
         }
     };
+    if let Err(error) = current() {
+        pairing.cancel().await;
+        return Err(error);
+    }
     pairing
         .submit(pin)
         .await

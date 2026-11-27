@@ -18,12 +18,12 @@ use std::{
     net::SocketAddr,
     num::NonZeroU16,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 use tokio::runtime::Handle;
 use tokio::{
-    sync::OnceCell,
+    sync::{OnceCell, watch},
     time::{Instant, timeout, timeout_at},
 };
 
@@ -31,6 +31,8 @@ use tokio::{
 mod airplay;
 #[cfg(target_os = "android")]
 pub(super) mod android;
+#[cfg(any(target_os = "android", test))]
+mod android_events;
 
 pub(super) struct Sender {
     client: OnceCell<Client>,
@@ -264,27 +266,24 @@ impl Port for Sender {
             #[cfg(not(target_os = "android"))]
             let route = self.route(&receiver)?;
             #[cfg(target_os = "android")]
-            let route = {
+            let (route, topology) = {
                 let current = android::topology()?.ok_or(Error::Unavailable)?;
                 let cache = self.routes.lock().map_err(|_| Error::Unavailable)?;
                 if cache.topology.as_ref() != Some(&current) {
                     return Err(Error::Unavailable);
                 }
-                cache
+                let route = cache
                     .entries
                     .get(&receiver.id)
                     .cloned()
-                    .ok_or(Error::Unavailable)?
+                    .ok_or(Error::Unavailable)?;
+                (route, current)
             };
             let connect = {
-                // AirPlay refreshes its mDNS candidates before opening a socket.
-                // Release the Wi-Fi lease before waiting for receiver/PIN approval.
+                // Stable receiver IDs are refreshed through mDNS before connecting.
+                // Release the Wi-Fi lease before waiting for receiver PIN approval.
                 #[cfg(target_os = "android")]
-                let _multicast = if receiver.protocol == NetworkProtocol::AirPlay {
-                    android::Multicast::acquire()?
-                } else {
-                    None
-                };
+                let _multicast = android::Multicast::acquire()?;
                 self.client()
                     .await?
                     .cast
@@ -295,9 +294,20 @@ impl Port for Sender {
             let connection = match connect {
                 Connect::Ready(connection) => connection,
                 Connect::PinRequired(pairing) => {
-                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    #[cfg(target_os = "android")]
                     {
-                        airplay::pair(pairing, pairing_prompt).await?
+                        if let Err(error) = android::require_topology(&topology) {
+                            pairing.cancel().await;
+                            return Err(error);
+                        }
+                        airplay::pair(pairing, pairing_prompt, || {
+                            android::require_topology(&topology)
+                        })
+                        .await?
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        airplay::pair(pairing, pairing_prompt, || Ok(())).await?
                     }
                     #[cfg(not(any(target_os = "linux", target_os = "android")))]
                     {
@@ -308,6 +318,11 @@ impl Port for Sender {
                 }
                 _ => return Err(Error::Unsupported),
             };
+            #[cfg(target_os = "android")]
+            if let Err(error) = android::require_topology(&topology) {
+                connection.close().await;
+                return Err(error);
+            }
             if receiver.protocol == NetworkProtocol::AirPlay
                 && connection.peer_trust() != PeerTrust::VerifiedPairing
             {
@@ -329,6 +344,8 @@ impl Port for Sender {
                     listen,
                     remote,
                     protocol: receiver.protocol,
+                    #[cfg(target_os = "android")]
+                    topology,
                 }),
                 pending: None,
                 handle: Handle::current(),
@@ -357,6 +374,8 @@ struct Ready {
     listen: SocketAddr,
     remote: SocketAddr,
     protocol: NetworkProtocol,
+    #[cfg(target_os = "android")]
+    topology: String,
 }
 
 struct Pending {
@@ -452,15 +471,18 @@ impl Prepared for Handoff {
                 listen,
                 remote,
                 protocol,
+                #[cfg(target_os = "android")]
+                topology,
             } = self.ready.take().ok_or(Error::Unknown)?;
             #[cfg(target_os = "android")]
-            let mut service_state = match android::PlaybackLease::start(listen.ip()).await {
-                Ok(lease) => self.service.insert(lease).state(),
-                Err(error) => {
-                    connection.close().await;
-                    return Err(error);
-                }
-            };
+            let mut service_state =
+                match android::PlaybackLease::start(listen.ip(), &topology).await {
+                    Ok(lease) => self.service.insert(lease).state(),
+                    Err(error) => {
+                        connection.close().await;
+                        return Err(error);
+                    }
+                };
             // The old relay's listener is joined before the runtime calls load.
             let (relay, gate) = tokio::task::spawn_blocking(move || {
                 PlaybackRelay::start_cast(
@@ -489,7 +511,7 @@ impl Prepared for Handoff {
                 return Err(Error::Denied);
             }
             #[cfg(target_os = "android")]
-            if *service_state.borrow() != android::ServiceState::Ready {
+            if *service_state.borrow() != android_events::ServiceState::Ready {
                 drop(gate);
                 relay.shutdown().await;
                 connection.close().await;
@@ -546,7 +568,7 @@ impl Prepared for Handoff {
                         return Err(Error::Denied);
                     }
                     #[cfg(target_os = "android")]
-                    if *service_state.borrow() != android::ServiceState::Ready {
+                    if *service_state.borrow() != android_events::ServiceState::Ready {
                         return Err(Error::Unavailable);
                     }
                     if !gate.allow() {
@@ -574,12 +596,7 @@ impl Prepared for Handoff {
                 Ok(paused) => {
                     #[cfg(target_os = "android")]
                     let platform_updates = session.subscribe();
-                    let remote = Arc::new(Playing {
-                        session: tokio::sync::Mutex::new(Some(session)),
-                        relay: tokio::sync::Mutex::new(Some(relay)),
-                        #[cfg(target_os = "android")]
-                        service: Mutex::default(),
-                    });
+                    let remote = Arc::new(Playing::new(session, relay));
                     #[cfg(target_os = "android")]
                     {
                         remote
@@ -699,18 +716,62 @@ async fn stop_remote(session: Session) -> Result<(), Error> {
 }
 
 struct Playing {
-    session: tokio::sync::Mutex<Option<Session>>,
-    relay: tokio::sync::Mutex<Option<PlaybackRelay>>,
+    session: Arc<tokio::sync::Mutex<Option<Session>>>,
+    relay: Arc<tokio::sync::Mutex<Option<PlaybackRelay>>>,
+    stop_result: OnceLock<watch::Receiver<Option<Result<(), Error>>>>,
     #[cfg(target_os = "android")]
     service: Mutex<Option<android::PlaybackLease>>,
 }
 
 impl Playing {
-    async fn retire_relay(&self) {
-        let mut relay = self.relay.lock().await;
-        if let Some(relay) = relay.take() {
-            relay.shutdown().await;
+    fn new(session: Session, relay: PlaybackRelay) -> Self {
+        Self {
+            session: Arc::new(tokio::sync::Mutex::new(Some(session))),
+            relay: Arc::new(tokio::sync::Mutex::new(Some(relay))),
+            stop_result: OnceLock::new(),
+            #[cfg(target_os = "android")]
+            service: Mutex::default(),
         }
+    }
+
+    async fn stop_owned(&self) -> Result<(), Error> {
+        let mut outcome = self
+            .stop_result
+            .get_or_init(|| {
+                let (publish, outcome) = watch::channel(None);
+                let relay = self.relay.clone();
+                let session = self.session.clone();
+                #[cfg(target_os = "android")]
+                let service = self.service.lock().expect("cast service poisoned").take();
+                // The OS controls and the app may both stop this media. Keep one
+                // joined retirement and one receiver result even if a waiter drops.
+                tokio::spawn(async move {
+                    #[cfg(target_os = "android")]
+                    let _service = service;
+                    retire_relay(&relay).await;
+                    let session = session.lock().await.take();
+                    let result = match session {
+                        Some(session) => stop_remote(session).await,
+                        None => Ok(()),
+                    };
+                    publish.send_replace(Some(result));
+                });
+                outcome
+            })
+            .clone();
+        outcome
+            .wait_for(Option::is_some)
+            .await
+            .ok()
+            .and_then(|observed| *observed)
+            .unwrap_or(Err(Error::StopUnconfirmed))
+    }
+}
+
+async fn retire_relay(slot: &tokio::sync::Mutex<Option<PlaybackRelay>>) {
+    let mut slot = slot.lock().await;
+    if let Some(relay) = slot.take() {
+        relay.shutdown().await;
     }
 }
 
@@ -735,14 +796,12 @@ impl Remote for Playing {
 
     fn command(&self, command: Command) -> Task<'_, ()> {
         Box::pin(async move {
-            let mut slot = self.session.lock().await;
             if command == Command::Stop {
-                return if let Some(session) = slot.take() {
-                    drop(slot);
-                    stop_remote(session).await
-                } else {
-                    Ok(())
-                };
+                return self.stop_owned().await;
+            }
+            let mut slot = self.session.lock().await;
+            if self.stop_result.get().is_some() {
+                return Err(Error::Unavailable);
             }
             let session = slot.as_mut().ok_or(Error::Unavailable)?;
             let output = |change| output_control(session.snapshot().volume_scope(), change);
@@ -768,7 +827,15 @@ impl Remote for Playing {
         Box::pin(async {
             let slot = self.session.lock().await;
             let Some(session) = slot.as_ref() else {
-                return Ok(RemoteState::Ended);
+                return Ok(
+                    if self.stop_result.get().is_some_and(|result| {
+                        result.borrow().is_none() && result.has_changed().is_ok()
+                    }) {
+                        RemoteState::Loading
+                    } else {
+                        RemoteState::Ended
+                    },
+                );
             };
             let snapshot = session.snapshot();
             if finished(&snapshot) {
@@ -788,19 +855,20 @@ impl Remote for Playing {
 
     fn retire(&self) -> Retirement<'_> {
         Box::pin(async move {
-            self.retire_relay().await;
+            retire_relay(&self.relay).await;
             #[cfg(target_os = "android")]
             drop(self.service.lock().expect("cast service poisoned").take());
         })
     }
 
-    fn stop_checked(&self) -> Task<'_, ()> {
+    fn stop(&self) -> Retirement<'_> {
         Box::pin(async {
-            #[cfg(target_os = "android")]
-            let _service = self.service.lock().expect("cast service poisoned").take();
-            self.retire_relay().await;
-            self.command(Command::Stop).await
+            let _ = self.stop_owned().await;
         })
+    }
+
+    fn stop_checked(&self) -> Task<'_, ()> {
+        Box::pin(self.stop_owned())
     }
 }
 

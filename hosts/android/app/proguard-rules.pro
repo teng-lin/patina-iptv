@@ -63,7 +63,7 @@
 -keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.CastHost {
     static android.net.wifi.WifiManager$MulticastLock multicast();
     static java.lang.String topology();
-    static boolean start(long, java.lang.String);
+    static boolean start(long, java.lang.String, java.lang.String);
     static void release(long);
     static void playback(long, int, int);
     static byte[] loadCredential(java.lang.String);

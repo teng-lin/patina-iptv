@@ -27,7 +27,7 @@ import java.net.InetAddress
 
 /** The service can outlive the activity while an owned LAN relay serves the receiver. */
 class CastPlaybackService : Service() {
-    private data class Lease(val lan: CastHost.LanNetwork, val address: InetAddress)
+    private data class Lease(val lan: CastLanNetwork, val address: InetAddress)
     private val leases = LinkedHashMap<Long, Lease>()
     private val main = Handler(Looper.getMainLooper())
     private var lastStart = 0
@@ -75,7 +75,7 @@ class CastPlaybackService : Service() {
                 override fun onPause() = command(CastHost.PAUSE)
                 override fun onStop() = command(CastHost.STOP)
 
-                override fun onCustomAction(action: String?, extras: Bundle?) {
+                override fun onCustomAction(action: String, extras: Bundle?) {
                     if (action == Control.STOP.name) onStop()
                 }
             }, main)
@@ -104,10 +104,8 @@ class CastPlaybackService : Service() {
             } else {
                 startForeground(NOTIFICATION, notification)
             }
-            val address = CastHost.requestedAddress(id)
-            val lan = CastHost.lanNetworks(this).firstOrNull { address in it.addresses }
-            if (address == null || lan == null) {
-                CastHost.playbackEvent(id, CastHost.STOP)
+            val request = CastHost.request(id)
+            if (request == null) {
                 if (leases.isEmpty()) stopSelf(startId)
                 return START_NOT_STICKY
             }
@@ -116,15 +114,23 @@ class CastPlaybackService : Service() {
                     .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                     .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
                     .build()
+                // Subscribe before validating the snapshot so a subsequent
+                // address change reaches this specific lease.
                 connectivity.registerNetworkCallback(networks, networkCallback)
                 monitoring = true
+            }
+            val lan = CastLanNetwork.select(CastHost.lanNetworks(this), request)
+            if (lan == null) {
+                CastHost.playbackEvent(id, CastHost.STOP)
+                if (leases.isEmpty()) stopSelf(startId)
+                return START_NOT_STICKY
             }
             if (wake == null) {
                 wake = getSystemService(PowerManager::class.java)
                     .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "patina:cast").apply { acquire() }
             }
             if (lan.wifi) holdWifi()
-            leases[id] = Lease(lan, address)
+            leases[id] = Lease(lan, request.address)
             CastHost.playbackEvent(id, CastHost.READY)
         } catch (_: RuntimeException) {
             CastHost.playbackEvent(id, CastHost.STOP)
@@ -145,7 +151,7 @@ class CastPlaybackService : Service() {
 
     private fun lost(network: Network, addresses: List<InetAddress>) {
         for ((id, lease) in leases) {
-            if (lease.lan.network == network && lease.address !in addresses) {
+            if (lease.lan.handle == network.networkHandle && lease.address !in addresses) {
                 CastHost.playbackEvent(id, CastHost.STOP)
             }
         }

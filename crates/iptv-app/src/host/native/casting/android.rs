@@ -1,5 +1,9 @@
 //! Android LAN leases, media controls and Keystore callbacks.
-use super::{Playing, finished};
+use super::{
+    Playing,
+    android_events::{HostEvents, ServiceState},
+    finished,
+};
 use iptv_cast::{
     Availability, Credential, CredentialKey, CredentialStore, Feature, Link, Playback, StoreError,
     Updates,
@@ -64,6 +68,13 @@ pub(super) fn topology() -> Result<Option<String>, Error> {
     .ok_or(Error::Unavailable)
 }
 
+pub(super) fn require_topology(expected: &str) -> Result<(), Error> {
+    match topology()? {
+        Some(current) if current == expected => Ok(()),
+        _ => Err(Error::Unavailable),
+    }
+}
+
 /// Android filters multicast on Wi-Fi until the app takes this lock. Keep
 /// it for a bounded scan, with release on every exit including cancellation.
 pub(super) struct Multicast(GlobalRef);
@@ -95,7 +106,7 @@ impl Drop for Multicast {
 }
 
 fn store_error() -> StoreError {
-    StoreError::new(std::io::Error::other("Android pairing store unavailable"))
+    StoreError::new(std::io::Error::from(std::io::ErrorKind::Other))
 }
 
 pub(super) struct CastStore;
@@ -183,47 +194,6 @@ fn decode_credential(mut payload: Vec<u8>) -> Result<Option<Credential>, StoreEr
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ServiceState {
-    Pending,
-    Ready,
-    Stopped,
-}
-
-struct HostEvents {
-    state: watch::Sender<ServiceState>,
-    commands: mpsc::Sender<Command>,
-}
-
-impl HostEvents {
-    fn notify(&self, event: jint) {
-        match event {
-            0 => {
-                self.state.send_if_modified(|state| {
-                    if *state != ServiceState::Pending {
-                        return false;
-                    }
-                    *state = ServiceState::Ready;
-                    true
-                });
-            }
-            1 => {
-                // Terminal events cannot be displaced by queued key repeats.
-                self.state.send_replace(ServiceState::Stopped);
-            }
-            2 | 3 if *self.state.borrow() == ServiceState::Ready => {
-                let command = if event == 2 {
-                    Command::Play
-                } else {
-                    Command::Pause
-                };
-                let _ = self.commands.try_send(command);
-            }
-            _ => {}
-        }
-    }
-}
-
 static LEASES: LazyLock<Mutex<HashMap<jlong, HostEvents>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static NEXT_LEASE: AtomicI64 = AtomicI64::new(1);
@@ -249,7 +219,7 @@ pub(super) struct PlaybackLease {
 }
 
 impl PlaybackLease {
-    pub(super) async fn start(address: IpAddr) -> Result<Self, Error> {
+    pub(super) async fn start(address: IpAddr, topology: &str) -> Result<Self, Error> {
         let id = NEXT_LEASE.fetch_add(1, Ordering::Relaxed);
         let (state, events) = watch::channel(ServiceState::Pending);
         let (commands, input) = mpsc::channel(4);
@@ -264,11 +234,16 @@ impl PlaybackLease {
         };
         let started = call(|env, class| {
             let address = env.new_string(address.to_string())?;
+            let topology = env.new_string(topology)?;
             env.call_static_method(
                 class,
                 "start",
-                "(JLjava/lang/String;)Z",
-                &[JValue::Long(id), JValue::Object(&address)],
+                "(JLjava/lang/String;Ljava/lang/String;)Z",
+                &[
+                    JValue::Long(id),
+                    JValue::Object(&address),
+                    JValue::Object(&topology),
+                ],
             )?
             .z()
         });
