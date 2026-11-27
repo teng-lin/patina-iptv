@@ -446,3 +446,28 @@ fn interrupted_command(kind: ErrorKind) -> Error {
 fn stop_error(kind: ErrorKind, delivery: Delivery) -> Error {
     Error::new(kind, Stage::Stop, delivery)
 }
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn retirement_and_wire_dispatch_preserve_delivery() {
+        let cancelled = Dispatch::default();
+        cancelled.cancel_queued();
+        let error = cancelled.mark_sent().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Cancelled);
+        assert_eq!(error.stage(), Stage::Load);
+        assert_eq!(error.delivery(), Delivery::NotSent);
+        assert!(!cancelled.sent());
+
+        let dispatched = Dispatch::default();
+        dispatched.mark_sent().unwrap();
+        dispatched.cancel_queued();
+        assert!(dispatched.sent());
+        let error = dispatched.mark_sent().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Protocol);
+        assert_eq!(error.stage(), Stage::Load);
+        assert_eq!(error.delivery(), Delivery::MayHaveReachedReceiver);
+    }
+}

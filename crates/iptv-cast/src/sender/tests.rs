@@ -82,6 +82,7 @@ struct Fixture {
     stops: Count,
     controls: Count,
     block_command: AtomicBool,
+    block_stop: AtomicBool,
     closes: Count,
     pairs: Count,
     cancelled_pairs: Count,
@@ -105,6 +106,7 @@ impl Default for Fixture {
             stops: Count::default(),
             controls: Count::default(),
             block_command: AtomicBool::new(false),
+            block_stop: AtomicBool::new(false),
             closes: Count::default(),
             pairs: Count::default(),
             cancelled_pairs: Count::default(),
@@ -127,6 +129,7 @@ impl Fixture {
             expires: false,
             unsent_load: false,
             insecure_pair: false,
+            ignore_stored_credentials: false,
             block_connect: false,
         }
     }
@@ -145,6 +148,7 @@ struct Fake {
     expires: bool,
     unsent_load: bool,
     insecure_pair: bool,
+    ignore_stored_credentials: bool,
     block_connect: bool,
 }
 
@@ -215,7 +219,7 @@ impl Backend for Fake {
                 return Ok(BackendConnect::Ready(Box::new(driver)));
             }
             let identity = self.fixture.identity.load(Ordering::Relaxed);
-            match credential {
+            match credential.filter(|_| !self.ignore_stored_credentials) {
                 Some(credential) if credential.as_bytes() == identity.to_le_bytes() => {
                     Ok(BackendConnect::Ready(Box::new(driver)))
                 }
@@ -421,6 +425,9 @@ impl Driver for Receiver {
             }
             self.check_owner(Stage::Stop)?;
             self.fixture.stops.bump();
+            if self.fixture.block_stop.load(Ordering::Relaxed) {
+                pending::<()>().await;
+            }
             Ok(StopOutcome::StopRequested(Confirmation::ReceiverConfirmed))
         })
     }
@@ -559,6 +566,9 @@ async fn discovers_independent_protocols_under_one_deadline() {
     };
     assert_eq!(stable.name(), partial.name());
     assert_eq!(stable.name(), ephemeral.name());
+    let debug = format!("{stable:?}");
+    assert!(debug.contains(stable.id().as_str()));
+    assert!(!debug.contains(stable.name()));
     assert_eq!(stable.id(), second.routes()[1].id());
     assert_ne!(stable.id(), partial.id());
     assert_ne!(ephemeral.id(), second.routes()[2].id());
@@ -586,6 +596,7 @@ async fn discovers_independent_protocols_under_one_deadline() {
         Delivery::NotSent,
     );
     cast.forget(ephemeral).await.unwrap();
+    cast.forget(partial).await.unwrap();
     assert_error(
         cast.discover(Duration::ZERO).await.err().unwrap(),
         ErrorKind::InvalidInput,
@@ -1201,6 +1212,8 @@ async fn pairing_retires_on_expiry_wrong_pin_and_drop() {
 #[derive(Default)]
 struct BlockingStore {
     record: Mutex<Option<(String, Credential)>>,
+    loading: Count,
+    block_load: AtomicBool,
     saving: Count,
     saving_gate: Notify,
     fail: AtomicBool,
@@ -1212,6 +1225,10 @@ fn store_error() -> StoreError {
 
 impl CredentialStore for Arc<BlockingStore> {
     async fn load(&self, key: &CredentialKey) -> Result<Option<Credential>, StoreError> {
+        self.loading.bump();
+        if self.block_load.load(Ordering::Relaxed) {
+            pending::<()>().await;
+        }
         if self.fail.load(Ordering::Relaxed) {
             return Err(store_error());
         }
@@ -1560,4 +1577,201 @@ async fn cancelling_submit_retires_partial_pairing_and_insecure_pairing_is_disca
     );
     assert_eq!(fixture.closes.read(), 1);
     pairing(&cast, &route).await.cancel().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stalled_stop_joins_local_cleanup_and_preserves_last_playback_evidence() {
+    let fixture = Arc::new(Fixture::default());
+    fixture.block_stop.store(true, Ordering::Relaxed);
+    fixture.send_gate.add_permits(1);
+    fixture.acknowledge.add_permits(1);
+    let cast = cast(fixture.backend());
+    let mut session = connection(&cast, &route(&cast).await)
+        .await
+        .load(media())
+        .unwrap();
+    assert_error(
+        session
+            .command(Command::Output {
+                scope: VolumeScope::Receiver,
+                change: OutputChange::SetMuted(true),
+            })
+            .await
+            .unwrap_err(),
+        ErrorKind::Unavailable,
+        Stage::Control,
+        Delivery::NotSent,
+    );
+    display_start(&session).await;
+    let mut observer = session.subscribe();
+    assert!(matches!(
+        observer.next().await.unwrap().playback(),
+        Playback::Accepted
+    ));
+    assert_error(
+        session.stop().await.unwrap_err(),
+        ErrorKind::TimedOut,
+        Stage::Stop,
+        Delivery::MayHaveReachedReceiver,
+    );
+    assert_eq!(fixture.stops.read(), 1);
+    assert_eq!(fixture.closes.read(), 1);
+    let final_snapshot = observer.next().await.unwrap();
+    assert!(matches!(final_snapshot.playback(), Playback::Accepted));
+    assert_eq!(final_snapshot.link(), Link::Disconnected);
+    assert!(observer.next().await.is_none());
+}
+
+#[tokio::test]
+async fn playback_failure_after_acknowledgement_retires_without_remote_write() {
+    let fixture = Arc::new(Fixture::default());
+    fixture.send_gate.add_permits(1);
+    fixture.acknowledge.add_permits(1);
+    let cast = cast(fixture.backend());
+    let session = connection(&cast, &route(&cast).await)
+        .await
+        .load(media())
+        .unwrap();
+    display_start(&session).await;
+    let mut observer = session.subscribe();
+    observer.next().await.unwrap();
+    fixture.event(Event::Playback(Playback::Failed(error(
+        ErrorKind::ReceiverRefused,
+        Stage::Observe,
+        Delivery::Acknowledged,
+    ))));
+
+    let final_snapshot = observer.next().await.unwrap();
+    let Playback::Failed(error) = final_snapshot.playback() else {
+        panic!("expected receiver-reported playback failure");
+    };
+    assert_eq!(error.stage(), Stage::Observe);
+    assert_eq!(error.delivery(), Delivery::Acknowledged);
+    assert_eq!(final_snapshot.link(), Link::Disconnected);
+    assert!(observer.next().await.is_none());
+    assert_error(
+        session.stop().await.unwrap_err(),
+        ErrorKind::ReceiverRefused,
+        Stage::Stop,
+        Delivery::NotSent,
+    );
+    assert_eq!(fixture.stops.read(), 0);
+}
+
+#[tokio::test]
+async fn transient_routes_pair_without_creating_a_durable_record() {
+    let fixture = Arc::new(Fixture::default());
+    let mut backend = fixture.backend();
+    backend.pair = true;
+    let store = Arc::new(BlockingStore::default());
+    let cast = Cast::builder()
+        .credential_store(store.clone())
+        .build_with(vec![Arc::new(backend)])
+        .unwrap();
+    let scan = cast.discover(WINDOW).await.unwrap();
+    let route = &scan.routes()[1];
+    for _ in 0..2 {
+        fixture.pairing_gate.add_permits(1);
+        let connection = timeout(
+            Duration::from_secs(5),
+            pairing(&cast, route)
+                .await
+                .submit(PinCode::parse("0042").unwrap()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(connection.peer_trust(), PeerTrust::VerifiedPairing);
+        connection.close().await;
+    }
+    cast.forget(route).await.unwrap();
+    assert_eq!(store.loading.read(), 0);
+    assert_eq!(store.saving.read(), 0);
+    assert!(store.record.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn existing_credentials_require_verified_identity_before_playback_or_repair() {
+    let fixture = Arc::new(Fixture::default());
+    let store = Arc::new(BlockingStore::default());
+    let mut backend = fixture.backend();
+    backend.pair = true;
+    let cast = Cast::builder()
+        .credential_store(store.clone())
+        .build_with(vec![Arc::new(backend)])
+        .unwrap();
+    let target = route(&cast).await;
+    fixture.pairing_gate.add_permits(1);
+    store.saving_gate.notify_one();
+    pairing(&cast, &target)
+        .await
+        .submit(PinCode::parse("0042").unwrap())
+        .await
+        .unwrap()
+        .close()
+        .await;
+    drop(cast);
+    let mut backend = fixture.backend();
+    backend.pair = true;
+    backend.insecure_pair = true;
+    let cast = Cast::builder()
+        .credential_store(store.clone())
+        .build_with(vec![Arc::new(backend)])
+        .unwrap();
+    let target = route(&cast).await;
+    assert_error(
+        cast.connect(&target).await.err().unwrap(),
+        ErrorKind::IdentityMismatch,
+        Stage::Connect,
+        Delivery::NotSent,
+    );
+    assert_eq!(fixture.closes.read(), 2);
+    drop(cast);
+
+    let mut backend = fixture.backend();
+    backend.pair = true;
+    backend.ignore_stored_credentials = true;
+    let cast = Cast::builder()
+        .credential_store(store.clone())
+        .build_with(vec![Arc::new(backend)])
+        .unwrap();
+    let target = route(&cast).await;
+    assert_error(
+        cast.connect(&target).await.err().unwrap(),
+        ErrorKind::IdentityMismatch,
+        Stage::Connect,
+        Delivery::NotSent,
+    );
+    assert_eq!(fixture.cancelled_pairs.read(), 1);
+    assert_eq!(store.saving.read(), 1);
+    assert!(store.record.lock().unwrap().is_some());
+}
+
+#[tokio::test]
+async fn forgetting_during_credential_lookup_cancels_before_network_dispatch() {
+    let fixture = Arc::new(Fixture::default());
+    let store = Arc::new(BlockingStore::default());
+    store.block_load.store(true, Ordering::Relaxed);
+    let mut backend = fixture.backend();
+    backend.pair = true;
+    backend.block_connect = true;
+    let cast = Cast::builder()
+        .credential_store(store.clone())
+        .build_with(vec![Arc::new(backend)])
+        .unwrap();
+    let target = route(&cast).await;
+    let lookup = {
+        let cast = cast.clone();
+        let target = target.clone();
+        tokio::spawn(async move { cast.connect(&target).await })
+    };
+    store.loading.wait(1).await;
+    cast.forget(&target).await.unwrap();
+    assert_error(
+        lookup.await.unwrap().err().unwrap(),
+        ErrorKind::Cancelled,
+        Stage::Connect,
+        Delivery::NotSent,
+    );
+    assert_eq!(fixture.connect_entered.read(), 0);
 }
