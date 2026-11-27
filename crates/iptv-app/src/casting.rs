@@ -474,10 +474,13 @@ fn report(error: Error) {
             "AirPlay timing did not arrive. Allow UDP port {port} from the receiver.",
             &[("port", port.into())],
         )),
-        Error::AirPlayTimingBind { port } => notify(&trf(
-            "Could not open AirPlay UDP timing port {port}.",
+        Error::AirPlayTimingSocket { port: Some(port) } => notify(&trf(
+            "AirPlay UDP timing failed on port {port}.",
             &[("port", port.into())],
         )),
+        Error::AirPlayTimingSocket { port: None } => {
+            notify(tr("Could not start AirPlay UDP timing."))
+        }
         Error::AirPlayRelayAddress => {
             notify(tr("Patina cannot relay through a link-local IPv6 address."))
         }

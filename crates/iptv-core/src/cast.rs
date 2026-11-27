@@ -78,7 +78,7 @@ pub enum Error {
     Unknown,
     NoRequest { relay_port: u16 },
     AirPlayTiming { port: u16 },
-    AirPlayTimingBind { port: u16 },
+    AirPlayTimingSocket { port: Option<u16> },
     InvalidAirPlayTimingPort,
     AirPlayRelayAddress,
     PairingRejected,

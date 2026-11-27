@@ -85,6 +85,7 @@ impl CastStore {
                 Ok(Some(Credential::from_bytes(bytes)))
             }
             Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring::Error::Ambiguous(_)) => Err(StoreError::invalid_credential()),
             Err(error) => Err(StoreError::new(error)),
         })
         .await
@@ -162,6 +163,16 @@ pub(super) fn verify_disposable_pairing_store() {
                 entry
                     .set_secret(b"generated%bad-encoding")
                     .map_err(StoreError::new)
+            })
+            .await
+            .unwrap();
+        assert!(reopened.load_record(key).await.is_err());
+        reopened.remove_record(key).await.unwrap();
+        assert!(reopened.load_record(key).await.unwrap().is_none());
+        reopened
+            .run(key, |entry| {
+                entry.set_secret(b"AQ").map_err(StoreError::new)?;
+                entry.add_session_duplicate(b"Ag").map_err(StoreError::new)
             })
             .await
             .unwrap();

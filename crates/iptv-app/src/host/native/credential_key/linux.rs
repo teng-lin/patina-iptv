@@ -72,6 +72,22 @@ impl Entry {
             .map_err(error)
     }
 
+    #[cfg(test)]
+    pub(super) fn add_session_duplicate(&self, secret: &[u8]) -> Result<(), keyring::Error> {
+        self.broker
+            .get_collection_by_alias("session")
+            .map_err(error)?
+            .create_item(
+                "Generated duplicate pairing",
+                self.attributes(),
+                secret,
+                false,
+                "text/plain",
+            )
+            .map_err(error)?;
+        Ok(())
+    }
+
     pub(super) fn delete_secret(&self) -> Result<(), keyring::Error> {
         let found = self.broker.search_items(self.attributes()).map_err(error)?;
         for item in found.unlocked.iter().chain(&found.locked) {

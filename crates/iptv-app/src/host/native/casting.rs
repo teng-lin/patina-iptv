@@ -68,7 +68,11 @@ fn map_error(error: &iptv_cast::Error) -> Error {
         let port = local_addr.port();
         match error.kind() {
             ErrorKind::TimedOut => return Error::AirPlayTiming { port },
-            ErrorKind::Unavailable if port != 0 => return Error::AirPlayTimingBind { port },
+            ErrorKind::Unavailable => {
+                return Error::AirPlayTimingSocket {
+                    port: NonZeroU16::new(port).map(NonZeroU16::get),
+                };
+            }
             _ => {}
         }
     }
