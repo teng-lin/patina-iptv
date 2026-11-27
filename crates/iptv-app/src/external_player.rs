@@ -12,7 +12,7 @@ use std::rc::Rc;
 pub(crate) struct ExternalUi {
     state: Signal<State>,
     pub(crate) request: Memo<u64>,
-    session: Stored<Option<Active>>,
+    session: Stored<Option<Transport>>,
 }
 
 impl ExternalUi {
@@ -26,19 +26,29 @@ impl ExternalUi {
     }
 
     fn active(self) -> Option<Active> {
-        self.session.get()
+        let handoff = self.state.with_untracked(|state| state.active().cloned())?;
+        let transport = self.session.get()?;
+        Some(Active { handoff, transport })
     }
 
-    fn activate(self, active: Active) {
-        let handoff = active.handoff.clone();
-        self.session.replace(Some(active));
+    fn activate(self, handoff: Handoff, transport: Transport) -> bool {
+        if self.request.get_untracked() != handoff.ticket {
+            return false;
+        }
+        self.session.replace(Some(transport));
         self.state.update(|state| state.activate(handoff));
+        true
     }
 }
 
 #[derive(Clone)]
 struct Active {
     handoff: Handoff,
+    transport: Transport,
+}
+
+#[derive(Clone)]
+struct Transport {
     authority: ResolutionAuthority,
     group: String,
     session: host::ExternalSession,
@@ -48,24 +58,24 @@ pub fn enforce(ui: Ui) {
     let Some(active) = ui.cast.external.active() else {
         return;
     };
-    if active.session.is_retired() {
-        clear_retired(ui, &active);
+    if active.transport.session.is_retired() {
+        clear_retired(ui, &active.handoff);
         return;
     }
-    if !active.session.is_open() {
+    if !active.transport.session.is_open() {
         return;
     }
     if !crate::runtime_owner::runtime().parental_allowed(&active.handoff.target) {
-        active.session.close();
+        active.transport.session.close();
         return;
     }
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let allowed = owner
-            .external_playback_allowed(active.authority, active.group)
+            .external_playback_allowed(active.transport.authority, active.transport.group)
             .await;
         if !matches!(allowed, Ok(true)) && active_ticket(ui, active.handoff.ticket) {
-            active.session.close();
+            active.transport.session.close();
         }
     });
 }
@@ -77,8 +87,7 @@ fn active_ticket(ui: Ui, ticket: u64) -> bool {
         .with_untracked(|state| state.is_active(ticket))
 }
 
-fn clear_retired(ui: Ui, active: &Active) {
-    let handoff = &active.handoff;
+fn clear_retired(ui: Ui, handoff: &Handoff) {
     if active_ticket(ui, handoff.ticket) {
         ui.cast.external.session.replace(None);
         ui.cast
@@ -103,16 +112,16 @@ pub(crate) fn handoff_target(ui: Ui) -> Option<Target> {
         ui.cast
             .external
             .active()
-            .filter(|active| active.session.is_open())
+            .filter(|active| active.transport.session.is_open())
             .map(|active| active.handoff.target)
     })
 }
 
 pub(crate) fn is_playing(ui: Ui) -> bool {
-    ui.cast.external.session.with(|active| {
-        active
+    ui.cast.external.session.with(|transport| {
+        transport
             .as_ref()
-            .is_some_and(|active| active.session.is_open())
+            .is_some_and(|transport| transport.session.is_open())
     })
 }
 
@@ -124,7 +133,7 @@ pub(crate) fn returned(ui: Ui) {
 pub(crate) fn stop(ui: Ui) {
     cancel_pending(ui);
     if let Some(active) = ui.cast.external.active() {
-        active.session.close();
+        active.transport.session.close();
         crate::runtime_owner::runtime().parental_end_transfer(&active.handoff.target);
     }
 }
@@ -140,7 +149,7 @@ fn clear_pending_target(ui: Ui, ticket: Option<u64>) {
     external.state.set(state);
     if !external
         .active()
-        .is_some_and(|active| active.handoff.target == target && active.session.is_open())
+        .is_some_and(|active| active.handoff.target == target && active.transport.session.is_open())
     {
         crate::runtime_owner::runtime().parental_end_transfer(&target);
     }
@@ -280,9 +289,9 @@ pub fn cancel_pending(ui: Ui) {
     ui.cast.external.state.update(State::supersede);
     clear_pending_target(ui, None);
     if let Some(active) = ui.cast.external.active()
-        && active.session.is_retired()
+        && active.transport.session.is_retired()
     {
-        clear_retired(ui, &active);
+        clear_retired(ui, &active.handoff);
     }
 }
 
@@ -525,8 +534,8 @@ fn open_from(
                 return;
             }
             if let Some(previous) = ui.cast.external.active() {
-                previous.session.close_and_wait().await;
-                clear_retired(ui, &previous);
+                previous.transport.session.close_and_wait().await;
+                clear_retired(ui, &previous.handoff);
                 if !current() {
                     return;
                 }
@@ -568,16 +577,23 @@ fn open_from(
                 _ => None,
             };
             if let Some(session) = session {
-                let active = Active {
-                    handoff: Handoff { ticket, target },
+                let transport = Transport {
                     authority: expected,
                     group: group_id,
                     session,
                 };
-                ui.cast.external.activate(active.clone());
+                let handoff = Handoff { ticket, target };
+                if !ui
+                    .cast
+                    .external
+                    .activate(handoff.clone(), transport.clone())
+                {
+                    transport.session.close();
+                    return;
+                }
                 crate::tasks::spawn_in_app(async move {
-                    active.session.wait_retired().await;
-                    clear_retired(ui, &active);
+                    transport.session.wait_retired().await;
+                    clear_retired(ui, &handoff);
                 });
             } else {
                 unavailable();

@@ -54,6 +54,7 @@ mod projection_tests {
         let remote_updates = signal(0);
         effect(move || {
             cast.remote.get();
+            cast.controls.get();
             untracked(|| remote_updates.update(|updates| *updates += 1));
         });
         view()

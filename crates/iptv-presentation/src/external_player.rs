@@ -52,7 +52,13 @@ impl State {
     }
 
     pub fn activate(&mut self, handoff: Handoff) {
-        self.active = Some(handoff);
+        if handoff.ticket == self.request {
+            self.active = Some(handoff);
+        }
+    }
+
+    pub fn active(&self) -> Option<&Handoff> {
+        self.active.as_ref()
     }
 
     pub fn is_active(&self, ticket: u64) -> bool {
@@ -90,5 +96,11 @@ mod tests {
         state.clear_active(0);
         assert!(state.is_active(1));
         assert_eq!(state.pending_target(), Some(&new));
+        state.supersede();
+        state.activate(Handoff {
+            ticket: 1,
+            target: Target::live(3, "stale"),
+        });
+        assert_eq!(state.active().map(|active| &active.target), Some(&new));
     }
 }
