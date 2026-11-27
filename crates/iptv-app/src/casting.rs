@@ -425,6 +425,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
                     ui.play(ch, Playback::Live);
                 }
             }
+            _ if command != Command::Stop && !ui.cast_remote.get_untracked() => {}
             Ok(()) => ui.paused.set(command == Command::Pause),
             Err(e) => report(e),
         }
