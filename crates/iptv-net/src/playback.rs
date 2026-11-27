@@ -760,7 +760,7 @@ impl PlaybackRelay {
             write_timeouts: write_timeouts.clone(),
         });
         let prefix = session.prefix.clone();
-        let (stop, mut stopped) = oneshot::channel();
+        let (stop, stopped) = oneshot::channel();
         let (closed_tx, closed) = oneshot::channel();
         std::thread::Builder::new()
             .name("iptv-playback-http".into())
@@ -774,6 +774,9 @@ impl PlaybackRelay {
                     }
                 }
                 let _closed = Closed(Some(closed_tx));
+                // Release captured resources before acknowledging retirement,
+                // including when constructing the worker runtime fails.
+                let resources = (listener, session, stopped);
                 let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -781,6 +784,7 @@ impl PlaybackRelay {
                     return;
                 };
                 rt.block_on(async move {
+                    let (listener, session, mut stopped) = resources;
                     let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
                         return;
                     };
