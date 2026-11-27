@@ -5,4 +5,6 @@
     <string name="external_background">Otra app está reproduciendo un canal de Patina</string>
     <string name="cast_playback">Transmitiendo desde Patina</string>
     <string name="cast_stop">Detener transmisión</string>
+    <string name="cast_play">Reproducir</string>
+    <string name="cast_pause">Pausar</string>
 </resources>

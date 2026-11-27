@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.content.pm.ServiceInfo
 import android.media.MediaMetadata
 import android.media.VolumeProvider
@@ -18,6 +19,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -72,6 +74,10 @@ class CastPlaybackService : Service() {
                 override fun onPlay() = command(CastHost.PLAY)
                 override fun onPause() = command(CastHost.PAUSE)
                 override fun onStop() = command(CastHost.STOP)
+
+                override fun onCustomAction(action: String?, extras: Bundle?) {
+                    if (action == Control.STOP.name) onStop()
+                }
             }, main)
             setMetadata(
                 MediaMetadata.Builder()
@@ -84,8 +90,9 @@ class CastPlaybackService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         lastStart = startId
         val id = intent?.getLongExtra(ID, 0L) ?: 0L
-        if (intent?.action == STOP) {
-            if (leases.containsKey(id)) CastHost.playbackEvent(id, CastHost.STOP)
+        val control = Control.entries.firstOrNull { it.name == intent?.action }
+        if (control != null) {
+            if (id == active) CastHost.playbackEvent(id, control.event)
             if (leases.isEmpty()) stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -167,6 +174,12 @@ class CastPlaybackService : Service() {
         media.setPlaybackState(
             PlaybackState.Builder().setActions(actions)
                 .setState(platformState, PlaybackState.PLAYBACK_POSITION_UNKNOWN, speed)
+                // Android 13+ places the button from the playback state.
+                .addCustomAction(
+                    Control.STOP.name,
+                    CaptureLimits.localized(this).getString(Control.STOP.label),
+                    Control.STOP.icon,
+                )
                 .build(),
         )
         media.isActive = true
@@ -194,20 +207,34 @@ class CastPlaybackService : Service() {
             .setContentTitle(localized.getString(R.string.cast_playback))
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(openApp)
+            .setCategory(Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-        active?.let { id ->
-            val stop = Intent(this, CastPlaybackService::class.java).setAction(STOP).putExtra(ID, id)
-            val pending = PendingIntent.getService(
-                this, id.toInt(), stop,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            builder.setStyle(Notification.MediaStyle().setMediaSession(media.sessionToken).setShowActionsInCompactView(0))
-                .addAction(Notification.Action.Builder(
-                    android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    localized.getString(R.string.cast_stop), pending,
+        val id = active
+        val playback = lastPlayback
+        if (id != null && playback != null) {
+            val (state, controls) = playback
+            val primary = when {
+                state == PLAYING && controls and CONTROL_PAUSE != 0 -> Control.PAUSE
+                state == PAUSED && controls and CONTROL_PLAY != 0 -> Control.PLAY
+                else -> null
+            }
+            val actions = listOfNotNull(primary, Control.STOP)
+            val compact = actions.indices.toList().toIntArray()
+            builder.setStyle(Notification.MediaStyle().setMediaSession(media.sessionToken).setShowActionsInCompactView(*compact))
+            for (action in actions) {
+                val intent = Intent(this, CastPlaybackService::class.java).setAction(action.name).putExtra(ID, id)
+                val pending = PendingIntent.getService(
+                    this, id.toInt(), intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+                builder.addAction(Notification.Action.Builder(
+                    Icon.createWithResource(this, action.icon),
+                    localized.getString(action.label),
+                    pending,
                 ).build())
+            }
         }
         return builder.build()
     }
@@ -228,9 +255,14 @@ class CastPlaybackService : Service() {
         super.onDestroy()
     }
 
+    private enum class Control(val event: Int, val icon: Int, val label: Int) {
+        PLAY(CastHost.PLAY, android.R.drawable.ic_media_play, R.string.cast_play),
+        PAUSE(CastHost.PAUSE, android.R.drawable.ic_media_pause, R.string.cast_pause),
+        STOP(CastHost.STOP, android.R.drawable.ic_menu_close_clear_cancel, R.string.cast_stop),
+    }
+
     companion object {
         internal const val ID = "castId"
-        private const val STOP = "com.hantekllc.iptvrs.host.STOP_CAST"
         private const val CHANNEL = "cast-playback"
         private const val NOTIFICATION = 475
         private const val PLAYING = 1

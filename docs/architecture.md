@@ -741,7 +741,7 @@ the system UI, rather than being inferred from successful pairing or selection.
 Handheld Android registers the shared network sender for Chromecast and AirPlay.
 The Android host holds a Wi-Fi multicast lock during discovery and grants a
 foreground service lease for the selected connection's LAN interface before
-Patina submits its gated relay. The service keeps that relay available during
+Patina submits its gated relay. The service holds its foreground lease through
 backgrounding and screen lock and forwards media controls to the owned session.
 When the bound network or address disappears, the sender closes the relay and
 requires a fresh receiver selection. Android Keystore protects saved AirPlay

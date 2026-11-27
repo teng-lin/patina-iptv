@@ -8,6 +8,10 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     // NSH native views use these IDs and weak references to attach to a runtime-owned sender.
     ("host/native/apple_airplay/transport.rs", "NEXT_ID"),
     ("host/native/apple_airplay/transport.rs", "VIEWS"),
+    // The JNI class handle and non-owning callback IDs of Android's Cast foreground service.
+    ("host/native/casting/android.rs", "HOST"),
+    ("host/native/casting/android.rs", "LEASES"),
+    ("host/native/casting/android.rs", "NEXT_LEASE"),
     ("host/native/android_transport.rs", "RELAYS"), // JNI playback relay handles.
     ("backup.rs", "REQUEST"),                       // Android document picker signal.
     ("backup.rs", "ANSWER"),                        // Android document picker callback.

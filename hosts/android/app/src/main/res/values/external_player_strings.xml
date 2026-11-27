@@ -5,4 +5,6 @@
     <string name="external_background">Another app is playing a channel from Patina</string>
     <string name="cast_playback">Casting from Patina</string>
     <string name="cast_stop">Stop casting</string>
+    <string name="cast_play">Play</string>
+    <string name="cast_pause">Pause</string>
 </resources>

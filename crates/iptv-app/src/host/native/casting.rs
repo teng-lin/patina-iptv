@@ -276,14 +276,23 @@ impl Port for Sender {
                     .cloned()
                     .ok_or(Error::Unavailable)?
             };
-            let connection = match self
-                .client()
-                .await?
-                .cast
-                .connect(&route)
-                .await
-                .map_err(|error| map_error(&error))?
-            {
+            let connect = {
+                // AirPlay refreshes its mDNS candidates before opening a socket.
+                // Release the Wi-Fi lease before waiting for receiver/PIN approval.
+                #[cfg(target_os = "android")]
+                let _multicast = if receiver.protocol == NetworkProtocol::AirPlay {
+                    android::Multicast::acquire()?
+                } else {
+                    None
+                };
+                self.client()
+                    .await?
+                    .cast
+                    .connect(&route)
+                    .await
+                    .map_err(|error| map_error(&error))?
+            };
+            let connection = match connect {
                 Connect::Ready(connection) => connection,
                 Connect::PinRequired(pairing) => {
                     #[cfg(any(target_os = "linux", target_os = "android"))]

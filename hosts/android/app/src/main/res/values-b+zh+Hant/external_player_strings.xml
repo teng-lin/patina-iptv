@@ -5,4 +5,6 @@
     <string name="external_background">其他應用程式正在播放來自 Patina 的頻道</string>
     <string name="cast_playback">正在從 Patina 投放</string>
     <string name="cast_stop">停止投放</string>
+    <string name="cast_play">播放</string>
+    <string name="cast_pause">暫停</string>
 </resources>

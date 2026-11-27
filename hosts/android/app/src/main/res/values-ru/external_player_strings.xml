@@ -5,4 +5,6 @@
     <string name="external_background">Другое приложение воспроизводит канал из Patina</string>
     <string name="cast_playback">Трансляция из Patina</string>
     <string name="cast_stop">Остановить трансляцию</string>
+    <string name="cast_play">Воспроизвести</string>
+    <string name="cast_pause">Пауза</string>
 </resources>

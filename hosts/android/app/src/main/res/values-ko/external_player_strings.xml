@@ -5,4 +5,6 @@
     <string name="external_background">다른 앱이 Patina의 채널을 재생하고 있습니다</string>
     <string name="cast_playback">Patina에서 전송 중</string>
     <string name="cast_stop">전송 중지</string>
+    <string name="cast_play">재생</string>
+    <string name="cast_pause">일시정지</string>
 </resources>
