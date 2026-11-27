@@ -13,7 +13,7 @@
 #
 # --cold: only the cold starts (no zaps, keys or memory), for quick runs.
 # Each cold start prints the app's startup phases (`iptv startup:` lines,
-# `crates/iptv-app/src/startup.rs`): ms since the process started.
+# `crates/iptv-app/src/chrome/startup.rs`): ms since the process started.
 #
 # Reports: activity launch, stored guide mount proxy, zap to reported size/ready
 # (channel down in full screen; these are not first-render events), guide key handling and frame times during

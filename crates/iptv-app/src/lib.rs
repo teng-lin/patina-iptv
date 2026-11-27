@@ -4,7 +4,7 @@
 //! program, navigation rail and groups beside the guide grid) over one
 //! persistent video layer (`video.rs`). The guide shows one list at a time (`lists.rs`).
 
-use crate::i18n::tr;
+use crate::chrome::i18n::tr;
 
 #[cfg(patina_airplay_probe)]
 #[path = "../../../tools/apple-airplay-probe/view.rs"]
@@ -12,149 +12,71 @@ mod airplay_probe;
 #[cfg(patina_airplay_probe)]
 pub use airplay_probe::AirPlayProbe;
 
-static TUI_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Enables TUI-host layout adjustments (such as bypassing desktop horizontal
-/// `StickyCells` wrappers that `nsh-platform-tui` does not implement).
-pub fn set_tui_mode(enabled: bool) {
-    TUI_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
-}
-
-pub(crate) fn is_tui_mode() -> bool {
-    TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
-}
-
+mod chrome;
 /// Guide values and navigation used by the shell.
-pub mod guide {
-    pub use iptv_core::guide::{
-        Airing, CHANNELS, DAY, GROUPS, GroupName, HISTORY, HORIZON, HOUR, Listing, Program,
-        SYNTHETIC_EPOCH_UNIX, Schedule, SyntheticSchedule, VISIBLE, catchup_days, floor, floor_of,
-        group_start, now_minute, program_at, secs_to_next_minute, unix_of,
-    };
-    pub use iptv_presentation::guide::{
-        Focus, Move, PAST, Pane, ProgramSelection, STEP, home_window, moves, page_row, view_range,
-    };
-}
-#[cfg(all(
-    feature = "test-support",
-    any(target_os = "linux", target_os = "macos")
-))]
-mod guide_window_walkthrough;
-pub mod theme;
-
-mod airplay;
-mod archive_playback;
-mod backup;
-/// The document pickers a device has, and the ones headless apps get.
-#[cfg(feature = "test-support")]
-pub use backup::{Pickers, set_pickers_for_test};
-mod browse_playback;
-mod capabilities;
-mod capture_limits;
-mod cast_pairing;
-mod casting;
-mod channels_view;
-mod chooser;
-mod clock;
-mod content_image;
-mod custom_groups;
-mod data;
-mod desktop;
-mod device;
-mod device_wiring;
-mod epg_sources_view;
-mod exit_confirmation;
-mod external_player;
-mod fav_editor;
-mod favorites;
-mod fonts;
-mod grid;
-mod guide_assign_view;
-mod guide_clock;
-mod guide_inspect_view;
-mod guide_repair_view;
-mod header;
+pub mod guide;
 mod host;
-pub mod layout;
-mod tasks;
-pub mod timeline;
+mod library_ui;
+mod playback;
+mod screens;
+pub mod theme;
+mod wiring;
+
+use chrome::{
+    chooser, desktop, exit_confirmation, fonts, i18n, input, keyboard, menu_view, mode, overlays,
+    rail, remote_editor, startup_view, toast, ui_kit,
+};
+use guide::{fav_editor, favorites, grid, guide_clock, header, lists};
+use iptv_runtime as runtime;
+use library_ui::{
+    backup, custom_groups, epg_sources_view, guide_assign_view, guide_inspect_view,
+    guide_repair_view, organization_view, playlists_view, wizard_view,
+};
+use playback::{
+    browse_playback, external_player, interruption, media, multiview, multiview_picker,
+    multiview_view, panels, pip, play_bar, player, player_panels, touch_zap, video,
+};
+use runtime_owner::runtime;
+use screens::{
+    cast_pairing, casting, channels_view, parental_view, recordings_view, search_view,
+    settings_view, vod_view,
+};
+use wiring::{
+    data, device_wiring, request_ui, runtime_owner, runtime_wiring, settings, settings_wiring,
+};
+#[cfg(feature = "test-support")]
+use wiring::{guide_window_walkthrough, performance_probe};
+
+pub use chrome::{layout, startup};
+pub use guide::{header::debug_overlay, timeline};
+pub use host::set_tui_mode;
 // A browser host exports nothing: the glob is empty there.
+#[cfg(feature = "test-support")]
+pub use chrome::i18n::pseudo_fixed_for_test;
+/// Whether a keyboard binding fires on auto-repeats now (headless tests).
+#[cfg(feature = "test-support")]
+pub use chrome::input::keyboard_repeats;
+/// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
+#[cfg(feature = "test-support")]
+pub use chrome::input::use_remote_key_phases;
 #[allow(unused_imports)]
 #[doc(inline)]
 pub use host::exports::*;
-mod i18n;
+/// The document pickers a device has, and the ones headless apps get.
 #[cfg(feature = "test-support")]
-pub use i18n::pseudo_fixed_for_test;
-mod input;
-/// Whether a keyboard binding fires on auto-repeats now (headless tests).
-#[cfg(feature = "test-support")]
-pub use input::keyboard_repeats;
-/// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
-#[cfg(feature = "test-support")]
-pub use input::use_remote_key_phases;
-mod interruption;
-mod keyboard;
-mod list_rows;
-mod listen;
-mod listing_labels;
-mod lists;
-mod media;
-mod menu_view;
-mod mode;
-pub(crate) mod parental_view;
-#[cfg(feature = "test-support")]
-mod performance_probe;
-mod recordings_view;
-mod vod_view;
-use iptv_runtime as runtime;
-mod multiview;
-mod multiview_picker;
-mod multiview_view;
-mod numbers;
-mod on_demand;
-mod organization_view;
-mod overlays;
-mod panels;
-mod pip;
-mod play_bar;
-mod player;
-mod player_keys;
-mod player_panels;
-mod playlists_view;
-mod rail;
-mod remote_editor;
-mod request_ui;
-mod runtime_events;
-mod runtime_owner;
-mod runtime_wiring;
-use runtime_owner::runtime;
-pub use runtime_owner::schedule;
-mod scale;
-mod search_view;
-mod seek;
-mod settings;
-mod settings_offer;
-mod settings_view;
-mod settings_wiring;
-mod setup_view;
-pub mod startup;
-mod startup_view;
+pub use library_ui::backup::{Pickers, set_pickers_for_test};
+#[doc(hidden)]
+pub use playback::video::has_source as player_has_source;
+#[doc(hidden)]
+pub use playback::video::opens as player_opens;
+pub use time::clock;
+pub use wiring::runtime_owner::schedule;
+
 /// The app's guide clock and its UI tick.
 pub mod time {
-    pub use crate::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
-    pub use crate::guide_clock::{start, tick};
+    pub use crate::guide::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
+    pub use crate::guide::guide_clock::{start, tick};
 }
-mod touch_zap;
-mod ui_kit;
-mod video;
-mod wizard_view;
-
-pub use header::debug_overlay;
-pub use time::clock;
-#[doc(hidden)]
-pub use video::has_source as player_has_source;
-#[doc(hidden)]
-pub use video::opens as player_opens;
 
 /// iOS (an iPad): a tap beside the open columns or list closes them.
 pub(crate) const IOS: bool = crate::host::IPAD;
@@ -389,55 +311,7 @@ pub(crate) struct ScreensUi {
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
     update_dialog_open: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_revision: Signal<u64>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_ready: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_install_busy: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_cancel_requested: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_pending_dismissed: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_focus: Signal<usize>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_notes_scroll: ui_kit::FocusScroll,
+    updates: Option<settings_view::updates::UpdateUi>,
 }
 
 #[derive(Clone, Copy)]
@@ -561,55 +435,7 @@ impl Ui {
                 parental: signal(None),
                 settings_screen: signal(None),
                 update_dialog_open: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_revision: signal(0),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_ready: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_install_busy: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_cancel_requested: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_pending_dismissed: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_focus: signal(0),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_notes_scroll: ui_kit::FocusScroll::new(),
+                updates: host::updates::AVAILABLE.then(settings_view::updates::UpdateUi::new),
             },
             chrome: ChromeUi {
                 // Until a press reports its pointer: a finger on phones and
@@ -865,10 +691,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     pip::bind(ui);
     desktop::player_windows::bind(ui);
     bind_back(ui);
-    #[cfg(all(
-        feature = "test-support",
-        any(target_os = "linux", target_os = "macos")
-    ))]
+    #[cfg(feature = "test-support")]
     guide_window_walkthrough::bind(ui);
 
     let rows = element_ref();
@@ -1067,7 +890,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             move || chooser::is_open(ui, true),
             move || chooser::layer(ui, true),
         ))
-        .child(settings_view::notice_layer())
+        .child(toast::layer())
         .child(exit_confirmation::layer(ui))
 }
 
@@ -1492,14 +1315,23 @@ pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySour
 /// The guide header a desktop window `width` × `height` gets at the default
 /// text size (for tests: the same policy the header and the video follow).
 #[cfg(feature = "test-support")]
-pub fn desktop_guide_header(width: f32, height: f32) -> crate::layout::GuideHeader {
-    crate::layout::GuideHeader::of(width, height, scale::scale_for(width, height, true), 1.0)
+pub fn desktop_guide_header(width: f32, height: f32) -> crate::chrome::layout::GuideHeader {
+    crate::chrome::layout::GuideHeader::of(
+        width,
+        height,
+        chrome::scale::scale_for(width, height, true),
+        1.0,
+    )
 }
 
 /// The guide header a phone's window `width` × `height` gets at the text
 /// factor `text` (for tests: the same policy the header and the video
 /// follow, at the phone's guide scale).
 #[cfg(feature = "test-support")]
-pub fn phone_guide_header(width: f32, height: f32, text: f32) -> crate::layout::GuideHeader {
-    crate::layout::GuideHeader::of(width, height, scale::PHONE, text)
+pub fn phone_guide_header(
+    width: f32,
+    height: f32,
+    text: f32,
+) -> crate::chrome::layout::GuideHeader {
+    crate::chrome::layout::GuideHeader::of(width, height, chrome::scale::PHONE, text)
 }

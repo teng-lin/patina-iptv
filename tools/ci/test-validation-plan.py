@@ -133,6 +133,10 @@ class Selection(unittest.TestCase):
 
     def test_platform_and_production_key_inputs_have_required_lanes(self):
         for path in ("crates/iptv-app/src/host/native/credential_key.rs", "crates/iptv-app/src/host/native/credential_key/linux.rs",
+                     "crates/iptv-app/src/wiring/runtime_owner.rs",
+                     "crates/iptv-app/src/host/native.rs",
+                     "crates/iptv-app/src/host/native/casting.rs",
+                     "crates/iptv-app/src/host/native/casting/airplay.rs",
                      "tools/ci/isolated-credentials.py", "crates/iptv-store-sqlite/src/lib.rs"):
             self.assertTrue(v.select([path])["credentials"], path)
         for path in ("tools/fetch-mpvkit.sh", "tools/mpv-runtime-ios/runtime-ios.json",
@@ -290,14 +294,14 @@ class Selection(unittest.TestCase):
         self.assertTrue(v.select(["Cargo.lock"])["ios_on_host"])
 
     def test_rust_sources_and_tests_select_coverage_but_docs_and_manifests_do_not(self):
-        for path in ("crates/iptv-app/src/recordings_view.rs", "crates/iptv-app/tests/app/recordings.rs",
+        for path in ("crates/iptv-app/src/screens/recordings_view.rs", "crates/iptv-app/tests/app/recordings.rs",
                      "crates/iptv-store-sqlite/tests/it/migrations.rs", "crates/iptv-web/src/lib.rs"):
             self.assertTrue(v.select([path])["coverage"], path)
         for path in ("README.md", "docs/ci.md", "crates/iptv-presentation/src/i18n/messages.tsv",
                      "hosts/android/app/build.gradle.kts", "Cargo.lock"):
             self.assertFalse(v.select([path])["coverage"], path)
         # Drafts still defer it until the pull request is marked ready.
-        self.assertFalse(v.select(["crates/iptv-app/src/recordings_view.rs"], draft=True)["coverage"])
+        self.assertFalse(v.select(["crates/iptv-app/src/screens/recordings_view.rs"], draft=True)["coverage"])
 
     def test_ci_helper_change_does_not_build_installers(self):
         plan = v.select(["tools/ci/test-sbom.py"])
@@ -336,7 +340,7 @@ class Selection(unittest.TestCase):
         self.assertTrue(package_lock_only["helpers_full"])
 
     def test_native_and_ui_changes_keep_both_form_factors(self):
-        for path in ("crates/iptv-app/src/video.rs", "crates/iptv-runtime/src/lib.rs", "hosts/android/app/src/main/Synthetic.kt",
+        for path in ("crates/iptv-app/src/playback/video.rs", "crates/iptv-runtime/src/lib.rs", "hosts/android/app/src/main/Synthetic.kt",
                      "crates/iptv-player-mpv/src/player.rs", "crates/iptv-nav/src/lib.rs"):
             self.assertTrue(v.select([path])["smoke"], path)
 
@@ -353,7 +357,7 @@ class Selection(unittest.TestCase):
         self.assertTrue(plan["host"])
         self.assertTrue(plan["windows"])
         self.assertFalse(any(plan[lane] for lane in ("android", "ios", "smoke", "packages", "windows-package")))
-        self.assertTrue(v.select([*paths, "crates/iptv-app/src/play_bar.rs"])["smoke"])
+        self.assertTrue(v.select([*paths, "crates/iptv-app/src/playback/play_bar.rs"])["smoke"])
 
     def test_leaf_workflow_edits_exercise_their_lane(self):
         for path, selected in v.LANE_WORKFLOWS.items():

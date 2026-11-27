@@ -118,16 +118,20 @@ const MESSAGE_TYPES: &[&str] = &["Notify"];
 /// Calls in the file itself are read, and those through the file's module
 /// (`wizard_view::button(…)`, `super::button(…)`).
 const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
-    ("iptv-app/src/parental_view.rs", "notify_message", 0),
-    ("iptv-app/src/fav_editor.rs", "button", 0),
+    ("iptv-app/src/screens/parental_view.rs", "notify_message", 0),
+    ("iptv-app/src/guide/fav_editor.rs", "button", 0),
     // `.label(move || tr(name))`, and the tile buttons' `tr(what)`.
-    ("iptv-app/src/multiview_view/chrome.rs", "pill", 0),
-    ("iptv-app/src/multiview_view/chrome.rs", "label", 0),
-    ("iptv-app/src/search_view/view.rs", "button", 2),
-    ("iptv-app/src/settings_view/editors.rs", "button", 2),
-    ("iptv-app/src/settings_view/words.rs", "with_unit", 0),
-    ("iptv-app/src/wizard_view.rs", "button", 2),
-    ("iptv-app/src/wizard_view/entry.rs", "button", 2),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "pill", 0),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "label", 0),
+    ("iptv-app/src/screens/search_view/view.rs", "button", 2),
+    ("iptv-app/src/screens/settings_view/editors.rs", "button", 2),
+    (
+        "iptv-app/src/screens/settings_view/words.rs",
+        "with_unit",
+        0,
+    ),
+    ("iptv-app/src/library_ui/wizard_view.rs", "button", 2),
+    ("iptv-app/src/chrome/ui_kit/entry.rs", "button", 2),
 ];
 
 /// Files whose every literal that reads as text is a message shown later
@@ -137,7 +141,7 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-core/src/parental.rs",
     "iptv-presentation/src/parental.rs",
     "iptv-runtime/src/parental.rs",
-    "iptv-app/src/parental_view.rs",
+    "iptv-app/src/screens/parental_view.rs",
     "iptv-runtime/src/backup.rs",
     "iptv-runtime/src/backup/instance.rs",
     "iptv-runtime/src/recordings.rs",
@@ -145,13 +149,14 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-runtime/src/recordings/host.rs",
     "iptv-runtime/src/recordings/rules.rs",
     "iptv-presentation/src/recording.rs",
-    "iptv-app/src/recordings_view.rs",
+    "iptv-app/src/screens/recordings_view.rs",
 ];
 
 /// The same for single calls of a file: the backup errors the view makes
 /// itself are the literals of its `context` and `Err`.
 const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
-    ("iptv-app/src/backup.rs", &["context", "Err"]),
+    ("iptv-app/src/library_ui/backup.rs", &["context", "Err"]),
+    ("iptv-app/src/host/backup_documents.rs", &["context", "Err"]),
     ("iptv-runtime/src/settings.rs", &["write_str"]),
 ];
 
@@ -162,46 +167,48 @@ const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
 /// `key(…)` constant, a helper's label, a backup error's text, a notice,
 /// a built-in list's name. A new one needs the same before it is listed.
 const CARRIED_MESSAGES: &[(&str, &str)] = &[
+    // Update prompts accept catalog keys marked where the host requests them.
+    ("iptv-app/src/screens/settings_view/updates/view.rs", "key"),
     // App-owned schema summaries are key-marked at their declaration. The
     // footer translates only those fields, never a persisted/user value.
-    ("iptv-app/src/settings_view/view.rs", "st"),
-    ("iptv-app/src/settings_view/view.rs", "c"),
-    ("iptv-app/src/vod_view.rs", "e"),
+    ("iptv-app/src/screens/settings_view/view.rs", "st"),
+    ("iptv-app/src/screens/settings_view/view.rs", "c"),
+    ("iptv-app/src/screens/vod_view.rs", "e"),
     // Core parental entry and native errors are checked MESSAGE_FILES.
-    ("iptv-app/src/parental_view.rs", "message"),
-    ("iptv-app/src/parental_view.rs", "title"),
+    ("iptv-app/src/screens/parental_view.rs", "message"),
+    ("iptv-app/src/screens/parental_view.rs", "title"),
     // Record now's start notices: key-marked in presentation capabilities.rs.
-    ("iptv-app/src/capture_limits.rs", "notice"),
+    ("iptv-app/src/screens/capture_limits.rs", "notice"),
     // Recording keys originate in the checked recording MESSAGE_FILES. Transport
     // failure keys are additionally enumerated by the recording transport test.
-    ("iptv-app/src/recordings_view.rs", "status_label"),
-    ("iptv-app/src/recordings_view.rs", "name"),
-    ("iptv-app/src/recordings_view.rs", "message"),
-    ("iptv-app/src/startup_view.rs", "reason"),
+    ("iptv-app/src/screens/recordings_view.rs", "status_label"),
+    ("iptv-app/src/screens/recordings_view.rs", "name"),
+    ("iptv-app/src/screens/recordings_view.rs", "message"),
+    ("iptv-app/src/chrome/startup_view.rs", "reason"),
     // What `tr` and `trf` hand to the presentation is what they were given.
-    ("iptv-app/src/i18n.rs", "source"),
+    ("iptv-app/src/chrome/i18n.rs", "source"),
     // `key(…)` constants.
-    ("iptv-app/src/backup.rs", "EXPORT_NOTE"),
-    ("iptv-app/src/backup.rs", "PENDING_NOTE"),
-    ("iptv-app/src/backup.rs", "RESTART_NOTE"),
-    ("iptv-app/src/custom_groups.rs", "CAPTION"),
-    ("iptv-app/src/remote_editor.rs", "CAPTION"),
+    ("iptv-app/src/library_ui/backup.rs", "EXPORT_NOTE"),
+    ("iptv-app/src/library_ui/backup.rs", "PENDING_NOTE"),
+    ("iptv-app/src/library_ui/backup.rs", "RESTART_NOTE"),
+    ("iptv-app/src/library_ui/custom_groups.rs", "CAPTION"),
+    ("iptv-app/src/chrome/remote_editor.rs", "CAPTION"),
     // A backup error's text (MESSAGE_FILES, MESSAGE_CALLS_IN).
-    ("iptv-app/src/backup.rs", "report"),
+    ("iptv-app/src/library_ui/backup.rs", "report"),
     ("iptv-app/src/lib.rs", "message"),
     // `RuntimeEvent::Notify` (MESSAGE_TYPES).
-    ("iptv-app/src/runtime_events.rs", "message"),
+    ("iptv-app/src/wiring/runtime_events.rs", "message"),
     // The labels of TRANSLATING_HELPERS.
-    ("iptv-app/src/fav_editor.rs", "label"),
-    ("iptv-app/src/multiview_view/chrome.rs", "name"),
-    ("iptv-app/src/multiview_view/chrome.rs", "what"),
+    ("iptv-app/src/guide/fav_editor.rs", "label"),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "name"),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "what"),
     // Each typed control label arm is a checked key(…) message.
-    ("iptv-app/src/play_bar.rs", "control_label"),
-    ("iptv-app/src/search_view/view.rs", "label"),
-    ("iptv-app/src/settings_view/editors.rs", "label"),
-    ("iptv-app/src/settings_view/words.rs", "message"),
-    ("iptv-app/src/wizard_view.rs", "label"),
-    ("iptv-app/src/wizard_view/entry.rs", "label"),
+    ("iptv-app/src/playback/play_bar.rs", "control_label"),
+    ("iptv-app/src/screens/search_view/view.rs", "label"),
+    ("iptv-app/src/screens/settings_view/editors.rs", "label"),
+    ("iptv-app/src/screens/settings_view/words.rs", "message"),
+    ("iptv-app/src/library_ui/wizard_view.rs", "label"),
+    ("iptv-app/src/chrome/ui_kit/entry.rs", "label"),
 ];
 
 /// Calls whose text goes to the log, a panic or the platform, never to
@@ -1921,9 +1928,9 @@ fn the_core_calls_are_followed_like_tr() {
 /// is refused, as for `tr`. So is what a message type is made of.
 #[test]
 fn a_translating_helper_and_a_message_type_are_followed_like_tr() {
-    let wizard = "iptv-app/src/wizard_view.rs";
-    let entry = "iptv-app/src/wizard_view/entry.rs";
-    let chrome = "iptv-app/src/multiview_view/chrome.rs";
+    let wizard = "iptv-app/src/library_ui/wizard_view.rs";
+    let entry = "iptv-app/src/library_ui/wizard_view/entry.rs";
+    let chrome = "iptv-app/src/playback/multiview_view/chrome.rs";
     let view = "iptv-app/src/some_view.rs";
     let all = |names: &[&str]| {
         names
@@ -2260,7 +2267,7 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
         Verdict::Bypass
     );
     // A helper that translates its label, and only that argument of it.
-    let wizard = "iptv-app/src/wizard_view.rs";
+    let wizard = "iptv-app/src/library_ui/wizard_view.rs";
     assert_eq!(
         verdict(wizard, &literal("Watch", Some("button"), 2)),
         Verdict::Message
@@ -2281,7 +2288,7 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
     );
     assert_eq!(
         verdict(
-            "iptv-app/src/backup.rs",
+            "iptv-app/src/library_ui/backup.rs",
             &literal("Not readable", Some("context"), 0)
         ),
         Verdict::Message
@@ -2299,7 +2306,7 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
             "Recording storage unavailable; retained media needs recovery",
         ),
         (
-            "iptv-app/src/custom_groups.rs",
+            "iptv-app/src/library_ui/custom_groups.rs",
             "The list could not be reloaded. Reopen it and try again.",
         ),
         (
@@ -2307,7 +2314,7 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
             "The list could not be reloaded. Reopen it and try again.",
         ),
         (
-            "iptv-app/src/organization_view.rs",
+            "iptv-app/src/library_ui/organization_view.rs",
             "The change could not be saved. Reopen the list and try again.",
         ),
         (
@@ -2319,11 +2326,11 @@ fn extracted_runtime_messages_and_shell_failures_remain_checked() {
             "Could not lock application storage",
         ),
         (
-            "iptv-app/src/settings_view/words.rs",
+            "iptv-app/src/screens/settings_view/words.rs",
             "Settings could not be saved. Check storage permissions and try again.",
         ),
         (
-            "iptv-app/src/settings_view/words.rs",
+            "iptv-app/src/screens/settings_view/words.rs",
             "Settings updated, but we could not confirm they were saved safely. Check storage and try again.",
         ),
     ] {

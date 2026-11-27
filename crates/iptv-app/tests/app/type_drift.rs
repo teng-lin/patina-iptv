@@ -13,15 +13,15 @@ use std::path::{Path, PathBuf};
 const LATER: &[&str] = &[
     // The play bar: another workstream is changing it; it gets its own
     // pass.
-    "play_bar/progress.rs",
+    "playback/play_bar/progress.rs",
     // The guide's header (the list button, the debug overlay) and the
     // grid's empty state: the guide-navigation workstream's files.
-    "header.rs",
-    "grid.rs",
+    "guide/header.rs",
+    "guide/grid.rs",
 ];
 
 /// Where the sizes are defined.
-const OWNERS: &[&str] = &["fonts.rs", "ui_kit.rs", "list_rows.rs"];
+const OWNERS: &[&str] = &["chrome/fonts.rs", "chrome/ui_kit.rs", "guide/list_rows.rs"];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap() {

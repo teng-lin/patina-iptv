@@ -30,7 +30,7 @@ import kotlin.math.roundToInt
  * to the launcher with playback stopped. The host reports it unsupported
  * there, so the app offers no control or setting for it.
  *
- * The app's side (`crates/iptv-app/src/pip.rs`), through that player:
+ * The app's side (`crates/iptv-app/src/playback/pip.rs`), through that player:
  * - prop `pip` `{auto, enter}`: `auto`, whether leaving the activity (Home,
  *   recents) opens the window now (Android 12+: the system's auto-enter;
  *   before: [userLeaving]); a new `enter` count opens it now ([enter]);

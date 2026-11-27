@@ -12,6 +12,7 @@
 //!   threads, the OS key stores and the OS schedulers.
 //! - `web`: a browser TV, over `iptv-web`'s adapters and the cooperative
 //!   executor.
+pub(crate) mod backup_documents;
 #[cfg(not(target_family = "wasm"))]
 mod native;
 pub(crate) mod updates;
@@ -130,3 +131,26 @@ pub(crate) fn splash_artwork() -> String {
 pub use native::exports;
 #[cfg(target_family = "wasm")]
 pub use web::exports;
+
+static TUI_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enables TUI-host layout adjustments (such as bypassing desktop horizontal
+/// `StickyCells` wrappers that `nsh-platform-tui` does not implement).
+pub fn set_tui_mode(enabled: bool) {
+    TUI_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn is_tui_mode() -> bool {
+    TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The local mock server (`tools/mock-server.py`) as the player reaches it:
+/// through the Android emulator's host alias, or on this machine. Debug
+/// builds only: the synthetic guide's channels have no streams in a release.
+#[cfg(all(debug_assertions, target_os = "android"))]
+pub(crate) const MOCK_SERVER: &str = "http://10.0.2.2:8089";
+#[cfg(all(debug_assertions, not(target_os = "android")))]
+pub(crate) const MOCK_SERVER: &str = "http://127.0.0.1:8089";
+
+/// Native players on these desktops can be routed to auxiliary windows.
+pub(crate) const PLAYER_POPUPS: bool = LINUX || MACOS;

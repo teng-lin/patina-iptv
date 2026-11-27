@@ -1,0 +1,670 @@
+//! The settings screen (Long OK menu → Settings): the pages on the left
+//! ([`PAGES`], in the reference's order), the chosen page's rows with
+//! their current values on the right, the focused row's description below,
+//! and the editors and dialogs (`editors`). State and rules live in
+//! `iptv_presentation::settings::screen`; this draws it, maps remote keys and taps to
+//! it, stores what it answers through `crate::wiring::settings` (saved at once,
+//! applied where the app reads it) and runs its commands.
+//!
+//! Globally unimplemented settings are hidden consistently on every build; none of
+//! the rows it acts on can be switched off by another setting yet;
+//! device-level features of TV boxes are left out (`settings_offer::offer`). Remote: Up/Down move, Right/OK
+//! enter a page, OK changes a row, Left/Back go back, Back on the pages
+//! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
+//! own (`words`).
+
+use crate::chrome::i18n::{tr, trf};
+use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::toast::notify;
+use crate::wiring::navigation::{request, settings_guarded};
+use crate::wiring::settings_wiring::refresh;
+
+mod editors;
+pub(crate) mod remote_keys;
+pub(crate) mod updates;
+mod view;
+mod words;
+
+pub(crate) use view::focused_playlist;
+pub use view::layer;
+pub(crate) use words::choice as choice_label;
+
+use std::cell::Cell;
+
+use iptv_nav::Action;
+use iptv_presentation::settings::screen::{
+    Ctx, Editor, Effect, Key, Page, Pane, Part, PlaylistRow, Row, RowId, Screen, Status,
+};
+use iptv_settings::schema::ValueType;
+use iptv_settings::{Section, Settings, Value};
+use nsh_core::prelude::*;
+
+use crate::theme::TEXT_DISABLED_ALPHA;
+use crate::wiring::data::stored::{self, GuideStatus};
+use crate::{Ui, tint};
+
+const WHITE: u32 = 0xFFFFFF;
+/// Titles of rows the app does not act on.
+const DIM_ALPHA: u8 = 0x80;
+const PRIVACY_POLICY_URL: &str = "https://teng-lin.github.io/patina-iptv/privacy-policy/";
+
+/// The pages, in the order the reference shows its settings.
+pub static PAGES: &[Page] = &[
+    Page {
+        key: "general",
+        parts: &[
+            Part::Section(Section::General),
+            Part::Section(Section::History),
+        ],
+    },
+    // Every stored playlist with its check box (shown or hidden; Menu
+    // opens its own actions), then adding, refreshing and ordering them.
+    Page {
+        key: "playlists",
+        parts: &[
+            Part::Playlists,
+            Part::Offered(&[
+                "playlists.add",
+                "playlists.update_all",
+                "playlists.sort",
+                "playlists.reorder",
+                "playlists.show_all",
+                "playlists.manage",
+            ]),
+        ],
+    },
+    Page {
+        key: "epg",
+        parts: &[Part::Section(Section::Epg)],
+    },
+    Page {
+        key: "appearance",
+        parts: &[
+            Part::Section(Section::Appearance),
+            Part::Section(Section::Guide),
+            Part::Section(Section::Channels),
+            Part::Section(Section::Logos),
+        ],
+    },
+    Page {
+        key: "playback",
+        parts: &[
+            Part::Section(Section::Player),
+            Part::Section(Section::Playback),
+            Part::Section(Section::Catchup),
+        ],
+    },
+    // Keyboard or Remote settings (`input::keys_for`): shown while there
+    // are keys to set up, named after them (`words::page`).
+    Page {
+        key: "remote",
+        parts: &[Part::Section(Section::Remote)],
+    },
+    Page {
+        key: "parental",
+        parts: &[Part::Section(Section::Parental)],
+    },
+    Page {
+        key: "other",
+        parts: &[
+            Part::Section(Section::Search),
+            Part::Section(Section::Recordings),
+            Part::Section(Section::Vod),
+        ],
+    },
+    // What this device keeps out of the way (`Offer::Advanced`); shown
+    // when it has rows.
+    Page {
+        key: "advanced",
+        parts: &[Part::Advanced],
+    },
+    Page {
+        key: "about",
+        parts: &[
+            Part::Keys(&["general.about"]),
+            Part::Offered(&["general.check_updates", "general.app_update_frequency"]),
+            Part::Keys(&["about.privacy_policy"]),
+        ],
+    },
+];
+
+thread_local! {
+    /// The page shown last: the screen opens on it again.
+    static LAST: Cell<&'static str> = const { Cell::new("general") };
+}
+
+// --- State ---------------------------------------------------------------------
+
+pub fn open(ui: Ui) {
+    if crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+        == "blocked_content_and_settings"
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
+    {
+        request(ui, iptv_core::parental::Target::settings(), move || {
+            open(ui)
+        });
+        return;
+    }
+    if !is_open(ui) {
+        // A document picker may have been installed or removed since the
+        // host last said which resolve (the backup rows follow).
+        crate::library_ui::backup::probe_pickers();
+        let mut screen = with_ctx(|ctx| Screen::opened(PAGES, LAST.with(Cell::get), ctx));
+        screen.set_playlists(playlist_rows());
+        ui.screens.settings_screen.set(Some(screen));
+        log::info!("iptv settings: open");
+    }
+}
+
+pub fn close(ui: Ui) {
+    crate::wiring::runtime_owner::runtime().parental_content_closed();
+    if let Some(page) = ui
+        .screens
+        .settings_screen
+        .with_untracked(|s| s.as_ref().map(|s| s.page().key))
+    {
+        LAST.with(|l| l.set(page));
+    }
+    let typing = editing_text(ui);
+    if ui.screens.settings_screen.with_untracked(Option::is_some) {
+        log::info!("iptv settings: close");
+    }
+    ui.screens.settings_screen.set(None);
+    if typing {
+        dismiss_keyboard();
+    }
+}
+
+/// The screen is shown and takes the remote.
+pub fn is_open(ui: Ui) -> bool {
+    ui.screens.settings_screen.with(Option::is_some)
+}
+
+fn editing_text(ui: Ui) -> bool {
+    ui.screens.settings_screen.with_untracked(|s| {
+        s.as_ref()
+            .is_some_and(|s| matches!(s.editor(), Some(Editor::Text { .. })))
+    })
+}
+
+fn screen_key(action: Action) -> Option<Key> {
+    Some(match action {
+        Action::MoveUp => Key::Up,
+        Action::MoveDown => Key::Down,
+        Action::MoveLeft => Key::Left,
+        Action::MoveRight => Key::Right,
+        Action::Select => Key::Ok,
+        Action::Back => Key::Back,
+        Action::PageUp | Action::ChannelUp => Key::PageUp,
+        Action::PageDown | Action::ChannelDown => Key::PageDown,
+        Action::ShowMenu => Key::Menu,
+        _ => return None,
+    })
+}
+
+/// The stored playlists, as the Playlists page lists them.
+fn playlist_rows() -> Vec<PlaylistRow> {
+    crate::runtime()
+        .playlists()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| PlaylistRow {
+            id: p.id.0,
+            enabled: p.policy.enabled,
+        })
+        .collect()
+}
+
+/// The stored playlists changed: the Playlists page follows.
+pub(crate) fn playlists_changed(ui: Ui) {
+    if ui.screens.settings_screen.with_untracked(Option::is_some) {
+        let rows = playlist_rows();
+        update(ui, move |screen, ctx| {
+            screen.set_playlists(rows);
+            screen.refresh(ctx);
+            Effect::None
+        });
+    }
+}
+
+/// Changes playlist visibility from a checkbox after the settings PIN check.
+pub(crate) fn set_playlist_visibility(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
+    settings_guarded(ui, move || show_playlist(ui, id, show));
+}
+
+fn show_playlist(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
+    crate::wiring::tasks::spawn_in_app(async move {
+        if let Err(e) = crate::wiring::data::update_policy(&crate::runtime(), id, move |policy| {
+            policy.enabled = show
+        })
+        .await
+        {
+            log::warn!("iptv settings: the store refused a playlist's check box: {e}");
+            if e.settings_locked() {
+                notify_setting_error(crate::wiring::settings::SaveError::ParentalLocked);
+            } else {
+                notify(tr(
+                    "The change could not be saved. Reopen the list and try again.",
+                ));
+            }
+        }
+        playlists_changed(ui);
+    });
+}
+
+/// A remote action while the screen is shown. While text is typed, the
+/// field has the keys; OK and Back arrive once it let them go.
+pub fn key(ui: Ui, action: Action) {
+    if let Some(key) = screen_key(action) {
+        update(ui, |screen, ctx| screen.key(key, ctx));
+    }
+}
+
+/// Back: closes an editor, leaves the rows, then closes the screen.
+pub fn back(ui: Ui) -> bool {
+    key(ui, Action::Back);
+    true
+}
+
+fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
+    let settings = crate::wiring::settings::get();
+    f(&Ctx {
+        settings: &settings,
+        offer: &crate::screens::settings_offer::offer_now,
+    })
+}
+
+/// Changes the screen with what the app knows now, then carries out what
+/// it answers.
+fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
+    let typing = editing_text(ui);
+    let mut effect = Effect::None;
+    with_ctx(|ctx| {
+        ui.screens.settings_screen.update(|s| {
+            if let Some(s) = s {
+                effect = f(s, ctx);
+            }
+        });
+    });
+    if typing && !editing_text(ui) {
+        dismiss_keyboard();
+    }
+    match effect {
+        Effect::None => {}
+        Effect::Set { key, value } => {
+            if (key.starts_with("parental.")
+                || crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+                    == "blocked_content_and_settings")
+                && (!crate::wiring::runtime_owner::runtime().parental_has_pin()
+                    || !crate::wiring::runtime_owner::runtime().parental_settings_allowed())
+            {
+                crate::screens::parental_view::protected_settings(ui, move || store(key, value));
+            } else {
+                store(key, value);
+            }
+        }
+        // Playlist rows act on the settings as the commands do: behind the
+        // PIN while the settings are protected and locked.
+        Effect::ShowPlaylist(id, show) => {
+            set_playlist_visibility(ui, crate::runtime::model::SourceId(id), show);
+        }
+        Effect::PlaylistActions(id) => settings_guarded(ui, move || {
+            crate::chrome::menu_view::open_playlist_options(
+                ui,
+                crate::runtime::model::SourceId(id),
+            );
+        }),
+        Effect::Run(key) => run(ui, key),
+        Effect::Close => close(ui),
+    }
+}
+
+fn store(key: &'static str, value: Value) {
+    if let Err(error) = save_setting(key, value) {
+        notify_setting_error(error);
+    }
+}
+
+/// Stores the setting through the runtime.
+pub(crate) fn save_setting(
+    key: &str,
+    value: Value,
+) -> Result<(), crate::wiring::settings::SaveError> {
+    crate::wiring::settings::set(key, value)
+}
+
+pub(crate) fn notify_setting_error(error: crate::wiring::settings::SaveError) {
+    use crate::runtime::model::SaveFailure;
+    match error {
+        crate::wiring::settings::SaveError::ParentalLocked => {
+            notify(tr("Unlock parental controls before changing settings"))
+        }
+        crate::wiring::settings::SaveError::Storage(_) => {
+            notify(words::save_failure(SaveFailure::NotPublished))
+        }
+        crate::wiring::settings::SaveError::Durability(_) => {
+            notify(words::save_failure(SaveFailure::DurabilityUnconfirmed))
+        }
+        crate::wiring::settings::SaveError::Invalid(_) => notify(&error.to_string()),
+    }
+}
+
+/// Tells the rows to read their status again.
+/// Runs a command (`settings_offer::COMMANDS`).
+fn run(ui: Ui, key: &'static str) {
+    if key != "parental.change_pin"
+        && crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+            == "blocked_content_and_settings"
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
+    {
+        crate::screens::parental_view::protected_settings(ui, move || run(ui, key));
+        return;
+    }
+    match key {
+        "history.clear" => {
+            crate::playback::player::watch_time::reset(ui);
+            let owner = crate::wiring::runtime_owner::runtime();
+            let saved = owner.clear_watch_history();
+            ui.playback
+                .player
+                .history
+                .set(iptv_presentation::playback::ChannelHistory::default());
+            crate::wiring::tasks::spawn_in_app(async move {
+                if saved.await {
+                    crate::guide::lists::favorites_changed(ui);
+                    owner.refresh_watch_order();
+                } else {
+                    notify(tr("Recent channel changes could not be saved; try again"));
+                }
+            });
+        }
+        "search.clear_history" => crate::screens::search_view::clear_history(ui),
+        "parental.change_pin" => crate::screens::parental_view::change_pin(ui),
+        "general.check_updates" => updates::run(ui),
+        "about.privacy_policy" => {
+            let opened = open_url(PRIVACY_POLICY_URL);
+            crate::wiring::tasks::spawn_in_app(async move {
+                if !opened.await {
+                    notify(PRIVACY_POLICY_URL);
+                }
+            });
+        }
+        "general.backup" => request(
+            ui,
+            iptv_core::parental::Target::settings(),
+            crate::library_ui::backup::export_ui,
+        ),
+        "general.restore" => crate::library_ui::backup::request_restore(ui),
+        "epg.update_now" => {
+            if stored::update_now(&crate::wiring::runtime_owner::runtime(), move || {
+                refresh(ui)
+            }) {
+                refresh(ui);
+            } else {
+                notify(tr("This playlist has no guide source switched on"));
+            }
+        }
+        // The combined view chooses a playlist before opening its Guide data.
+        "epg.manage_sources" | "epg.add_source" => {
+            crate::wiring::navigation::guide_sources(ui, crate::runtime().shown_source());
+        }
+        "epg.clear" => {
+            let cleared = stored::clear(&crate::wiring::runtime_owner::runtime(), move |deleted| {
+                notify(if deleted {
+                    tr("Guide data deleted")
+                } else {
+                    tr("The guide data could not be deleted")
+                });
+                refresh(ui);
+            });
+            if !cleared {
+                notify(tr("No playlist on screen"));
+            }
+        }
+        "remote.customize" => crate::chrome::remote_editor::open(ui),
+        // The playlists screen, over the settings screen.
+        "playlists.manage" => crate::wiring::navigation::manage_playlists(ui),
+        "playlists.show_all" => {
+            close(ui);
+            crate::wiring::data::switch_all(&crate::runtime());
+        }
+        // As the playlists screen's Add: behind the PIN once one is set.
+        "playlists.add" => crate::wiring::navigation::add_playlist(ui),
+        "playlists.update_all" => crate::wiring::data::refresh_all(&crate::runtime()),
+        // The playlists in their manual order, the first one focused.
+        "playlists.reorder" => crate::wiring::navigation::reorder_playlists(ui),
+        other => log::info!("iptv settings: {other} is not implemented yet"),
+    }
+}
+
+fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
+    ui.screens.settings_screen.with(|s| s.as_ref().map(f))
+}
+
+fn status(settings: &Settings, row: &Row) -> Status {
+    Ctx {
+        settings,
+        offer: &crate::screens::settings_offer::offer_now,
+    }
+    .status(row)
+}
+
+/// Why a row does not do what it says, or what to expect from it.
+fn note(settings: &Settings, row: &Row) -> String {
+    let restart = match row {
+        Row::Setting(s) => s.flags.requires_restart,
+        Row::Command(c) => c.requires_restart,
+        Row::Heading { .. } | Row::Playlist(_) => false,
+    };
+    match (status(settings, row), row) {
+        (Status::NotYet, _) => tr("Not available yet").to_owned(),
+        (Status::Later, _) => tr("In a later version").to_owned(),
+        (Status::Active, _) if restart => tr("Takes effect after a restart").to_owned(),
+        _ => String::new(),
+    }
+}
+
+/// How many rows of `page` the app acts on, of how many.
+fn counts(page: &Page) -> (usize, usize) {
+    with_ctx(|ctx| {
+        let rows = iptv_presentation::settings::screen::rows(page, ctx);
+        let keyed = rows.iter().filter(|r| r.key().is_some());
+        let active = keyed
+            .clone()
+            .filter(|r| ctx.status(r) == Status::Active)
+            .count();
+        (active, keyed.count())
+    })
+}
+
+/// Whether `page` has rows that show something (active or read-only).
+fn lit_page(page: &Page) -> bool {
+    with_ctx(|ctx| {
+        iptv_presentation::settings::screen::rows(page, ctx)
+            .iter()
+            .any(|r| {
+                r.key().is_some() && matches!(ctx.status(r), Status::Active | Status::ReadOnly)
+            })
+    })
+}
+
+/// What a command row shows on its right.
+fn command_value(key: &str) -> String {
+    match key {
+        "general.restore" if crate::wiring::runtime_owner::runtime().restore_is_pending() => {
+            tr("Scheduled for next launch").to_owned()
+        }
+        "epg.update_now" => match crate::wiring::runtime_owner::runtime().guide_status() {
+            GuideStatus::NoSource => tr("No playlist").to_owned(),
+            GuideStatus::Updating => tr("Updating…").to_owned(),
+            GuideStatus::Empty => tr("Not downloaded").to_owned(),
+            GuideStatus::Updated { at, channels } => trf(
+                "{count, plural, one {Updated {when} · # channel} \
+                 other {Updated {when} · # channels}}",
+                &[
+                    ("when", (&time_label(at)).into()),
+                    ("count", channels.into()),
+                ],
+            ),
+            GuideStatus::Failed { at, .. } => {
+                trf("Failed {when}", &[("when", (&time_label(at)).into())])
+            }
+        },
+        "epg.manage_sources" => sources_value(),
+        // The changed keys, which have no row of their own.
+        "remote.customize" => {
+            let setting =
+                iptv_settings::catalog::setting(iptv_settings::keys::KEY_OVERRIDES.as_str());
+            setting.map_or_else(String::new, |setting| {
+                let value = crate::wiring::settings::get()
+                    .get(setting.key)
+                    .unwrap_or_else(|_| setting.default_value());
+                words::value(setting, &value)
+            })
+        }
+        "general.about" => format!("v{}({})", env!("CARGO_PKG_VERSION"), env!("IPTV_GIT_HASH")),
+        _ => String::new(),
+    }
+}
+
+/// The "Guide sources" row's value: how many, switched on, and failed at
+/// their last download.
+fn sources_value() -> String {
+    let sources = crate::wiring::runtime_owner::runtime().shown_sources();
+    if sources.is_empty() {
+        return tr("No enabled playlist").to_owned();
+    }
+    let lines: Vec<_> = sources
+        .into_iter()
+        .flat_map(|source| crate::wiring::runtime_owner::runtime().source_lines(source))
+        .collect();
+    let on = lines.iter().filter(|l| l.source.enabled).count();
+    let failed = lines
+        .iter()
+        .filter(|l| l.source.enabled && l.result.as_ref().is_some_and(|r| r.error.is_some()))
+        .count();
+    let mut value = match (lines.len(), on) {
+        (0, _) => tr("None").to_owned(),
+        (all, on) if on == all => trf(
+            "{count, plural, one {# source} other {# sources}}",
+            &[("count", all.into())],
+        ),
+        (all, on) => trf(
+            "{on} of {all} on",
+            &[("on", on.into()), ("all", all.into())],
+        ),
+    };
+    if failed > 0 {
+        let failed = trf("{count} failed", &[("count", failed.into())]);
+        value = format!("{value} · {failed}");
+    }
+    value
+}
+
+/// A past time as the guide writes it (`14:05`, `Tue 10 · 14:05`).
+fn time_label(unix: i64) -> String {
+    crate::guide::clock::label(unix, crate::guide::clock::wall_unix())
+}
+
+/// The runtime reports publication semantics; the shell chooses the wording
+/// in the current interface language, including changes made since the save.
+pub(crate) fn save_failed(failure: crate::runtime::model::SaveFailure) {
+    notify(words::save_failure(failure));
+}
+
+#[cfg(test)]
+mod tests {
+    use iptv_settings::catalog;
+
+    use super::*;
+
+    fn row(page: &str, key: &str, settings: &Settings) -> Row {
+        let page = PAGES.iter().find(|p| p.key == page).unwrap();
+        iptv_presentation::settings::screen::rows(
+            page,
+            &Ctx {
+                settings,
+                offer: &crate::screens::settings_offer::offer_now,
+            },
+        )
+        .into_iter()
+        .find(|r| r.key() == Some(key))
+        .unwrap()
+    }
+
+    #[test]
+    fn rows_say_why_they_do_nothing() {
+        let s = Settings::new();
+        let language = row("general", "general.language", &s);
+        assert_eq!(note(&s, &language), "");
+        let resume = row("general", "general.resume_last_channel", &s);
+        assert_eq!(note(&s, &resume), "");
+        let pin = row("parental", "parental.live_enabled", &s);
+        assert_eq!(note(&s, &pin), "");
+    }
+
+    #[test]
+    fn every_setting_has_a_page_or_is_not_offered() {
+        // Playlist settings live on the playlists screen.
+        let placed = |section: Section| {
+            PAGES
+                .iter()
+                .any(|p| p.parts.contains(&Part::Section(section)))
+        };
+        for section in Section::ALL {
+            if section != Section::Playlists && !catalog::section(section).is_empty() {
+                assert!(placed(section), "{section:?} has no page");
+            }
+        }
+        let privacy = row("about", "about.privacy_policy", &Settings::new());
+        assert_eq!(status(&Settings::new(), &privacy), Status::Active);
+        for key in ["playlists.manage", "general.about"] {
+            assert!(catalog::command(key).is_some(), "{key}");
+        }
+        for p in PAGES {
+            assert!(!words::page(p.key).is_empty(), "{}", p.key);
+        }
+    }
+
+    /// No row the app acts on can be switched off by another setting, so
+    /// `note` has nothing to say for `Status::Disabled`; wiring such a
+    /// setting needs a note that names the switch.
+    #[test]
+    fn no_wired_setting_is_switched_off_by_another() {
+        use iptv_settings::schema::Effect as DependencyEffect;
+        for key in crate::screens::settings_offer::WIRED {
+            let s = catalog::setting(key).unwrap();
+            assert!(
+                s.depends
+                    .iter()
+                    .all(|d| d.effect != DependencyEffect::Enabled),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_keys_map_to_the_screen() {
+        assert_eq!(screen_key(Action::MoveLeft), Some(Key::Left));
+        assert_eq!(screen_key(Action::Select), Some(Key::Ok));
+        assert_eq!(screen_key(Action::ChannelDown), Some(Key::PageDown));
+        assert_eq!(screen_key(Action::Digit(3)), None);
+        assert_eq!(screen_key(Action::ShowMenu), Some(Key::Menu));
+    }
+
+    #[test]
+    fn pages_count_what_they_offer() {
+        let playback = PAGES.iter().find(|p| p.key == "playback").unwrap();
+        let (active, _) = counts(playback);
+        // Channel-change info, multiview's sound following
+        // the selected tile, the time-bar step and swiping to change
+        // channel; the seek keys are with the keyboard or remote settings
+        // (#280), and the rewind and fast-forward jumps on the Advanced
+        // page on every host (#281).
+        assert_eq!(active, 4);
+        let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
+        // Only the two enable switches and PIN command are visible by default;
+        // dependent preferences appear after live or VOD protection is enabled.
+        assert_eq!(counts(parental), (3, 3));
+    }
+}

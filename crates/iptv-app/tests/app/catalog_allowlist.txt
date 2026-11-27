@@ -54,10 +54,10 @@ iptv-runtime/src/native/app_updates/trust.rs	invalid trusted root version
 
 # The persisted fallback group name is also used to recognize the generated bucket.
 # CSS grid tracks for the wide and compact Search header.
-iptv-app/src/search_view/view.rs	auto minmax(0, 1fr) auto
-iptv-app/src/search_view/view.rs	minmax(0, 1fr) auto
+iptv-app/src/screens/search_view/view.rs	auto minmax(0, 1fr) auto
+iptv-app/src/screens/search_view/view.rs	minmax(0, 1fr) auto
 # Logical key name from the raw keyboard event.
-iptv-app/src/input/keys.rs	Escape
+iptv-app/src/chrome/input/keys.rs	Escape
 # Privacy command returns a fixed localized failure at the shell, never this diagnostic.
 iptv-runtime/src/store_service/system_repo.rs	legacy search history could not be removed
 # Redacted Debug type/variant labels; views render typed state with their own wording.
@@ -86,8 +86,8 @@ iptv-presentation/src/library/epg_sources.rs	Rename
 iptv-presentation/src/library/guide_inspect.rs	Screen
 iptv-presentation/src/library/playlists.rs	Editing
 # Search build errors are logged; the screen uses translated Programs status labels.
-iptv-app/src/search_view/program_index.rs	Search guide is unavailable
-iptv-app/src/search_view/program_index.rs	Search source is unavailable
+iptv-app/src/screens/search_view/program_index.rs	Search guide is unavailable
+iptv-app/src/screens/search_view/program_index.rs	Search source is unavailable
 iptv-runtime/src/store_service/epg_repo.rs	search source changed while indexing
 # Guide identity diagnostics become typed failures in the import wizard;
 # guide edits log their error. Neither path displays the Display implementation.
@@ -111,13 +111,13 @@ iptv-settings/src/catalog/general.rs	system
 # CLDR territory codes used to choose the automatic clock.
 iptv-presentation/src/clock.rs	419 AE AG AL AS AU BB BD BH BM BN BO BS BT CA CO CR CU CY DJ DM DO DZ EC EG EH ER ET FJ FM GD GH GM GR GT GU GY HK HN IN IQ JM JO KH KI KN KP KR KW KY LB LC LR LS LY MH MO MP MR MW MX MY NA NI NZ OM PA PE PG PH PK PR PS PW QA SA SB SD SG SL SO SS SV SY SZ TC TD TN TO TT TW UM US VC VE VG VI VU WS YE
 # Font families and measuring.
-iptv-app/src/fonts.rs	'Roboto Condensed', Roboto, sans-serif
+iptv-app/src/chrome/fonts.rs	'Roboto Condensed', Roboto, sans-serif
 iptv-app/src/host.rs	Roboto
 iptv-app/src/host.rs	Roboto Condensed
-iptv-app/src/fonts.rs	Roboto, sans-serif
-iptv-app/src/fonts.rs	unpacked in {unpacked_ms} ms, registered {ms} ms after asking
-iptv-app/src/fonts.rs	{size}px Roboto
-iptv-app/src/numbers.rs	{size}px Roboto
+iptv-app/src/chrome/fonts.rs	Roboto, sans-serif
+iptv-app/src/chrome/fonts.rs	unpacked in {unpacked_ms} ms, registered {ms} ms after asking
+iptv-app/src/chrome/fonts.rs	{size}px Roboto
+iptv-app/src/guide/numbers.rs	{size}px Roboto
 # Generated demo data, shown as a provider's would be.
 iptv-core/src/guide.rs	Channel {}
 iptv-core/src/guide.rs	Group {:02}
@@ -152,43 +152,43 @@ iptv-runtime/src/recordings/shared.rs	worker prepared source
 iptv-runtime/src/recordings/shared.rs	worker refused source
 iptv-runtime/src/recordings/shared.rs	worker reply received
 # Markup: icons drawn as SVG.
-iptv-app/src/grid/channel.rs	data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E
-iptv-app/src/ui_kit/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 11v6'/><circle fill='currentColor' stroke='none' cx='12' cy='7.5' r='1.3'/>
-iptv-app/src/ui_kit/icons.rs	<circle fill='currentColor' stroke='none' cx='5' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='12' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='19' cy='12' r='2'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M3 4h18v5H3zM5 9v11h14V9m-9 5h4'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M3 7.5V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-4'/><path d='M3 11a9 9 0 0 1 9 9M3 15.5a4.5 4.5 0 0 1 4.5 4.5'/><circle cx='3' cy='20' r='1.25' fill='currentColor' stroke='none'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M6 15l6-6 6 6'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M6 9l6 6 6-6'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M6 6l12 12M18 6L6 18'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M8 6.5h13M8 12h13M8 17.5h13'/><circle fill='currentColor' stroke='none' cx='4' cy='6.5' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='12' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='17.5' r='1.3'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5'/>
-iptv-app/src/ui_kit/icons.rs	<path fill='currentColor' d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
-iptv-app/src/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M11.5 6v12L3 12zM21 6v12l-8.5-6z'/>
-iptv-app/src/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M12.5 6v12L21 12zM3 6v12l8.5-6z'/>
-iptv-app/src/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/><path d='M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'/>
-iptv-app/src/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/><path d='M16 9l6 6M22 9l-6 6'/>
-iptv-app/src/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M6 4.5h4v15H6zM14 4.5h4v15h-4z'/>
-iptv-app/src/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M7 4.5v15L19.5 12z'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M16 15L9 8M9 13V8h5'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M5 12h3l2-4 3 8 2-4h4'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><rect x='12' y='11' width='8' height='7' rx='1' fill='currentColor'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='2.5' y='5' width='19' height='14' rx='2'/><path d='M6 11V8.5h3M18 13v2.5h-3'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M3 9h18M3 14.5h18M9 9v11M15 14.5V20'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='3' y='4' width='8' height='7' rx='1.5'/><rect x='13' y='4' width='8' height='7' rx='1.5'/><rect x='3' y='13' width='8' height='7' rx='1.5'/><rect x='13' y='13' width='8' height='7' rx='1.5'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='3' y='5' width='18' height='14' rx='2'/><path d='M7 12h3M12 12h5M7 15.5h7M16 15.5h1'/>
-iptv-app/src/ui_kit/icons.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>{}</svg>
-iptv-app/src/rail.rs	<circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/>
-iptv-app/src/rail.rs	<circle cx='12' cy='12' r='3.5'/><path d='M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8'/>
-iptv-app/src/rail.rs	<circle cx='12' cy='12' r='8'/><circle cx='12' cy='12' r='3' fill='currentColor'/>
-iptv-app/src/rail.rs	<path d='M12 3a9 9 0 1 1-8.5 6'/><path d='M10 8.5v7l5.5-3.5z'/>
-iptv-app/src/rail.rs	<rect x='3' y='9' width='18' height='12' rx='1.5'/><path d='M3 9l2-6h17l-2 6M7 3l4 6M14 3l4 6M3 14h18'/>
-iptv-app/src/rail.rs	<rect x='3' y='5' width='18' height='12' rx='2'/><path d='M8 21h8'/>
-iptv-app/src/rail.rs	<rect x='3' y='7' width='13' height='13' rx='2'/><path d='M19 2v7M15.5 5.5h7'/>
-iptv-app/src/rail.rs	<rect x='3' y='7' width='18' height='13' rx='2'/><path d='M8 3l4 4 4-4'/>
-iptv-app/src/rail.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>{body}</svg>
-iptv-app/src/ui_kit.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 4.5L7.5 12l7.5 7.5'/></svg>
+iptv-app/src/guide/grid/channel.rs	data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E
+iptv-app/src/chrome/ui_kit/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 11v6'/><circle fill='currentColor' stroke='none' cx='12' cy='7.5' r='1.3'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<circle fill='currentColor' stroke='none' cx='5' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='12' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='19' cy='12' r='2'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M3 4h18v5H3zM5 9v11h14V9m-9 5h4'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M3 7.5V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-4'/><path d='M3 11a9 9 0 0 1 9 9M3 15.5a4.5 4.5 0 0 1 4.5 4.5'/><circle cx='3' cy='20' r='1.25' fill='currentColor' stroke='none'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M6 15l6-6 6 6'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M6 9l6 6 6-6'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M6 6l12 12M18 6L6 18'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M8 6.5h13M8 12h13M8 17.5h13'/><circle fill='currentColor' stroke='none' cx='4' cy='6.5' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='12' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='17.5' r='1.3'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path fill='currentColor' d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M11.5 6v12L3 12zM21 6v12l-8.5-6z'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M12.5 6v12L21 12zM3 6v12l8.5-6z'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/><path d='M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/><path d='M16 9l6 6M22 9l-6 6'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M6 4.5h4v15H6zM14 4.5h4v15h-4z'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path fill='currentColor' stroke='none' d='M7 4.5v15L19.5 12z'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M16 15L9 8M9 13V8h5'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M5 12h3l2-4 3 8 2-4h4'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><rect x='12' y='11' width='8' height='7' rx='1' fill='currentColor'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='2.5' y='5' width='19' height='14' rx='2'/><path d='M6 11V8.5h3M18 13v2.5h-3'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M3 9h18M3 14.5h18M9 9v11M15 14.5V20'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='3' y='4' width='8' height='7' rx='1.5'/><rect x='13' y='4' width='8' height='7' rx='1.5'/><rect x='3' y='13' width='8' height='7' rx='1.5'/><rect x='13' y='13' width='8' height='7' rx='1.5'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='3' y='5' width='18' height='14' rx='2'/><path d='M7 12h3M12 12h5M7 15.5h7M16 15.5h1'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>{}</svg>
+iptv-app/src/chrome/rail.rs	<circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.5 5.5'/>
+iptv-app/src/chrome/rail.rs	<circle cx='12' cy='12' r='3.5'/><path d='M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8'/>
+iptv-app/src/chrome/rail.rs	<circle cx='12' cy='12' r='8'/><circle cx='12' cy='12' r='3' fill='currentColor'/>
+iptv-app/src/chrome/rail.rs	<path d='M12 3a9 9 0 1 1-8.5 6'/><path d='M10 8.5v7l5.5-3.5z'/>
+iptv-app/src/chrome/rail.rs	<rect x='3' y='9' width='18' height='12' rx='1.5'/><path d='M3 9l2-6h17l-2 6M7 3l4 6M14 3l4 6M3 14h18'/>
+iptv-app/src/chrome/rail.rs	<rect x='3' y='5' width='18' height='12' rx='2'/><path d='M8 21h8'/>
+iptv-app/src/chrome/rail.rs	<rect x='3' y='7' width='13' height='13' rx='2'/><path d='M19 2v7M15.5 5.5h7'/>
+iptv-app/src/chrome/rail.rs	<rect x='3' y='7' width='18' height='13' rx='2'/><path d='M8 3l4 4 4-4'/>
+iptv-app/src/chrome/rail.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>{body}</svg>
+iptv-app/src/chrome/ui_kit.rs	<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 4.5L7.5 12l7.5 7.5'/></svg>
 # Persistence Display text is diagnostic only: settings::set logs SaveError and
 # emits typed SettingsSaveFailed; the shell translates both publication outcomes.
 # File-writer replies stay inside the runtime (settings, last-channel, teardown).
@@ -210,7 +210,7 @@ iptv-app/src/host/native/credential_key.rs	platform database key has an invalid 
 iptv-app/src/host/native/credential_key.rs	secure random generator failed
 iptv-app/src/host/native/credential_key.rs	synthetic database key was not installed
 iptv-app/src/host/native/credential_key/android.rs	Android Keystore is unavailable
-iptv-app/src/host/native/credential_key/linux.rs	Patina catalog key
+iptv-app/src/host/native/credential_key.rs	Patina catalog key
 iptv-app/src/host/web.rs	this device has no key store
 # Data directory initialization logs the cause and shows a generic storage notice.
 iptv-app/src/host/native/platform_data.rs	Android host has not initialized private storage
@@ -278,9 +278,9 @@ iptv-runtime/src/publish.rs	the publish copy is gone
 iptv-runtime/src/publish.rs	the publish was canceled
 iptv-runtime/src/stored.rs	the guide publish did not finish
 iptv-runtime/src/stored.rs	the guide publish started twice
-iptv-app/src/startup.rs	guide shown
-iptv-app/src/fonts.rs	the page's
-iptv-app/src/performance_probe.rs	guide frame
+iptv-app/src/chrome/startup.rs	guide shown
+iptv-app/src/chrome/fonts.rs	the page's
+iptv-app/src/wiring/performance_probe.rs	guide frame
 iptv-core/src/import_limits.rs	decoded byte budget exceeded
 iptv-core/src/import_limits.rs	import {:?} limit exceeded ({})
 iptv-core/src/add_playlist.rs	SecretText(***)
@@ -291,31 +291,31 @@ iptv-core/src/add_playlist.rs	address has an invalid port
 iptv-core/src/add_playlist.rs	address is missing its scheme
 iptv-core/src/add_playlist.rs	address uses an unsupported scheme
 # The debug overlay (IPTV_DEBUG).
-iptv-app/src/header.rs	keys {} · {} µs (max {})
+iptv-app/src/guide/header.rs	keys {} · {} µs (max {})
 # The product's name and its files.
-iptv-app/src/backup.rs	Patina.patinabackup
-iptv-app/src/desktop.rs	Patina
+iptv-app/src/host/backup_documents.rs	Patina.patinabackup
+iptv-app/src/chrome/desktop.rs	Patina
 iptv-app/src/main.rs	Patina
-iptv-app/src/startup_view.rs	Patina
+iptv-app/src/chrome/startup_view.rs	Patina
 # What an edit or an effect is called in the log.
-iptv-app/src/epg_sources_view.rs	add (named {})
-iptv-app/src/epg_sources_view.rs	move {} by {step}
-iptv-app/src/epg_sources_view.rs	new link for {}
-iptv-app/src/epg_sources_view.rs	shift {} to {m} min
-iptv-app/src/guide_assign_view.rs	a guide channel
-iptv-app/src/guide_assign_view.rs	no guide
-iptv-app/src/playlists_view.rs	User-Agent of {}: set {}
-iptv-app/src/playlists_view.rs	custom groups {}
-iptv-app/src/playlists_view.rs	details of {}
-iptv-app/src/playlists_view.rs	guide sources of {}
-iptv-app/src/playlists_view.rs	movie and series import of {}
-iptv-app/src/playlists_view.rs	streams at once of {}
-iptv-app/src/playlists_view.rs	playlist order
-iptv-app/src/playlists_view.rs	playlist policy {}
-iptv-app/src/playlists_view.rs	reorder playlist {}
-iptv-app/src/playlists_view.rs	refresh all
-iptv-app/src/playlists_view.rs	show all playlists
-iptv-app/src/playlists_view.rs	try new details of {}
+iptv-app/src/library_ui/epg_sources_view.rs	add (named {})
+iptv-app/src/library_ui/epg_sources_view.rs	move {} by {step}
+iptv-app/src/library_ui/epg_sources_view.rs	new link for {}
+iptv-app/src/library_ui/epg_sources_view.rs	shift {} to {m} min
+iptv-app/src/library_ui/guide_assign_view.rs	a guide channel
+iptv-app/src/library_ui/guide_assign_view.rs	no guide
+iptv-app/src/library_ui/playlists_view.rs	User-Agent of {}: set {}
+iptv-app/src/library_ui/playlists_view.rs	custom groups {}
+iptv-app/src/library_ui/playlists_view.rs	details of {}
+iptv-app/src/library_ui/playlists_view.rs	guide sources of {}
+iptv-app/src/library_ui/playlists_view.rs	movie and series import of {}
+iptv-app/src/library_ui/playlists_view.rs	streams at once of {}
+iptv-app/src/library_ui/playlists_view.rs	playlist order
+iptv-app/src/library_ui/playlists_view.rs	playlist policy {}
+iptv-app/src/library_ui/playlists_view.rs	reorder playlist {}
+iptv-app/src/library_ui/playlists_view.rs	refresh all
+iptv-app/src/library_ui/playlists_view.rs	show all playlists
+iptv-app/src/library_ui/playlists_view.rs	try new details of {}
 # Internal store refusal classes: the shell logs the reason and presents a
 # translated generic edit failure; a superseded guide reply is never displayed.
 iptv-runtime/src/store_service/catalog_repo.rs	favorites use their ordered writer
@@ -334,7 +334,7 @@ iptv-runtime/src/inspection/probe.rs	probe integrity inspection stopped
 iptv-runtime/src/store_service/epg_repo.rs	guide repair commit is missing
 iptv-runtime/src/store_service/epg_repo.rs	guide repair was superseded
 
-iptv-app/src/ui_kit/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>
 
 # Retiring earlier versions' login and wake registrations: their identities.
 iptv-app/src/host/native/recording_host/startup.rs	\n$ErrorActionPreference = 'Stop'\ntry {\n    $scheduler = New-Object -ComObject 'Schedule.Service'\n    $scheduler.Connect()\n    $folder = $scheduler.GetFolder('\\')\n    try {\n        $folder.DeleteTask($env:PATINA_RECORDING_TASK, 0)\n    } catch {\n        $failure = $_.Exception\n        while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }\n        if ($failure.HResult -ne -2147024894) { throw }\n    }\n    exit 0\n} catch { exit 1 }\n
@@ -356,24 +356,24 @@ iptv-runtime/src/vod.rs	Referer
 iptv-runtime/src/vod.rs	User-Agent
 
 # Physical keyboard code prefixes used by the Android remote decoder.
-iptv-app/src/input/keys.rs	Digit
-iptv-app/src/input/keys.rs	Key
-iptv-app/src/input/keys.rs	Numpad
+iptv-app/src/chrome/input/keys.rs	Digit
+iptv-app/src/chrome/input/keys.rs	Key
+iptv-app/src/chrome/input/keys.rs	Numpad
 
 # Inline recording action dispatch keys; labels are translated in rows.rs.
-iptv-app/src/recordings_view/rows.rs	Cancel recording
-iptv-app/src/recordings_view/rows.rs	Delete recording
-iptv-app/src/recordings_view/rows.rs	Stop recording
+iptv-app/src/screens/recordings_view/rows.rs	Cancel recording
+iptv-app/src/screens/recordings_view/rows.rs	Delete recording
+iptv-app/src/screens/recordings_view/rows.rs	Stop recording
 
 # Original SVG icon geometry.
-iptv-app/src/ui_kit/icons.rs	<path d='M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7'/>
-iptv-app/src/ui_kit/icons.rs	<rect x='5' y='5' width='14' height='14' rx='1' fill='currentColor' stroke='none'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<rect x='5' y='5' width='14' height='14' rx='1' fill='currentColor' stroke='none'/>
 
 # Original recording status drawings, not text.
-iptv-app/src/ui_kit/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 6v6l4 2'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M12 3L2 21h20zM12 9v5'/><circle cx='12' cy='17.5' r='1' fill='currentColor'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M4 12l5 5L20 6'/>
-iptv-app/src/ui_kit/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 6v6l4 2'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M12 3L2 21h20zM12 9v5'/><circle cx='12' cy='17.5' r='1' fill='currentColor'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M4 12l5 5L20 6'/>
+iptv-app/src/chrome/ui_kit/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>
 # Execution and entropy port failures are diagnostics; operations report typed errors.
 iptv-runtime/src/execution.rs	OS can't spawn worker thread:
 iptv-runtime/src/execution.rs	the task ended without an output
