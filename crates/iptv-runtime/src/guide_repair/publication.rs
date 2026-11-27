@@ -147,8 +147,17 @@ pub(super) async fn after_commit(
         verification_pending: true,
         operation: id.clone(),
     };
+    // The durable mutation has already committed. Without an executor it
+    // cannot be actively pending; keep an evictable receipt that callers can
+    // verify when they have a host.
+    if !owner.has_tasks() {
+        if let Some(operation) = owner.repairs.borrow_mut().operations.get_mut(&id) {
+            operation.phase = OperationPhase::ReadyToVerify;
+        }
+        return outcome;
+    }
     let owner = owner.clone();
-    owner.clone().spawn(async move {
+    let _ = owner.clone().try_spawn(async move {
         let current_operation = || {
             owner
                 .repairs
@@ -209,6 +218,9 @@ fn refresh_observed(
     undone: bool,
     accepted: bool,
 ) {
+    if !owner.has_tasks() {
+        return;
+    }
     let read = crate::inspection::query_with_deadline(
         owner,
         InspectionControl::default(),
@@ -261,6 +273,9 @@ fn refresh_observed(
 }
 
 fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::ImportCompletion>) {
+    if !owner.has_tasks() {
+        return;
+    }
     let cancel = CancelToken::new();
     let id = commit.id.clone();
     let source = commit.source;

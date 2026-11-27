@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// The owner's key broker answers for its own library file.
 fn database_key(ports: &crate::Ports, path: &Path) -> Result<DatabaseKey, StoreError> {
-    (ports.database_key)(path).map_err(Into::into)
+    (ports.database_key)(path).map_err(crate::Error::into_store_error)
 }
 
 pub(crate) fn open_database(ports: &crate::Ports, path: &Path) -> Result<Store, StoreError> {

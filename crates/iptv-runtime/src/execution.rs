@@ -170,6 +170,10 @@ pub enum Progress {
 
 /// One owner's task executor.
 pub trait Tasks: Send + Sync {
+    /// Whether the underlying executor can accept work now.
+    fn ready(&self) -> bool {
+        true
+    }
     /// Runs `task` to its end; nothing waits for it here.
     fn spawn(&self, task: Task);
 
@@ -178,11 +182,34 @@ pub trait Tasks: Send + Sync {
 
     /// Drives `future` to its end on the calling worker, with the task
     /// executor's timers and I/O available to it. Only workers call this,
-    /// never the UI thread.
+    /// never the UI thread. If the executor cannot start, it drops
+    /// `future` without polling it.
     fn block_on(&self, future: LocalTask<'_>);
 
     /// A future that ends after `duration`.
     fn delay(&self, duration: Duration) -> Task;
+}
+
+/// Whether this thread's native execution boundary will recover the panic.
+/// Terminal hosts can leave their screen active for this expected failure.
+#[doc(hidden)]
+pub fn recovering_worker_spawn(payload: &(dyn std::any::Any + Send)) -> bool {
+    #[cfg(feature = "native")]
+    return crate::native::execution::recovering_worker_spawn(payload);
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = payload;
+        false
+    }
+}
+
+#[cfg(feature = "native")]
+pub(crate) fn worker_spawn_refusal(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
+    payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .filter(|reason| reason.starts_with("OS can't spawn worker thread:"))
 }
 
 /// The output of spawned work, awaited by whoever spawned it. Dropping it
@@ -239,12 +266,12 @@ pub(crate) fn spawn_blocking<R: Send + 'static>(
 }
 
 /// Drives `future` to its end on the calling worker.
-pub(crate) fn block_on<F: Future>(tasks: &dyn Tasks, future: F) -> F::Output {
+pub(crate) fn try_block_on<F: Future>(tasks: &dyn Tasks, future: F) -> Option<F::Output> {
     let mut output = None;
     tasks.block_on(Box::pin(async {
         output = Some(future.await);
     }));
-    output.expect("block_on drives its future to the end")
+    output
 }
 
 /// The deadline passed before the future ended.

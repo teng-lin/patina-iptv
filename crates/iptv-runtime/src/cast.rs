@@ -60,6 +60,9 @@ impl Authorization {
         work: impl Future<Output = Result<T, Error>>,
     ) -> Result<T, Error> {
         let mut work = std::pin::pin!(work);
+        if !self.services.tasks_ready() {
+            return Err(Error::Unavailable);
+        }
         while self.grant.is_current() {
             let deadline = crate::time::Instant::now() + std::time::Duration::from_millis(250);
             if let Ok(result) = self.services.timeout_at(deadline, work.as_mut()).await {
@@ -256,6 +259,9 @@ impl Runtime {
             .ok_or(Error::Unavailable)?;
         let generation = self.cast_generation.clone();
         let services = self.services();
+        if !services.tasks_ready() {
+            return Err(Error::Unavailable);
+        }
         let cancel = CancelOnDrop(CancelToken::new());
         let signal = cancel.0.clone();
         self.spawn_cast_worker(signal.clone(), async move {

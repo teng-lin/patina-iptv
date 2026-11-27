@@ -62,6 +62,7 @@ WINDOWS_PACKAGE = (*NOTICES, *WINDOWS_RESOURCES, "crates/iptv-app/build.rs", "ho
                     "tools/ci/windows-notices.py", "tools/ci/windows-installer.iss", "tools/ci/setup-inno.ps1",
                     "tools/ci/version.py", "tools/mpv-runtime/**", "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**")
 SMOKE = (*BUILD, "tools/ci/package.Cargo.lock", "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/**",
+         "crates/iptv-presentation/**",
          "crates/iptv-player-mpv/**", "crates/iptv-cast/**", "crates/iptv-net/**", "crates/iptv-nav/**", "tools/sync-host.sh",
          "tools/ci/android/**", "tools/ci/android-smoke.sh", "tools/ci/disposable-avd.py", "tools/ci/*hls-fixtures.py",
          "tools/ci/android-ndk-env.sh", "tools/make-*fixtures*", "tools/mock-server.py", "tools/mpv-runtime/**")

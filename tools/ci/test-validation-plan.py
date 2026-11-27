@@ -340,6 +340,13 @@ class Selection(unittest.TestCase):
                      "crates/iptv-player-mpv/src/player.rs", "crates/iptv-nav/src/lib.rs"):
             self.assertTrue(v.select([path])["smoke"], path)
 
+    def test_presentation_changes_run_android_smoke_but_domain_core_does_not(self):
+        for path in ("crates/iptv-presentation/src/guide.rs",
+                     "crates/iptv-presentation/src/i18n.rs",
+                     "crates/iptv-presentation/src/i18n/messages.tsv"):
+            self.assertTrue(v.select([path])["smoke"], path)
+        self.assertFalse(v.select(["crates/iptv-core/src/recording.rs"])["smoke"])
+
     def test_app_harness_changes_need_host_tests_but_no_android_or_ios_build(self):
         paths = ["crates/iptv-app/tests/app/play_bar.rs", "crates/iptv-app/tests/app/fixtures/playlist.m3u"]
         plan = v.select(paths)

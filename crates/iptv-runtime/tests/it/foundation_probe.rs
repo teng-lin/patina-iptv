@@ -978,6 +978,7 @@ fn two_held_feed_downloads_refuse_more_work_until_heavy_workers_finish() {
 }
 
 #[test]
+#[cfg(feature = "test-support")]
 fn queued_probe_configuration_honors_original_cancel_and_deadline_until_worker_exit() {
     for cancel_explicitly in [false, true] {
         let server = Mock::new(XML.as_bytes().to_vec(), false);

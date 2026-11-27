@@ -279,7 +279,8 @@ fn policy_native(
     owner: &super::Runtime,
     id: SourceId,
 ) -> Result<iptv_store_sqlite::SourcePolicy, StoreError> {
-    playlists(owner)?
+    playlists(owner)
+        .map_err(crate::Error::into_store_error)?
         .into_iter()
         .find(|source| source.id == id)
         .map(|source| source.policy)

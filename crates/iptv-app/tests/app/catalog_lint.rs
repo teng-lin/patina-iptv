@@ -144,7 +144,6 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-runtime/src/recordings/completion.rs",
     "iptv-runtime/src/recordings/host.rs",
     "iptv-runtime/src/recordings/rules.rs",
-    "iptv-core/src/recording.rs",
     "iptv-presentation/src/recording.rs",
     "iptv-app/src/recordings_view.rs",
 ];
@@ -178,6 +177,7 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/recordings_view.rs", "status_label"),
     ("iptv-app/src/recordings_view.rs", "name"),
     ("iptv-app/src/recordings_view.rs", "message"),
+    ("iptv-app/src/startup_view.rs", "reason"),
     // What `tr` and `trf` hand to the presentation is what they were given.
     ("iptv-app/src/i18n.rs", "source"),
     // `key(…)` constants.

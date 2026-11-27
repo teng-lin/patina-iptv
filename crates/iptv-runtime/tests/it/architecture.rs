@@ -111,6 +111,8 @@ const STATICS: &[(&str, &str)] = &[
     ("time.rs", "ORIGIN"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
     ("native.rs", "NEXT"),
+    // Only a scoped Tokio worker-spawn unwind leaves the TUI terminal in place.
+    ("native/execution.rs", "STARTING_TOKIO_WORKER"),
     // Startup marks seen by one opening unit test (`cfg(test)`): the mark
     // port is a function pointer.
     ("opening/revocation.rs", "MARKS"),
@@ -314,8 +316,15 @@ fn statics(code: &str) -> Vec<&str> {
 fn runtime_keeps_no_ambient_ui_owner() {
     let mut found = BTreeSet::new();
     for (name, code) in runtime_sources() {
-        assert!(
-            !code.contains("thread_local!"),
+        // The panic hook receives no owner. Allow only its scoped
+        // boolean, so other thread-local declarations still fail.
+        let panic_scope = name == "native/execution.rs"
+            && code.contains(
+                "thread_local! {\n    static STARTING_TOKIO_WORKER: Cell<bool> = const { Cell::new(false) };\n}",
+            );
+        assert_eq!(
+            code.matches("thread_local!").count(),
+            usize::from(panic_scope),
             "{name}: an owner is passed in, never kept in a thread-local"
         );
         for item in statics(&code) {

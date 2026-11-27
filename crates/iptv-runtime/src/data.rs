@@ -62,6 +62,7 @@ use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, pipeline
 pub use crate::imports::{Job, Purpose, Update};
 use crate::model::{StoreError, StoredSource};
 use crate::state::SingleSchedule;
+use crate::store_service::Services;
 use crate::time::now_unix;
 use crate::{GuideWork, Runtime, RuntimeEvent, ScheduleCause};
 
@@ -427,7 +428,7 @@ pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), Stor
 
 fn run_import(owner: &Rc<Runtime>, source: StoredSource, purpose: Purpose, edit: bool) {
     let (job, cancel, report) = library::prepare_import(owner, source, purpose, edit);
-    start_import_with(owner, job, cancel, report);
+    start_import_with(owner, job, cancel, owner.services(), report);
 }
 
 pub fn refresh_guide_status(owner: &Rc<Runtime>) {
@@ -570,7 +571,7 @@ fn start_update(
             }
             let guides = stored::configured_guides(&owner, source).await;
             let current = crate::library::import_is_current(&owner, source, &completion);
-            let (accepted, mut rx) =
+            let (mut accepted, mut rx) =
                 stored::download(&owner, source, guides, cancel, current, || {
                     source_is_visible(&owner, source)
                 });
@@ -601,6 +602,14 @@ fn start_update(
                     Some(Msg::NoCheck { .. }) if current() => {
                         owner.take_owed_guide_check(source);
                         answered = true;
+                    }
+                    Some(Msg::WorkerUnavailable) => {
+                        accepted = false;
+                        if current() && !force {
+                            owner.emit(crate::RuntimeEvent::Notify(
+                                "Program guide could not be loaded",
+                            ));
+                        }
                     }
                     Some(_) => {}
                     None => break,
@@ -1311,17 +1320,24 @@ pub fn start_import(
     on_update: impl Fn(Update) + 'static,
 ) -> CancelToken {
     let cancel = CancelToken::new();
-    start_import_with(owner, job, cancel.clone(), on_update);
+    start_import_with(owner, job, cancel.clone(), owner.services(), on_update);
     cancel
 }
 
-/// [`start_import`] with the caller's cancel token.
-fn start_import_with(
+/// [`start_import`] with the caller's cancel token and storage admission.
+pub(crate) fn start_import_with(
     owner: &std::rc::Rc<crate::Runtime>,
     job: Job,
     cancel: CancelToken,
+    services: Services,
     on_update: impl Fn(Update) + 'static,
 ) {
+    if !owner.has_tasks() {
+        on_update(Update::Done(Err(ImportFailure::new(
+            FailureKind::Unavailable,
+        ))));
+        return;
+    }
     let purpose = job.purpose;
     let mut import_source = job.stored;
     let completion = crate::library::import_completion(cancel.clone());
@@ -1352,7 +1368,6 @@ fn start_import_with(
                 purpose,
                 Purpose::Add | Purpose::Startup | Purpose::Switch | Purpose::Refresh
             );
-        let services = owner.services();
         owner.spawn({
             let owner = owner.clone();
             async move {
@@ -1408,14 +1423,24 @@ fn start_import_with(
                     return;
                 }
                 let failed = tx.clone();
+                let failed_if_worker_unavailable = tx.clone();
                 // A new source with a typed guide waits for its terminal
                 // result even after Cancel. Waiting for an unrelated import
                 // on the browser lane should not delay that result.
                 let cancel_while_queued =
                     (job.stored.is_none() && job.epg_url.is_some()).then(|| cancel.clone());
-                if !services.submit_import(visible, cancel_while_queued, move |worker| async move {
-                    pipeline(&worker, job, &tx, &cancel, &revoked, &authorization).await;
-                }) {
+                if !services.submit_import(
+                    visible,
+                    cancel_while_queued,
+                    move |worker| async move {
+                        pipeline(&worker, job, &tx, &cancel, &revoked, &authorization).await;
+                    },
+                    move || {
+                        let _ = failed_if_worker_unavailable.send(Msg::Playlist(Err(
+                            ImportFailure::new(FailureKind::Unavailable),
+                        )));
+                    },
+                ) {
                     let _ = failed.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Busy))));
                 }
             }
@@ -1546,6 +1571,7 @@ fn start_import_with(
                                 answered = true;
                             }
                         }
+                        Ok(Msg::WorkerUnavailable) => {}
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {
                             open = false;
@@ -2041,6 +2067,7 @@ async fn read_guide(
         }
     };
     let (tx, mut rx) = unbounded_channel();
+    let failed_tx = tx.clone();
     let services = owner.services();
     if !services.can_import() {
         // Guide reads cannot run on this host: no check is owed and none
@@ -2053,6 +2080,9 @@ async fn read_guide(
         None,
         move |worker| async move {
             guide_pipeline(&worker, source, &tx, read, &cancel).await;
+        },
+        move || {
+            let _ = failed_tx.send(Msg::WorkerUnavailable);
         },
     ) {
         owner.end_guide_check(source);
@@ -2134,12 +2164,58 @@ mod playlist_lifecycle_tests {
     use super::*;
     use iptv_providers::{SecretUrl, model::M3uSourceConfig};
 
+    #[test]
+    fn wizard_import_rejects_unstarted_storage_or_an_unbound_task_host() {
+        for start_services in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let owner = Rc::new(Runtime::new(crate::Ports::new(
+                directory.path().into(),
+                |_| Ok(crate::model::DatabaseKey::from_bytes([0x72; 32])),
+            )));
+            if start_services {
+                owner.start_services();
+            }
+            let admitted = Rc::new(Cell::new(None));
+            let request = admitted.clone();
+            let reports = Rc::new(RefCell::new(Vec::new()));
+            let sink = reports.clone();
+            let (id, epoch) = owner.start_wizard_import(
+                Job {
+                    source: synthetic("Synthetic unbound import"),
+                    epg_url: None,
+                    stored: None,
+                    purpose: Purpose::Add,
+                    edit: false,
+                },
+                |id, epoch| admitted.set(Some((id, epoch))),
+                move |id, update| {
+                    assert_eq!(request.get().map(|(admitted, _)| admitted), Some(id));
+                    sink.borrow_mut().push(update);
+                },
+            );
+            assert_eq!(admitted.get(), Some((id, epoch)));
+            assert!(matches!(
+                reports.borrow().as_slice(),
+                [Update::Done(Err(failure))] if failure.kind == FailureKind::Unavailable
+            ));
+            assert!(owner.wizard_import.borrow().is_none());
+            if start_services {
+                assert!(owner.drain_services());
+            }
+        }
+    }
+
     fn run(test: impl AsyncFnOnce(Rc<Runtime>)) {
+        run_with(|_| {}, test);
+    }
+
+    fn run_with(configure: impl FnOnce(&mut crate::Ports), test: impl AsyncFnOnce(Rc<Runtime>)) {
         let directory = tempfile::tempdir().unwrap();
-        let owner = Rc::new(Runtime::new(crate::Ports::new(
-            directory.path().into(),
-            |_| Ok(crate::model::DatabaseKey::from_bytes([0x73; 32])),
-        )));
+        let mut ports = crate::Ports::new(directory.path().into(), |_| {
+            Ok(crate::model::DatabaseKey::from_bytes([0x73; 32]))
+        });
+        configure(&mut ports);
+        let owner = Rc::new(Runtime::new(ports));
         owner.bind_tasks(
             |task| drop(tokio::task::spawn_local(task)),
             |duration| Box::pin(tokio::time::sleep(duration)),
@@ -2155,6 +2231,69 @@ mod playlist_lifecycle_tests {
                 .expect("playlist lifecycle scenario timed out");
         });
         assert!(owner.drain_services());
+    }
+
+    #[test]
+    fn guide_worker_refusal_reports_failure_and_leaves_a_check_owed() {
+        use crate::execution::{Execution, Job, Lane, LocalTask, Task, Tasks};
+        use crate::native::execution::NativeExecution;
+
+        struct RefusingGuideExecution;
+        impl Execution for RefusingGuideExecution {
+            fn lane(&self, name: &'static str) -> std::io::Result<Box<dyn Lane>> {
+                NativeExecution.lane(name)
+            }
+            fn worker(&self, name: String, job: Job) -> std::io::Result<()> {
+                NativeExecution.worker(name, job)
+            }
+            fn tasks(&self) -> Box<dyn Tasks> {
+                struct Refused;
+                impl Tasks for Refused {
+                    fn ready(&self) -> bool {
+                        false
+                    }
+                    fn spawn(&self, _: Task) {}
+                    fn spawn_blocking(&self, _: Job) {}
+                    fn block_on(&self, _: LocalTask<'_>) {}
+                    fn delay(&self, _: Duration) -> Task {
+                        Box::pin(std::future::ready(()))
+                    }
+                }
+                Box::new(Refused)
+            }
+        }
+
+        run_with(
+            |ports| ports.execution = std::sync::Arc::new(RefusingGuideExecution),
+            async |owner| {
+                let source = owner
+                    .services()
+                    .call(|store| {
+                        let source = store.add_source(&synthetic("Synthetic guide retry"))?;
+                        let feed = crate::guides::user_source(
+                            crate::guides::FIRST_USER_FEED,
+                            SecretUrl::new("http://127.0.0.1:9/synthetic.xml"),
+                            None,
+                        );
+                        store.set_guide_sources(source, &[feed])?;
+                        Ok(source)
+                    })
+                    .await
+                    .unwrap();
+                owner.shown.set(Some(source));
+                let generation = owner.generation.get();
+                let (done, result) = futures_channel::oneshot::channel();
+                assert!(start_update(&owner, source, None, true, move |accepted| {
+                    let _ = done.send(accepted);
+                }));
+                assert!(!result.await.unwrap(), "the manual update never ran");
+                assert!(owner.has_guide_check(source));
+
+                owner.end_guide_check(source);
+                read_guide(&owner, source, generation, GuideRead::Check, None, true).await;
+                assert!(owner.has_guide_check(source));
+            },
+        );
     }
 
     fn synthetic(name: &str) -> Source {

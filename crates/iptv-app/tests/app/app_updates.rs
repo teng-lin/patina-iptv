@@ -402,23 +402,26 @@ fn actual_about_check_shows_notes_retains_result_and_recovers_from_failed_check(
     step(app.wait_for("text:/Latest version: 9.8.7/"));
     step(app.press("id:app-update-panel >> text:Skip this version"));
     step(app.wait_for_gone("id:app-update-panel", Duration::from_secs(5)));
-    step(app.wait_until(
-        "skipped version is durable",
-        Duration::from_secs(10),
-        |_| {
-            let directory = fixture.path.parent().unwrap();
-            let parent = directory.parent().unwrap();
-            let name = directory.file_name().unwrap().to_string_lossy();
-            std::fs::read(
-                parent
-                    .join(format!("{name}.app-update"))
-                    .join("schedule.json"),
-            )
+    let schedule = iptv_runtime::backup::sibling(fixture.path.parent().unwrap(), "app-update")
+        .join("schedule.json");
+    let deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
+    // The persistence worker can finish after the panel's final view update.
+    // Poll the file while pumping the app instead of waiting for a view update.
+    loop {
+        let skipped = std::fs::read(&schedule)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|state| state["skipped_version"] == "9.8.7")
-        },
-    ));
+            .is_some_and(|state| state["skipped_version"] == "9.8.7");
+        if skipped {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "skipped version did not reach the durable update schedule"
+        );
+        step(app.wait(Duration::from_millis(10)));
+    }
     step(app.press("id:settings-content >> text:Check for updates"));
     step(app.wait_for("text:/Latest version: 9.8.7/"));
     api.serve(503, "{}".into());

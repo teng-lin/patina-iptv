@@ -30,6 +30,14 @@
 //! ```compile_fail
 //! use iptv_runtime::stored::configs_from_sources;
 //! ```
+//!
+//! Runtime failures cannot be converted back into storage errors by consumers.
+//!
+//! ```compile_fail
+//! fn convert(error: iptv_runtime::Error) -> iptv_store_sqlite::StoreError {
+//!     error.into()
+//! }
+//! ```
 pub mod build_config;
 pub mod cast;
 pub mod data;
@@ -97,6 +105,44 @@ pub type LocalTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 struct TaskHost {
     spawn: Box<dyn Fn(LocalTask)>,
     delay: Box<dyn Fn(std::time::Duration) -> LocalTask>,
+}
+
+#[derive(Default)]
+struct TaskBinding(RefCell<Option<Rc<TaskHost>>>);
+impl TaskBinding {
+    fn bind(
+        &self,
+        spawn: impl Fn(LocalTask) + 'static,
+        delay: impl Fn(std::time::Duration) -> LocalTask + 'static,
+    ) {
+        self.0.replace(Some(Rc::new(TaskHost {
+            spawn: Box::new(spawn),
+            delay: Box::new(delay),
+        })));
+    }
+
+    fn host(&self) -> Option<Rc<TaskHost>> {
+        self.0.borrow().clone()
+    }
+
+    fn has_tasks(&self) -> bool {
+        self.0.borrow().is_some()
+    }
+
+    fn try_spawn(&self, task: LocalTask) -> bool {
+        let Some(host) = self.host() else {
+            return false;
+        };
+        (host.spawn)(task);
+        true
+    }
+
+    fn delay(&self, duration: std::time::Duration) -> LocalTask {
+        match self.host() {
+            Some(host) => (host.delay)(duration),
+            None => Box::pin(std::future::pending()),
+        }
+    }
 }
 
 type EventSink = Rc<dyn Fn(RuntimeEvent)>;
@@ -200,7 +246,8 @@ pub struct Runtime {
     schedule: RefCell<Rc<dyn Schedule>>,
     schedule_revision: Cell<u64>,
     events: RefCell<Option<EventSink>>,
-    tasks: RefCell<Option<Rc<TaskHost>>>,
+    tasks: TaskBinding,
+    wizard_tickets: Cell<u64>,
     foreground: Cell<bool>,
     scheduler_started: Cell<bool>,
     guide_checks: RefCell<guide_checks::GuideChecks>,
@@ -315,7 +362,8 @@ impl Runtime {
             schedule: RefCell::new(schedule),
             schedule_revision: Cell::new(0),
             events: RefCell::new(None),
-            tasks: RefCell::new(None),
+            tasks: TaskBinding::default(),
+            wizard_tickets: Cell::new(0),
             foreground: Cell::new(true),
             scheduler_started: Cell::new(false),
             guide_checks: RefCell::new(guide_checks),
@@ -345,31 +393,28 @@ impl Runtime {
         spawn: impl Fn(LocalTask) + 'static,
         delay: impl Fn(std::time::Duration) -> LocalTask + 'static,
     ) {
-        *self.tasks.borrow_mut() = Some(Rc::new(TaskHost {
-            spawn: Box::new(spawn),
-            delay: Box::new(delay),
-        }));
+        self.tasks.bind(spawn, delay);
     }
     /// Runs `task` on the host's local executor. The task holds its owner
     /// itself: it names no other one, whichever owner the host polls it under.
     pub(crate) fn spawn(&self, task: impl std::future::Future<Output = ()> + 'static) {
-        let host = self
-            .tasks
-            .borrow()
-            .clone()
-            .expect("runtime task host installed");
-        (host.spawn)(Box::pin(task));
+        if !self.tasks.try_spawn(Box::pin(task)) {
+            log::error!("runtime task rejected because no task host is available");
+        }
+    }
+
+    pub(crate) fn has_tasks(&self) -> bool {
+        self.tasks.has_tasks()
+    }
+
+    pub(crate) fn try_spawn(&self, task: impl std::future::Future<Output = ()> + 'static) -> bool {
+        self.tasks.try_spawn(Box::pin(task))
     }
     pub(crate) fn delay(
         &self,
         duration: std::time::Duration,
     ) -> impl std::future::Future<Output = ()> + use<> {
-        let host = self
-            .tasks
-            .borrow()
-            .clone()
-            .expect("runtime task host installed");
-        (host.delay)(duration)
+        self.tasks.delay(duration)
     }
     pub fn flush_files(&self, limit: std::time::Duration) -> bool {
         self.store.files().flush(limit)
@@ -402,7 +447,10 @@ impl Runtime {
         self.close_cast();
         let drained = self
             .store
-            .drain_on_shutdown_with(|| self.inspection.cancel_requests());
+            .drain_on_shutdown_until(deadline, || self.inspection.cancel_requests());
+        if let Some((_, cancel)) = self.wizard_import.borrow_mut().take() {
+            cancel.cancel();
+        }
         let probes_drained = self
             .inspection
             .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()));
@@ -502,16 +550,24 @@ impl Drop for Runtime {
         // if a noncooperative lane did not close. Do not spend it again in Drop.
         if !self.shutdown_requested.replace(true) {
             let deadline = crate::time::Instant::now() + self.store.drain_limit();
+            self.inspection.close_workers();
             self.close_cast();
             if !self
                 .store
-                .drain_on_shutdown_with(|| self.inspection.cancel_requests())
+                .drain_on_shutdown_until(deadline, || self.inspection.cancel_requests())
             {
                 log::error!("iptv persistence: fallback store drain did not finish at disposal");
+            }
+            if !self
+                .inspection
+                .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()))
+            {
+                log::error!("iptv inspection: fallback worker drain did not finish at disposal");
             }
             if !self.drain_cast(deadline) {
                 log::error!("iptv cast: relay shutdown exceeded the owner's drain deadline");
             }
+            self.inspection.clear();
         }
         if !self.store.files().flush(std::time::Duration::from_secs(2)) {
             log::error!("iptv persistence: fallback file flush did not finish at disposal");
@@ -586,6 +642,17 @@ impl HostHandle {
         self.0
             .upgrade()
             .map_or(0, |service| service.hooks.reports_waiting())
+    }
+
+    /// Number of wizard terminal reports processed, including stale reports.
+    #[cfg(feature = "test-support")]
+    pub fn wizard_reports_delivered(&self) -> usize {
+        self.0.upgrade().map_or(0, |service| {
+            service
+                .hooks
+                .wizard_reports_delivered
+                .load(std::sync::atomic::Ordering::Relaxed)
+        })
     }
 
     /// Pause a FIFO writer job; the returned gate acknowledges actual entry.

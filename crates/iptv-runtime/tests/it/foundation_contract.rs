@@ -199,6 +199,53 @@ fn capability(value: CapabilityState) -> &'static str {
 }
 
 #[test]
+fn applying_repair_without_a_task_host_keeps_the_durable_outcome_pending() {
+    use iptv_library::inspection::Query;
+    use iptv_runtime::{Ports, inspection::InspectionControl};
+    use iptv_store_sqlite::{DatabaseKey, Store};
+
+    const KEY: [u8; 32] = [0x71; 32];
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("iptv.sqlite");
+    let mut store = Store::open_encrypted(path, &DatabaseKey::from_bytes(KEY)).unwrap();
+    let source = store
+        .add_source(&super::common::m3u_source("Synthetic repair"))
+        .unwrap();
+    let catalog = super::common::catalog(1, 0, "synthetic-repair");
+    super::common::replace(&mut store, source, &catalog);
+    drop(store);
+
+    let owner = Rc::new(Runtime::new(Ports::new(directory.path().into(), |_| {
+        Ok(DatabaseKey::from_bytes(KEY))
+    })));
+    owner.start_services();
+    let channels = super::support::block_on(
+        owner.query_channels(Query::source(source), InspectionControl::default()),
+    )
+    .unwrap();
+    let channel = channels.items[0].key.clone();
+    let window = TimeWindow {
+        from: 1_794_657_600,
+        to: 1_794_664_800,
+    };
+    let plan = super::support::block_on(owner.preview_guide_repair(
+        Request::mapping(channel, Target::NoGuide, window),
+        InspectionControl::default(),
+    ))
+    .unwrap();
+    let outcome = super::support::block_on(owner.apply_guide_repair(
+        plan.id,
+        plan.digest,
+        InspectionControl::default(),
+    ))
+    .unwrap();
+    assert!(outcome.mapping_saved && outcome.configuration_committed);
+    assert_eq!(outcome.effective, Effective::Pending);
+    assert!(outcome.verification_pending);
+    assert!(owner.drain_services());
+}
+
+#[test]
 fn independent_consumer_compiles_against_the_declared_service_types() {
     let _: fn(&Rc<Runtime>, SourceId, ChannelRef, CandidateRef, ProbeEvidence) = consume;
     let _: fn(InspectionError) -> &'static str = inspection_error;

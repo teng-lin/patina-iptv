@@ -721,7 +721,7 @@ fn stored_playlists_switch_refresh_and_go() {
     step(app.wait_for("text:Patina still can’t open your library."));
     step(app.press_key("right"));
     step(app.press_key("enter"));
-    step(app.wait_for("text:encrypted database filesystem operation failed"));
+    step(app.wait_for("text:The saved library could not be opened"));
     let screen = app.screen();
     assert!(screen.shows(&path.to_string_lossy()));
     assert!(!screen.shows("Set up your library"));
