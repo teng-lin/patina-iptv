@@ -1609,7 +1609,10 @@ async fn stalled_stop_joins_local_cleanup_and_preserves_last_playback_evidence()
         Playback::Accepted
     ));
     assert_error(
-        session.stop().await.unwrap_err(),
+        timeout(Duration::from_secs(30), session.stop())
+            .await
+            .expect("stalled stop must retire within its deadline")
+            .unwrap_err(),
         ErrorKind::TimedOut,
         Stage::Stop,
         Delivery::MayHaveReachedReceiver,
@@ -1766,9 +1769,14 @@ async fn forgetting_during_credential_lookup_cancels_before_network_dispatch() {
         tokio::spawn(async move { cast.connect(&target).await })
     };
     store.loading.wait(1).await;
-    cast.forget(&target).await.unwrap();
+    let result = timeout(Duration::from_secs(5), async {
+        cast.forget(&target).await.unwrap();
+        lookup.await.unwrap()
+    })
+    .await
+    .expect("forget must interrupt the stalled credential lookup");
     assert_error(
-        lookup.await.unwrap().err().unwrap(),
+        result.err().unwrap(),
         ErrorKind::Cancelled,
         Stage::Connect,
         Delivery::NotSent,
