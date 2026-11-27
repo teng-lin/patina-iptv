@@ -1208,10 +1208,16 @@ async fn transition(
     bytes: u64,
     message: &'static str,
 ) -> completion::Transition {
-    let (id, from) = (job.id, job.status);
-    completion::retry(services, move |store| {
-        store.transition_recording(id, from, to, bytes, message)
-    })
+    completion::retry(
+        services,
+        completion::RecordingOperation::Transition {
+            id: job.id,
+            from: job.status,
+            to,
+            bytes,
+            message,
+        },
+    )
     .await
 }
 

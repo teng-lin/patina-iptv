@@ -45,51 +45,56 @@ const NATIVE_ONLY: &[&str] = &["native.rs", "native/", "recordings.rs", "recordi
 /// Test-only additions.
 const DEV_DEPENDENCIES: &[&str] = &["rusqlite", "tempfile"];
 
-/// The runtime modules that may name the store adapter: the service that
-/// owns its connections, the modules that write store work items, and the
-/// two boundary modules that give its values runtime names (`model`,
-/// `error`). Everything else, the orchestration in `data` and the owner's
-/// named operations included, reaches the store through these.
+/// Shipped runtime modules that may name the store adapter. Test fixtures
+/// are tracked separately below.
 const STORE_ADAPTER_USERS: &[&str] = &[
-    "assign.rs",
-    "guide_repair.rs",
-    "guide_repair/prepare.rs",
-    "guide_repair/publication.rs",
-    "guide_repair/tests.rs",
-    "guide_repair/write.rs",
     "backup.rs",
     "backup/error.rs",
-    "backup/tests.rs",
-    "commands.rs",
     "credential_store.rs",
     "error.rs",
-    "favorites.rs",
+    "guide_repair.rs",
+    "guide_repair/prepare.rs",
     "imports.rs",
     "inspection.rs",
     "inspection/probe.rs",
-    "library.rs",
     "model.rs",
     "opening.rs",
-    "opening/revocation.rs",
-    "guide_checks/retry.rs",
-    "paging.rs",
-    "parental.rs",
     "private_files.rs",
-    // The sliced publish where the host keeps the store, and that host's
-    // port (opening, persistence, the publish copy).
     "publish.rs",
-    "publish/tests/catalog_import_tests.rs", // Encrypted fixture for the cooperative publication driver.
-    "store_host.rs",
     "recordings.rs",
-    "recordings/completion.rs",
-    "recordings/shared.rs", // Owned transport preparation queues durable authority reads.
-    "recordings/shared_tests.rs", // Synthetic ownership and authority fixtures.
-    "recordings/tests.rs",
-    "search.rs",
+    "recordings/shared.rs",
     "state.rs",
-    "store_service.rs",
+    "store_host.rs",
+    "store_service/",
     "stored.rs",
     "vod.rs",
+];
+
+/// Test-only adapter references do not widen the shipped runtime surface.
+const STORE_ADAPTER_TEST_USERS: &[&str] = &[
+    "backup/tests.rs",
+    "favorites.rs",
+    "guide_checks/retry.rs",
+    "guide_repair/tests.rs",
+    "library.rs",
+    "opening/revocation.rs",
+    "parental.rs",
+    "publish/tests/catalog_import_tests.rs",
+    "recordings/shared_tests.rs",
+    "recordings/tests.rs",
+    "vod/recovery_tests.rs",
+];
+
+/// Dedicated files whose modules are compiled only under cfg(test). Some
+/// nested inline modules cannot be resolved from the declaration text alone.
+const STORE_ADAPTER_DEDICATED_TEST_USERS: &[&str] = &[
+    "backup/tests.rs",
+    "guide_checks/retry.rs",
+    "guide_repair/tests.rs",
+    "opening/revocation.rs",
+    "publish/tests/catalog_import_tests.rs",
+    "recordings/shared_tests.rs",
+    "recordings/tests.rs",
     "vod/recovery_tests.rs",
 ];
 
@@ -290,12 +295,45 @@ fn runtime_sources_name_only_listed_workspace_crates_and_no_toolkit() {
 
 #[test]
 fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
-    let users: BTreeSet<String> = runtime_sources()
-        .into_iter()
-        .filter(|(_, code)| code.contains("iptv_store_sqlite"))
-        .map(|(name, _)| name)
+    let sources = runtime_sources();
+    let test_modules = test_modules(&sources);
+    let users: BTreeSet<String> = sources
+        .iter()
+        .filter(|(name, code)| {
+            !test_modules.contains(name.as_str())
+                && !STORE_ADAPTER_DEDICATED_TEST_USERS.contains(&name.as_str())
+                && shipped(code).contains("iptv_store_sqlite")
+        })
+        .map(|(name, _)| {
+            if name.starts_with("store_service/") {
+                "store_service/".to_owned()
+            } else {
+                name.clone()
+            }
+        })
         .collect();
-    exact(&users, STORE_ADAPTER_USERS, "store adapter user");
+    exact(&users, STORE_ADAPTER_USERS, "shipped store adapter user");
+    for (name, code) in &sources {
+        if shipped(code).contains("pub(crate) use iptv_store_sqlite::*") {
+            assert!(
+                matches!(name.as_str(), "model.rs" | "error.rs"),
+                "{name} re-exports the SQLite adapter namespace"
+            );
+        }
+    }
+    let test_users: BTreeSet<String> = sources
+        .iter()
+        .filter(|(name, code)| {
+            code.contains("iptv_store_sqlite")
+                && (test_modules.contains(name) || !shipped(code).contains("iptv_store_sqlite"))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    exact(
+        &test_users,
+        STORE_ADAPTER_TEST_USERS,
+        "test-only store adapter user",
+    );
 }
 
 #[test]
@@ -430,6 +468,15 @@ fn shipped(code: &str) -> String {
                     break;
                 }
             }
+            continue;
+        }
+        if test_only
+            && lines.peek().is_some_and(|next| {
+                let next = next.trim_start();
+                next.starts_with("use ") || next.starts_with("pub use ")
+            })
+        {
+            lines.next();
             continue;
         }
         shipped.push(line);

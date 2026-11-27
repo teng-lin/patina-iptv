@@ -1,6 +1,6 @@
 //! Durable terminal intent precedes rename; verified media precedes catalog acknowledgement.
 use super::*;
-use iptv_store_sqlite::{RecordingCompletion, StoreError};
+use crate::model::RecordingCompletion;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
@@ -11,17 +11,67 @@ pub(super) enum Transition {
     Failed,
 }
 
-pub(super) async fn retry(
-    services: &Services,
-    operation: impl Fn(&mut iptv_store_sqlite::Store) -> Result<bool, StoreError>
-    + Send
-    + Sync
-    + 'static,
-) -> Transition {
-    let operation = Arc::new(operation);
-    for attempt in 0..3 {
+#[derive(Clone)]
+pub(super) enum RecordingOperation {
+    Retain(RecordingCompletion),
+    Commit(RecordingCompletion),
+    Prepare(Job, RecordingCompletion),
+    Transition {
+        id: iptv_core::recording::JobId,
+        from: Status,
+        to: Status,
+        bytes: u64,
+        message: &'static str,
+    },
+}
+
+pub(super) async fn retry(services: &Services, operation: RecordingOperation) -> Transition {
+    retry_with(|| {
+        let services = services.clone();
         let operation = operation.clone();
-        match services.call(move |store| operation(store)).await {
+        async move {
+            match operation {
+                RecordingOperation::Retain(completion) => {
+                    services
+                        .recordings()
+                        .retain_partial_completion(completion)
+                        .await
+                }
+                RecordingOperation::Commit(completion) => {
+                    services.recordings().commit_completion(completion).await
+                }
+                RecordingOperation::Prepare(job, completion) => {
+                    services
+                        .recordings()
+                        .prepare_completion(job, completion)
+                        .await
+                }
+                RecordingOperation::Transition {
+                    id,
+                    from,
+                    to,
+                    bytes,
+                    message,
+                } => {
+                    services
+                        .recordings()
+                        .transition(id, from, to, bytes, message)
+                        .await
+                }
+            }
+        }
+    })
+    .await
+}
+
+async fn retry_with<F, Fut>(mut operation: F) -> Transition
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<bool, crate::store_service::StoreError>>,
+{
+    for attempt in 0..3 {
+        let result = operation().await;
+        match result {
             Ok(true) => return Transition::Applied,
             Ok(false) => return Transition::Superseded,
             Err(error) if error.retryable_write() && attempt < 2 => {
@@ -35,6 +85,15 @@ pub(super) async fn retry(
         }
     }
     unreachable!("bounded recording retry returns on its final attempt")
+}
+
+#[cfg(test)]
+async fn retry_for_test<F, Fut>(operation: F) -> Transition
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<bool, crate::store_service::StoreError>>,
+{
+    retry_with(operation).await
 }
 
 fn digest(path: &Path) -> std::io::Result<(u64, String)> {
@@ -146,10 +205,7 @@ async fn reconcile(
         if retained {
             #[cfg(feature = "test-support")]
             let completion_job = completion.job;
-            let result = retry(services, move |store| {
-                store.retain_partial_recording_completion(&completion)
-            })
-            .await;
+            let result = retry(services, RecordingOperation::Retain(completion.clone())).await;
             #[cfg(feature = "test-support")]
             host::observe_operation(
                 services,
@@ -178,10 +234,7 @@ async fn reconcile(
     let completion_status = completion.status;
     #[cfg(feature = "test-support")]
     let completion_job = completion.job;
-    let result = retry(services, move |store| {
-        store.commit_recording_completion(&completion)
-    })
-    .await;
+    let result = retry(services, RecordingOperation::Commit(completion.clone())).await;
     #[cfg(feature = "test-support")]
     host::observe_operation(
         services,
@@ -266,11 +319,7 @@ pub(super) async fn finish(
     };
     let accepted = job.clone();
     let receipt = completion.clone();
-    match retry(services, move |store| {
-        store.prepare_recording_completion(&accepted, &receipt)
-    })
-    .await
-    {
+    match retry(services, RecordingOperation::Prepare(accepted, receipt)).await {
         Transition::Applied => {
             #[cfg(feature = "test-support")]
             host::observe_operation(services, job.id, "completion intent prepared");
@@ -294,10 +343,7 @@ pub(super) async fn finish(
 
 /// None means legacy receipt-less media. A failed receipt is never downgraded to Partial.
 pub(super) async fn recover(services: &Services, id: JobId) -> Option<Transition> {
-    match services
-        .read(move |store| store.recording_completion(id))
-        .await
-    {
+    match services.recordings().completion(id).await {
         Ok(Some(receipt)) => Some(reconcile(services, receipt, None).await),
         Ok(None) => None,
         Err(_) => Some(Transition::Failed),
@@ -430,7 +476,8 @@ mod tests {
                     let owner = owner(&root);
                     let mut job = owner
                         .services()
-                        .read(|store| store.recording_job(JobId(801)))
+                        .recordings()
+                        .job(JobId(801))
                         .await
                         .unwrap()
                         .unwrap();
@@ -442,7 +489,8 @@ mod tests {
                     }
                     job = owner
                         .services()
-                        .read(|store| store.recording_job(JobId(801)))
+                        .recordings()
+                        .job(JobId(801))
                         .await
                         .unwrap()
                         .unwrap();
@@ -487,7 +535,8 @@ mod tests {
         assert!(
             owner
                 .services()
-                .read(move |store| store.recording_completion(job.id))
+                .recordings()
+                .completion(job.id)
                 .await
                 .unwrap()
                 .is_some()
@@ -503,16 +552,19 @@ mod tests {
         for failure in [true, false] {
             let calls = Arc::new(AtomicUsize::new(0));
             let counted = calls.clone();
-            let outcome = retry(&owner.services(), move |_| {
+            let outcome = retry_for_test(move || {
                 counted.fetch_add(1, Ordering::SeqCst);
-                if failure {
-                    Err(StoreError::Sqlite(rusqlite::Error::SqliteFailure(
-                        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL),
-                        None,
-                    )))
+                let result = if failure {
+                    Err(crate::store_service::StoreError::Sqlite(
+                        rusqlite::Error::SqliteFailure(
+                            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL),
+                            None,
+                        ),
+                    ))
                 } else {
                     Ok(false)
-                }
+                };
+                std::future::ready(result)
             })
             .await;
             assert_eq!(calls.load(Ordering::SeqCst), if failure { 3 } else { 1 });

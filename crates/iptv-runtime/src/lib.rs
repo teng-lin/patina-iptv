@@ -673,9 +673,11 @@ mod tests {
         let second_cancel = CancelToken::new();
         first
             .imports
+            .imports
             .borrow_mut()
             .insert(SourceId(1), (1, first_cancel.clone()));
         second
+            .imports
             .imports
             .borrow_mut()
             .insert(SourceId(1), (1, second_cancel.clone()));

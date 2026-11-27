@@ -93,7 +93,11 @@ pub(crate) fn load_guide(
     now: UnixTime,
 ) -> Option<GuideStore> {
     let window = super::paging::window(now, stored_past_days());
-    read_guide(services, source, &super::paging::store_window(window))
+    let window = EpgWindow {
+        from: window.loaded_from,
+        ..EpgWindow::from(0, 0)
+    };
+    read_guide(services, source, &window)
 }
 
 /// [`load_guide`] for a read that restores the screen: an error when the
@@ -105,8 +109,11 @@ pub(crate) fn try_load_guide(
     now: UnixTime,
 ) -> Result<GuideStore, StoreError> {
     let window = super::paging::window(now, stored_past_days());
-    services
-        .blocking_read(move |store| store.load_epg(source, &super::paging::store_window(window)))
+    let window = EpgWindow {
+        from: window.loaded_from,
+        ..EpgWindow::from(0, 0)
+    };
+    services.blocking_read(move |store| store.load_epg(source, &window))
 }
 
 /// `window` of `source`'s stored guide; `None` when nothing is stored.

@@ -122,7 +122,7 @@ fn a_queued_registration_cannot_outlive_its_application_owner() {
     let owner = Runtime::new(ports);
     owner.start_services();
     owner.recordings.lock().ready = true;
-    let state = owner.recordings.clone();
+    let state = owner.recordings.shared().clone();
     let publication = state.publication.lock().unwrap();
     let queued = state.clone();
     let services = owner.services();
@@ -154,7 +154,7 @@ fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
     let (entered, seen) = sync_channel(1);
     let (release, parked) = sync_channel(1);
     *GATE.lock().unwrap() = Some((entered, parked));
-    let state = owner.recordings.clone();
+    let state = owner.recordings.shared().clone();
     let services = owner.services();
     let worker = std::thread::spawn(move || state.publish_schedule(&services, 0, true));
     seen.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -948,7 +948,7 @@ async fn native_host_captures_after_its_ui_owner_is_drained_and_dropped() {
     request.start = now() + 2;
     request.end = request.start + 3;
     let id = owner.schedule_recording(request).await.unwrap();
-    let state = owner.recordings.clone();
+    let state = owner.recordings.shared().clone();
     assert!(owner.drain_services());
     drop(owner);
     let services = state.host.lock().unwrap().as_ref().unwrap().accept();
@@ -1022,7 +1022,7 @@ async fn native_host_stop_joins_an_in_flight_account_refresh_and_closes_its_stor
     owner.start_services();
     seed(&owner, "http://example.test/generated.ts").await;
     let refresh = crate::TestGate::new();
-    let state = owner.recordings.clone();
+    let state = owner.recordings.shared().clone();
     *state.account_refresh.lock().unwrap() = Some(refresh.0.clone());
     owner.start_recordings();
     assert!(refresh.wait_entered(Duration::from_secs(30)));
@@ -1218,7 +1218,7 @@ async fn a_surviving_ui_and_a_restarted_host_keep_one_recording_budget() {
     // The OS restarts its native service while this exact UI Runtime survives.
     host::start_background_host(ports.clone()).unwrap();
     let restarted = host::acquire(&ports);
-    assert!(Arc::ptr_eq(&owner.recordings, &restarted));
+    assert!(Arc::ptr_eq(owner.recordings.shared(), &restarted));
     assert!(restarted.lock().viewers.contains_key(&0));
     owner.release_viewing(0);
     assert!(restarted.lock().viewers.is_empty());

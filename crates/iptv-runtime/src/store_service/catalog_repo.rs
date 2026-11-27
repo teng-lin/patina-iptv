@@ -1,0 +1,960 @@
+//! Typed catalog and library repositories over an owner's accepted store lane.
+
+use super::{Services, StoreError};
+use iptv_core::membership::Member;
+use iptv_core::organization::{BlockKind, Blocks, Edit, Item, Sort};
+use iptv_core::parental::Target;
+use iptv_guide::playback::ResolutionAuthority;
+use iptv_library::OrganizationScope as Scope;
+use iptv_library::SourceId;
+use iptv_library::{Playlist, SourcePolicy};
+use iptv_providers::model::{Source, SourceConfig};
+use iptv_providers::{ContentId, GroupId};
+use iptv_store_sqlite::{
+    ChannelOrder, ChannelQuery, ChannelScope, CustomGroup, CustomGroupId, MoveTarget, OrderScope,
+    SourceSummary, Store, StoredSource,
+};
+use std::collections::BTreeMap;
+
+fn snapshot_in(store: &Store) -> Result<crate::library::Snapshot, StoreError> {
+    let playlists = playlists_in(store)?;
+    let mut details = BTreeMap::new();
+    let mut imports = BTreeMap::new();
+    for playlist in &playlists {
+        imports.insert(playlist.id, store.import_status(playlist.id)?);
+        if let Some(source) = store.source(playlist.id)? {
+            details.insert(playlist.id, source);
+        }
+    }
+    Ok(crate::library::Snapshot {
+        playlists,
+        details,
+        imports,
+        active: store.active_source()?,
+    })
+}
+
+fn startup_source_in(store: &Store) -> Result<Option<StoredSource>, StoreError> {
+    if let Some(id) = store.active_source()?
+        && store.source_policy(id)?.enabled
+    {
+        return store.source(id);
+    }
+    for source in store.sources()?.iter().rev() {
+        if store.source_policy(source.id)?.enabled {
+            return store.source(source.id);
+        }
+    }
+    Ok(None)
+}
+
+fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
+    store
+        .sources()?
+        .into_iter()
+        .map(|summary| {
+            let guide = store.epg_guide(summary.id)?;
+            let policy = store.source_policy(summary.id)?;
+            let kinds = if policy.enabled {
+                store.on_demand_kinds(summary.id)?
+            } else {
+                (false, false)
+            };
+            let guides = store.guide_sources(summary.id)?;
+            let config = store.source(summary.id)?.map(|stored| stored.source.config);
+            let (user_agent, from_file) = match &config {
+                Some(SourceConfig::M3u(config)) => (
+                    config.user_agent.clone(),
+                    !config.location.expose().contains("://"),
+                ),
+                Some(SourceConfig::Xtream(config)) => (config.user_agent.clone(), false),
+                _ => (None, false),
+            };
+            Ok(Playlist {
+                policy,
+                id: summary.id,
+                name: summary.name,
+                kind: summary.kind,
+                channels: summary.import.counts.channels,
+                has_movies: kinds.0,
+                has_series: kinds.1,
+                movies_failed: summary.import.movies_error,
+                series_failed: summary.import.series_error,
+                updated_at: summary.import.last_success_at,
+                failed: summary
+                    .import
+                    .last_error
+                    .map(|kind| (kind, summary.import.last_error_at)),
+                guide_failed: guide
+                    .as_ref()
+                    .is_some_and(|guide| guide.last_error.is_some()),
+                guides,
+                user_agent,
+                from_file,
+            })
+        })
+        .collect()
+}
+
+pub(crate) struct CatalogRepo {
+    pub(super) services: Services,
+}
+
+impl CatalogRepo {
+    pub(crate) async fn source_policies(
+        self,
+    ) -> Result<Vec<(SourceSummary, SourcePolicy)>, StoreError> {
+        self.services
+            .read(|store| {
+                store
+                    .sources()?
+                    .into_iter()
+                    .map(|source| Ok((source.clone(), store.source_policy(source.id)?)))
+                    .collect()
+            })
+            .await
+    }
+
+    pub(crate) async fn status_snapshot(self) -> Result<crate::state::StatusSnapshot, StoreError> {
+        self.services
+            .call(|store| {
+                let mut snapshot = crate::state::StatusSnapshot {
+                    library: Some(snapshot_in(store)?),
+                    combined: store.all_playlists()?,
+                    ..Default::default()
+                };
+                for source in store.sources()? {
+                    if store.source_policy(source.id)?.enabled {
+                        snapshot.enabled.push(source.id);
+                    }
+                    if let Some(guide) = store.epg_guide(source.id)? {
+                        snapshot.guides.insert(source.id, guide);
+                    }
+                    let results = store.epg_feed_results(source.id)?;
+                    let lines = store
+                        .guide_sources(source.id)?
+                        .into_iter()
+                        .map(|source| iptv_library::SourceLine {
+                            result: results
+                                .iter()
+                                .find(|result| result.feed == source.feed)
+                                .cloned(),
+                            source,
+                        })
+                        .collect();
+                    snapshot.lines.insert(source.id, lines);
+                }
+                Ok(snapshot)
+            })
+            .await
+    }
+
+    pub(crate) async fn hide_group(self, source: SourceId, id: String) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.hide_group(source, &GroupId::from_stored(&id), true))
+            .await
+    }
+
+    pub(crate) async fn set_guide_sort(
+        self,
+        source: SourceId,
+        scope: Scope,
+        sort: Sort,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.set_guide_sort(source, &scope, sort))
+            .await
+    }
+
+    pub(crate) async fn combined_resume_state(
+        self,
+    ) -> Result<(Option<String>, Option<SourceId>), StoreError> {
+        self.services
+            .read(|store| {
+                let combined = store.combined_last_channel()?;
+                let active = store.active_source()?;
+                let active = active.filter(|source| {
+                    store
+                        .source_policy(*source)
+                        .is_ok_and(|policy| policy.enabled)
+                });
+                Ok((combined, active))
+            })
+            .await
+    }
+
+    pub(crate) async fn startup_library(
+        &self,
+    ) -> Result<(Option<StoredSource>, bool, bool, crate::library::Snapshot), StoreError> {
+        let directory = self.services.directory().to_owned();
+        self.services
+            .call_at_startup(move |store| {
+                iptv_store_sqlite::EpgStage::remove_stale(&directory);
+                iptv_store_sqlite::CatalogStage::remove_stale(&directory);
+                let sources = store.sources()?;
+                let mut enabled = 0;
+                for source in &sources {
+                    enabled += usize::from(store.source_policy(source.id)?.enabled);
+                }
+                Ok((
+                    startup_source_in(store)?,
+                    store.all_playlists()? || enabled > 1,
+                    !sources.is_empty(),
+                    snapshot_in(store)?,
+                ))
+            })
+            .await
+    }
+
+    pub(crate) async fn update_source_policy(
+        self,
+        id: SourceId,
+        access: crate::parental::Snapshot,
+        edit: impl FnOnce(&mut SourcePolicy) + Send + 'static,
+    ) -> Result<(SourcePolicy, bool), StoreError> {
+        let services = self.services.clone();
+        self.services
+            .call(move |store| {
+                crate::parental::require_settings_write(store, &access, &services.settings())?;
+                let mut policy = store.source_policy(id)?;
+                let was_enabled = policy.enabled;
+                edit(&mut policy);
+                store.set_source_policy(id, policy)?;
+                Ok((policy, was_enabled != policy.enabled))
+            })
+            .await
+    }
+
+    pub(crate) async fn organization_with_group_lists(
+        &self,
+        source: SourceId,
+    ) -> Result<(iptv_guide::Organization, Vec<(String, String, Vec<String>)>), StoreError> {
+        self.services
+            .read(move |store| {
+                store.read_snapshot(|store| {
+                    let organization = organization_in(store, source)?;
+                    let lists = group_lists_in(store, source, &organization.groups)?;
+                    Ok((organization, lists))
+                })
+            })
+            .await
+    }
+
+    pub(crate) async fn guide_blocks(&self, source: SourceId) -> Result<Blocks, StoreError> {
+        self.services
+            .read(move |store| store.guide_blocks(source))
+            .await
+    }
+
+    pub(crate) async fn guide_channel_blocked(
+        &self,
+        source: SourceId,
+        id: String,
+    ) -> Result<bool, StoreError> {
+        self.services
+            .read(move |store| store.guide_channel_blocked(source, &id))
+            .await
+    }
+
+    pub(crate) async fn set_guide_block(
+        self,
+        source: SourceId,
+        kind: BlockKind,
+        id: String,
+        blocked: bool,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.set_guide_block(source, kind, &id, blocked))
+            .await
+    }
+
+    pub(crate) async fn organization_editor(
+        &self,
+        source: SourceId,
+        scope: Scope,
+        favorites: Vec<String>,
+        draft_sort: Option<Sort>,
+    ) -> Result<(Vec<Item>, Sort, Blocks), StoreError> {
+        self.services
+            .read(move |store| {
+                store.read_snapshot(|store| {
+                    Ok((
+                        organization_rows_in(store, source, &scope, favorites, draft_sort)?,
+                        store.guide_sort(source, &scope)?,
+                        store.guide_blocks(source)?,
+                    ))
+                })
+            })
+            .await
+    }
+
+    pub(crate) async fn set_group_preference(
+        self,
+        source: SourceId,
+        group: String,
+        preference: iptv_core::organization::GroupPreference,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.set_guide_group_preference(source, &group, preference))
+            .await
+    }
+
+    pub(crate) async fn save_guide_order_from(
+        self,
+        source: SourceId,
+        scope: Scope,
+        original: Vec<String>,
+        order: Vec<String>,
+        expected_sort: Sort,
+        from_custom: bool,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| {
+                store.save_guide_order_from(
+                    source,
+                    &scope,
+                    &original,
+                    &order,
+                    Some(expected_sort),
+                    from_custom,
+                )
+            })
+            .await
+    }
+    pub(crate) async fn snapshot(&self) -> Result<crate::library::Snapshot, StoreError> {
+        self.services.read(snapshot_in).await
+    }
+
+    pub(crate) async fn startup_source(&self) -> Result<Option<StoredSource>, StoreError> {
+        self.services
+            .call_at_startup(|store| startup_source_in(store))
+            .await
+    }
+
+    pub(crate) async fn source_details(self, id: SourceId) -> Result<Option<Source>, StoreError> {
+        Ok(self.source(id).await?.map(|stored| stored.source))
+    }
+
+    pub(crate) async fn set_source_order(
+        self,
+        order: Vec<SourceId>,
+        access: crate::parental::Snapshot,
+    ) -> Result<(), StoreError> {
+        let services = self.services.clone();
+        self.services
+            .call(move |store| {
+                crate::parental::require_settings_write(store, &access, &services.settings())?;
+                store.set_source_order(&order)
+            })
+            .await
+    }
+
+    pub(crate) async fn set_active_source(self, source: SourceId) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.set_active_source(source))
+            .await
+    }
+
+    pub(crate) async fn rename_source(self, id: SourceId, name: String) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.rename_source(id, &name))
+            .await
+    }
+
+    pub(crate) async fn delete_source(
+        self,
+        id: SourceId,
+        access: crate::parental::Snapshot,
+    ) -> Result<bool, StoreError> {
+        self.services
+            .call(move |store| {
+                crate::parental::require_admin(store, &access)?;
+                store.delete_source(id)
+            })
+            .await
+    }
+
+    pub(crate) async fn edit_guide_sources(
+        self,
+        id: SourceId,
+        edit: iptv_library::guides::Edit,
+    ) -> Result<bool, StoreError> {
+        self.services
+            .call(move |store| store.edit_guide_sources(id, &edit))
+            .await
+    }
+
+    pub(crate) async fn set_source_policy(
+        self,
+        id: SourceId,
+        policy: SourcePolicy,
+        access: crate::parental::Snapshot,
+    ) -> Result<bool, StoreError> {
+        let services = self.services.clone();
+        self.services
+            .call(move |store| {
+                crate::parental::require_settings_write(store, &access, &services.settings())?;
+                let was_enabled = store.source_policy(id)?.enabled;
+                store.set_source_policy(id, policy)?;
+                Ok(was_enabled != policy.enabled)
+            })
+            .await
+    }
+
+    pub(crate) async fn set_all_playlists(
+        self,
+        all: bool,
+        access: crate::parental::Snapshot,
+    ) -> Result<(), StoreError> {
+        let services = self.services.clone();
+        self.services
+            .call(move |store| {
+                crate::parental::require_settings_write(store, &access, &services.settings())?;
+                store.set_all_playlists(all)
+            })
+            .await
+    }
+
+    pub(crate) async fn collapsed_playlists(&self) -> Result<Vec<i64>, StoreError> {
+        self.services
+            .read(|store| store.collapsed_playlists())
+            .await
+    }
+
+    pub(crate) async fn set_collapsed_playlists(self, ids: Vec<i64>) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.set_collapsed_playlists(&ids))
+            .await
+    }
+
+    pub(crate) async fn source(self, id: SourceId) -> Result<Option<StoredSource>, StoreError> {
+        self.services.read(move |store| store.source(id)).await
+    }
+
+    pub(crate) async fn sources(&self) -> Result<Vec<SourceSummary>, StoreError> {
+        self.services.read(|store| store.sources()).await
+    }
+
+    pub(crate) async fn source_policy(self, id: SourceId) -> Result<SourcePolicy, StoreError> {
+        self.services
+            .read(move |store| store.source_policy(id))
+            .await
+    }
+
+    pub(crate) async fn all_playlists(&self) -> Result<bool, StoreError> {
+        self.services.read(|store| store.all_playlists()).await
+    }
+
+    pub(crate) async fn custom_groups(
+        self,
+        source: SourceId,
+    ) -> Result<Vec<CustomGroup>, StoreError> {
+        self.services
+            .read(move |store| store.custom_groups(source))
+            .await
+    }
+
+    pub(crate) async fn members(
+        self,
+        source: SourceId,
+        scope: ChannelScope,
+    ) -> Result<Vec<Member>, StoreError> {
+        let rows = self
+            .services
+            .read(move |store| {
+                store.load_channels(
+                    source,
+                    &ChannelQuery {
+                        scope,
+                        include_hidden: true,
+                        ..Default::default()
+                    },
+                )
+            })
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| Member {
+                id: row.channel.id.as_str().into(),
+                name: row.name,
+            })
+            .collect())
+    }
+
+    pub(crate) async fn group_members(
+        self,
+        source: SourceId,
+        scope: ChannelScope,
+    ) -> Result<(Vec<CustomGroup>, Vec<Member>), StoreError> {
+        let groups = self
+            .services
+            .read(move |store| store.custom_groups(source))
+            .await?;
+        let members = self
+            .services
+            .read(move |store| {
+                store.load_channels(
+                    source,
+                    &ChannelQuery {
+                        scope,
+                        include_hidden: true,
+                        ..Default::default()
+                    },
+                )
+            })
+            .await?
+            .into_iter()
+            .map(|row| Member {
+                id: row.channel.id.as_str().into(),
+                name: row.name,
+            })
+            .collect();
+        Ok((groups, members))
+    }
+
+    pub(crate) async fn save_custom_group(
+        self,
+        source: SourceId,
+        group: Option<CustomGroupId>,
+        name: String,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| match group {
+                Some(group) => store.rename_custom_group(group, &name),
+                None => store.create_custom_group(source, &name).map(|_| ()),
+            })
+            .await
+    }
+
+    pub(crate) async fn remove_custom_members(
+        self,
+        group: CustomGroupId,
+        members: Vec<ContentId>,
+        access: crate::parental::Snapshot,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| {
+                crate::parental::require_group_edit(store, group, &access)?;
+                store.remove_custom_members(group, &members)
+            })
+            .await
+    }
+
+    pub(crate) async fn transfer_custom_members(
+        self,
+        source: SourceId,
+        from: Option<CustomGroupId>,
+        to: CustomGroupId,
+        members: Vec<ContentId>,
+        moving: bool,
+        access: crate::parental::Snapshot,
+    ) -> Result<usize, StoreError> {
+        self.services
+            .call(move |store| {
+                if moving && let Some(group) = from {
+                    crate::parental::require_group_edit(store, group, &access)?;
+                }
+                store.transfer_custom_members(source, from, to, &members, moving)
+            })
+            .await
+    }
+
+    pub(crate) async fn delete_custom_group(
+        self,
+        group: CustomGroupId,
+        access: crate::parental::Snapshot,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| {
+                crate::parental::require_group_edit(store, group, &access)?;
+                store.delete_custom_group(group).map(|_| ())
+            })
+            .await
+    }
+
+    pub(crate) async fn hide_channel(
+        self,
+        source: SourceId,
+        channel: String,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.set_hidden(source, &ContentId::from_stored(channel), true))
+            .await
+    }
+
+    pub(crate) async fn remember_combined_channel(self, channel: String) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| store.set_combined_last_channel(&channel))
+            .await
+    }
+
+    pub(crate) async fn channel(
+        self,
+        source: SourceId,
+        channel: ContentId,
+        mut access: crate::parental::Snapshot,
+    ) -> Result<Option<crate::model::PlaybackChannel>, StoreError> {
+        let settings = self.services.settings();
+        self.services
+            .read(move |store| {
+                access.access.policy = crate::parental::policy_settings(&settings);
+                let target = Target::live(source.0, channel.as_str());
+                if store.guide_channel_blocked(source, channel.as_str())?
+                    || !crate::parental::native_allowed(store, &target, &access)?
+                {
+                    return Ok(None);
+                }
+                Ok(store
+                    .channel(source, &channel)?
+                    .map(|row| crate::model::PlaybackChannel {
+                        channel: row.channel,
+                        blocked: row.blocked,
+                    }))
+            })
+            .await
+    }
+
+    pub(crate) async fn playback_handoff(
+        self,
+        authority: ResolutionAuthority,
+        external_group: Option<String>,
+        access: crate::parental::Snapshot,
+    ) -> Result<Option<crate::operations::ExternalPlaybackAuthorization>, StoreError> {
+        self.services
+            .read(move |store| {
+                playback_handoff_in(store, &authority, external_group.as_deref(), access)
+            })
+            .await
+    }
+
+    pub(crate) async fn playback_handoff_ordered(
+        self,
+        authority: ResolutionAuthority,
+        external_group: Option<String>,
+        access: crate::parental::Snapshot,
+    ) -> Result<Option<crate::operations::ExternalPlaybackAuthorization>, StoreError> {
+        self.services
+            .call(move |store| {
+                playback_handoff_in(store, &authority, external_group.as_deref(), access)
+            })
+            .await
+    }
+
+    pub(crate) async fn organization(
+        self,
+        source: SourceId,
+    ) -> Result<iptv_guide::Organization, StoreError> {
+        self.services
+            .read(move |store| organization_in(store, source))
+            .await
+    }
+
+    pub(crate) async fn organization_rows(
+        self,
+        source: SourceId,
+        kind: Scope,
+        favorites: Vec<String>,
+        sort: Option<Sort>,
+    ) -> Result<Vec<Item>, StoreError> {
+        self.services
+            .read(move |store| organization_rows_in(store, source, &kind, favorites, sort))
+            .await
+    }
+
+    pub(crate) async fn edit_organization(
+        self,
+        source: SourceId,
+        kind: Scope,
+        items: Vec<Item>,
+        item: Item,
+        edit: Edit,
+        selected: std::collections::BTreeSet<String>,
+    ) -> Result<(), StoreError> {
+        #[derive(PartialEq)]
+        enum StoredKind {
+            Channels,
+            Groups,
+            GroupChannels(GroupId),
+            CustomChannels(CustomGroupId),
+        }
+        let kind = match kind {
+            Scope::Channels => Ok(StoredKind::Channels),
+            Scope::Groups => Ok(StoredKind::Groups),
+            Scope::GroupChannels(group) => Ok(StoredKind::GroupChannels(group)),
+            Scope::CustomChannels(group) => Ok(StoredKind::CustomChannels(group)),
+            Scope::Favorites
+                if !matches!(
+                    edit,
+                    Edit::Earlier | Edit::Later | Edit::First | Edit::Last | Edit::ResetOrder
+                ) =>
+            {
+                Ok(StoredKind::Channels)
+            }
+            Scope::Favorites => Err(StoreError::Unavailable(
+                "favorites use their ordered writer",
+            )),
+        };
+        self.services
+            .call(move |store| {
+                let kind = kind?;
+                let id = ContentId::from_stored(&item.id);
+                let group = GroupId::from_stored(&item.id);
+                let to = match edit {
+                    Edit::Earlier => MoveTarget::Step(-1),
+                    Edit::Later => MoveTarget::Step(1),
+                    Edit::Last => MoveTarget::Index(usize::MAX),
+                    _ => MoveTarget::Index(0),
+                };
+                match edit {
+                    Edit::Visibility => match &kind {
+                        StoredKind::Groups => store.hide_group(source, &group, !item.hidden)?,
+                        _ => store.set_hidden(source, &id, !item.hidden)?,
+                    },
+                    Edit::ResetName => match &kind {
+                        StoredKind::Groups => store.rename_group(source, &group, None)?,
+                        _ => store.rename_channel(source, &id, None)?,
+                    },
+                    Edit::Earlier | Edit::Later | Edit::First | Edit::Last => match &kind {
+                        StoredKind::Channels => {
+                            store.move_channel_to(source, &OrderScope::All, &id, to)?;
+                        }
+                        StoredKind::GroupChannels(group) => {
+                            store.move_channel_to(
+                                source,
+                                &OrderScope::Group(group.clone()),
+                                &id,
+                                to,
+                            )?;
+                        }
+                        StoredKind::CustomChannels(group) => {
+                            store.move_in_custom_group_to(*group, &id, to)?;
+                        }
+                        StoredKind::Groups => store.move_group_to(source, &group, to)?,
+                    },
+                    Edit::ResetOrder => match &kind {
+                        StoredKind::Channels => {
+                            store.reset_manual_order(source, &OrderScope::All)?
+                        }
+                        StoredKind::GroupChannels(group) => {
+                            store.reset_manual_order(source, &OrderScope::Group(group.clone()))?;
+                        }
+                        StoredKind::CustomChannels(group) => {
+                            store.reset_custom_group_order(*group)?
+                        }
+                        StoredKind::Groups => store.reset_group_order(source)?,
+                    },
+                    Edit::HideSelected | Edit::ShowSelected | Edit::HideAll | Edit::ShowAll => {
+                        let all = matches!(edit, Edit::HideAll | Edit::ShowAll);
+                        let hidden = matches!(edit, Edit::HideSelected | Edit::HideAll);
+                        let ids: Vec<_> = items
+                            .into_iter()
+                            .filter(|item| all || selected.contains(&item.id))
+                            .map(|item| item.id)
+                            .collect();
+                        store.set_library_visibility(
+                            source,
+                            &ids,
+                            kind == StoredKind::Groups,
+                            hidden,
+                        )?;
+                    }
+                }
+                Ok(())
+            })
+            .await
+    }
+
+    pub(crate) async fn favorite_provider_order(
+        self,
+        source: SourceId,
+        keys: Vec<String>,
+    ) -> Result<Vec<String>, StoreError> {
+        self.services
+            .call(move |store| {
+                Ok(store
+                    .load_channels(
+                        source,
+                        &ChannelQuery {
+                            include_hidden: true,
+                            order: ChannelOrder::Provider,
+                            ..Default::default()
+                        },
+                    )?
+                    .into_iter()
+                    .filter(|row| keys.iter().any(|key| key == row.channel.id.as_str()))
+                    .map(|row| row.channel.id.as_str().to_owned())
+                    .collect())
+            })
+            .await
+    }
+
+    pub(crate) async fn rename_organization_item(
+        self,
+        source: SourceId,
+        kind: Scope,
+        id: String,
+        text: String,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| {
+                let text = (!text.trim().is_empty()).then_some(text.trim());
+                match kind {
+                    Scope::Groups => store.rename_group(source, &GroupId::from_stored(&id), text),
+                    _ => store.rename_channel(source, &ContentId::from_stored(&id), text),
+                }
+            })
+            .await
+    }
+}
+
+fn organization_in(
+    store: &Store,
+    source: SourceId,
+) -> Result<iptv_guide::Organization, StoreError> {
+    let channels = store
+        .ordered_guide_channels(source, &Scope::Channels)?
+        .into_iter()
+        .map(|row| (row.channel.id.as_str().to_owned(), row.name, row.hidden))
+        .collect();
+    let mut group_preferences = std::collections::HashMap::new();
+    let mut groups = Vec::new();
+    let group_sort = store.guide_sort(source, &Scope::Groups)?;
+    for item in store.guide_groups_with_sort(source, group_sort)? {
+        group_preferences.insert(
+            item.id.clone(),
+            store.guide_group_preferences(source, &item.id)?,
+        );
+        groups.push((item.id, item.name, item.hidden));
+    }
+    if !group_preferences.contains_key("__other__") {
+        group_preferences.insert(
+            "__other__".into(),
+            store.guide_group_preferences(source, "__other__")?,
+        );
+    }
+    Ok(iptv_guide::Organization {
+        channels,
+        groups,
+        blocks: store.guide_blocks(source)?,
+        group_preferences,
+        renamed_groups: store.renamed_groups(source)?,
+        group_sort,
+        channel_sort: store.guide_sort(source, &Scope::Channels)?,
+    })
+}
+
+fn group_lists_in(
+    store: &Store,
+    source: SourceId,
+    groups: &[(String, String, bool)],
+) -> Result<Vec<(String, String, Vec<String>)>, StoreError> {
+    groups
+        .iter()
+        .filter(|(_, _, hidden)| !hidden)
+        .map(|(id, name, _)| {
+            let scope = Scope::group_channels(id);
+            let channels = store
+                .ordered_guide_channels(source, &scope)?
+                .into_iter()
+                .map(|row| row.channel.id.as_str().to_owned())
+                .collect();
+            Ok((id.clone(), name.clone(), channels))
+        })
+        .collect()
+}
+
+fn organization_rows_in(
+    store: &Store,
+    source: SourceId,
+    kind: &Scope,
+    favorites: Vec<String>,
+    sort: Option<Sort>,
+) -> Result<Vec<Item>, StoreError> {
+    if *kind == Scope::Groups {
+        return match sort {
+            Some(sort) => store.guide_groups_with_sort(source, sort),
+            None => store.guide_groups(source),
+        };
+    }
+    let scope = if *kind == Scope::Favorites {
+        &Scope::Channels
+    } else {
+        kind
+    };
+    let rows = match sort {
+        Some(sort) => store.guide_channels_with_sort(source, scope, sort),
+        None => store.ordered_guide_channels(source, scope),
+    }?;
+    if *kind == Scope::Favorites {
+        let mut by_id: std::collections::HashMap<_, _> = rows
+            .into_iter()
+            .map(|row| (row.channel.id.as_str().to_owned(), row))
+            .collect();
+        return Ok(favorites
+            .into_iter()
+            .filter_map(|id| {
+                let row = by_id.remove(&id)?;
+                Some(Item {
+                    id,
+                    name: row.name,
+                    hidden: row.hidden,
+                })
+            })
+            .collect());
+    }
+    Ok(rows
+        .into_iter()
+        .map(|row| Item {
+            id: row.channel.id.as_str().to_owned(),
+            name: row.name,
+            hidden: row.hidden,
+        })
+        .collect())
+}
+
+fn playback_handoff_in(
+    store: &Store,
+    authority: &ResolutionAuthority,
+    external_group: Option<&str>,
+    access: crate::parental::Snapshot,
+) -> Result<Option<crate::operations::ExternalPlaybackAuthorization>, StoreError> {
+    let source = SourceId(authority.source());
+    let channel = &authority.channel().id;
+    let target = Target::live(source.0, channel.as_str());
+    store.read_snapshot(|store| {
+        let Some(grants) = crate::parental::native_grants(store, &target, &access)? else {
+            return Ok(None);
+        };
+        if !store.source_policy(source)?.enabled
+            || store.guide_channel_blocked(source, channel.as_str())?
+        {
+            return Ok(None);
+        }
+        let Some(stored) = store.source(source)? else {
+            return Ok(None);
+        };
+        if let Some(group) = external_group {
+            let scope = iptv_library::OrganizationScope::group_channels(group);
+            if !store
+                .guide_group_preferences(source, group)?
+                .external_player
+                || !store
+                    .ordered_guide_channels(source, &scope)?
+                    .iter()
+                    .any(|row| &row.channel.id == channel)
+            {
+                return Ok(None);
+            }
+        }
+        let Some(row) = store.channel(source, channel)? else {
+            return Ok(None);
+        };
+        let allowed = !row.blocked
+            && stored.incarnation == authority.incarnation()
+            && stored.source.config == *authority.config()
+            && row.channel == *authority.channel()
+            && access.playback_current(&target, &grants);
+        Ok(allowed
+            .then(|| crate::operations::ExternalPlaybackAuthorization::new(access, target, grants)))
+    })
+}

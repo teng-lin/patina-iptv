@@ -18,11 +18,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use iptv_core::favorites::{Favorites, KeyIndex, RECENT_LIMIT, Recent, diff};
+use crate::store_service::{FavoriteWrite, StoreError};
+use iptv_core::favorites::{Favorites, KeyIndex, Recent, diff};
 use iptv_core::guide::Schedule;
-use iptv_providers::ContentId;
+use iptv_library::SourceId;
+#[cfg(test)]
 use iptv_providers::model::ContentKind;
-use iptv_store_sqlite::{SourceId, Store, StoreError};
+#[cfg(test)]
+use iptv_store_sqlite::Store;
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -100,21 +103,7 @@ impl State {
 }
 
 /// Whether `source` has movies or shows by its last import's counts.
-fn source_has_vod(store: &Store, source: SourceId) -> Result<bool, StoreError> {
-    let counts = store.import_status(source)?.counts;
-    Ok(counts.vod > 0 || counts.series > 0)
-}
-
-/// Whether any enabled source has movies or shows: one status read per
-/// configured playlist, never a catalog scan.
-fn any_enabled_vod(store: &Store) -> Result<bool, StoreError> {
-    for source in store.sources()? {
-        if store.source_policy(source.id)?.enabled && source_has_vod(store, source.id)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
+type PendingWrite = FavoriteWrite;
 
 struct VodRequest {
     epoch: Rc<()>,
@@ -160,7 +149,7 @@ pub(crate) fn refresh_vod_availability(
 ) -> impl std::future::Future<Output = ()> + use<> {
     let request = begin_vod_request(owner);
     let services = owner.services();
-    let read = services.read(any_enabled_vod);
+    let read = services.favorites().any_enabled_vod();
     let owner = owner.clone();
     async move {
         let Ok(any_vod) = read.await else { return };
@@ -205,31 +194,6 @@ enum Write {
     },
 }
 
-#[derive(Clone)]
-enum PendingWrite {
-    ClearHistory,
-    MoveFavorite {
-        source: SourceId,
-        key: String,
-        index: usize,
-    },
-    Favorite {
-        source: SourceId,
-        key: String,
-        on: bool,
-    },
-    Watched {
-        source: SourceId,
-        key: String,
-        at: i64,
-    },
-    WatchTime {
-        source: SourceId,
-        key: String,
-        elapsed_ms: u64,
-    },
-}
-
 /// Writes sent to the writer thread and not yet committed (or dropped with
 /// their deleted playlist).
 fn unsaved(owner: &super::Runtime) -> Arc<AtomicUsize> {
@@ -243,22 +207,6 @@ fn cooperative_failure(owner: &super::Runtime) -> Arc<AtomicBool> {
 /// Reads saved favorites. The store's reader does not wait for a long
 /// publish, but it cannot see a write still queued: while any of ours is,
 /// a favorites-inbox barrier must finish before queuing the read.
-async fn load<R: Send + 'static>(
-    owner: &super::Runtime,
-    read: impl FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
-) -> Result<R, StoreError> {
-    if unsaved(owner).load(Ordering::Acquire) > 0 {
-        if !flush(owner).await {
-            return Err(StoreError::Unavailable(
-                "recent favorite edits are not saved",
-            ));
-        }
-        owner.services().call(move |store| read(store)).await
-    } else {
-        owner.services().read(read).await
-    }
-}
-
 /// A new app root must reload persisted favorites, including an applied restore.
 pub fn reset(owner: &super::Runtime) {
     owner.organization.favorites().borrow_mut().reset();
@@ -279,32 +227,26 @@ pub async fn prepare_source(
         .favorites()
         .with(|state| state.borrow().history_revision);
     let request = begin_vod_request(owner);
-    let loaded = load(owner, move |store| {
-        let has_vod = source_has_vod(store, id).unwrap_or(false);
-        // Another enabled playlist's films keep the cross-source shelves
-        // reachable while a live-only playlist is on screen.
-        // An unrelated playlist's metadata error must not block this guide.
-        // None preserves the last known cross-source availability.
-        let any_vod = if has_vod {
-            Some(true)
-        } else {
-            any_enabled_vod(store).ok()
-        };
-        let keys = store.favorite_keys(id)?;
-        let recent = store.recent(Some(id), Some(ContentKind::Live), RECENT_LIMIT as u32)?;
-        Ok(((has_vod, any_vod), keys, recent))
-    })
-    .await;
+    if unsaved(owner).load(Ordering::Acquire) > 0 && !flush(owner).await {
+        return None;
+    }
+    let loaded = services.favorites().source_data(id).await;
     if !services.is_current() || owner.imports.generation.get() != generation {
         return None;
     }
-    let ((has_vod, any_vod), keys, recent) = match loaded {
+    let loaded = match loaded {
         Ok(loaded) => loaded,
         Err(error) => {
             log::warn!("iptv favorites: store unavailable ({error})");
             return None;
         }
     };
+    let (has_vod, any_vod, keys, recent) = (
+        loaded.has_vod,
+        loaded.any_vod,
+        loaded.favorites,
+        loaded.recent,
+    );
     let owner = owner.clone();
     Some(move || {
         owner.organization.favorites().with(|state| {
@@ -325,8 +267,7 @@ pub async fn prepare_source(
             state.recent = Recent::from_keys(
                 recent
                     .into_iter()
-                    .filter(|_| state.history_revision == history_revision)
-                    .map(|row| row.item_id.as_str().to_owned()),
+                    .filter(|_| state.history_revision == history_revision),
             );
         })
     })
@@ -342,35 +283,22 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
     let services = owner.services();
     let request = begin_vod_request(owner);
     use iptv_guide::combined::{qualified_key, split_key};
-    let loaded = load(owner, |store| {
-        let mut ids = Vec::new();
-        let mut favorites = Vec::new();
-        let mut has_vod = false;
-        let mut availability_known = true;
-        for source in store.sources()? {
-            if store.source_policy(source.id)?.enabled {
-                ids.push(source.id);
-                match source_has_vod(store, source.id) {
-                    Ok(available) => has_vod |= available,
-                    Err(_) => availability_known = false,
-                }
-                favorites.push((source.id, store.favorite_keys(source.id)?));
-            }
-        }
-        Ok((
-            ids,
-            favorites,
-            store.recent(None, Some(ContentKind::Live), RECENT_LIMIT as u32)?,
-            (has_vod || availability_known).then_some(has_vod),
-        ))
-    })
-    .await;
+    if unsaved(owner).load(Ordering::Acquire) > 0 && !flush(owner).await {
+        return None;
+    }
+    let loaded = services.favorites().combined_data().await;
     if !services.is_current() || owner.imports.generation.get() != generation {
         return None;
     }
-    let Ok((ids, favorites, recent, has_vod)) = loaded else {
+    let Ok(loaded) = loaded else {
         return None;
     };
+    let (ids, favorites, recent, has_vod) = (
+        loaded.sources,
+        loaded.favorites,
+        loaded.recent,
+        loaded.has_vod,
+    );
     let owner = owner.clone();
     Some(move || {
         owner.organization.favorites().with(|state| {
@@ -404,8 +332,8 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                 state.recent = Recent::from_keys(
                     recent
                         .into_iter()
-                        .filter(|row| ids.contains(&row.source_id))
-                        .map(|row| qualified_key(row.source_id.0, row.item_id.as_str())),
+                        .filter(|(source, _)| ids.contains(source))
+                        .map(|(source, key)| qualified_key(source.0, &key)),
                 );
             }
             // Every enabled playlist is on screen.
@@ -659,7 +587,7 @@ fn queue_on_writer(owner: &super::Runtime, write: Write) {
         let failed = failed.clone();
         // A barrier that cannot be queued is dropped, and its waiter hears
         // that nothing was saved.
-        drop(services.call(move |_| {
+        drop(services.writer_barrier(move || {
             done(!failed.swap(false, Ordering::AcqRel));
             Ok(())
         }));
@@ -696,45 +624,20 @@ fn queue_on_writer(owner: &super::Runtime, write: Write) {
     };
     let counted = Counted::new(owner);
     let failure = ReportFailure(Some(failed));
-    drop(services.call(move |store| {
-        let _counted = counted;
-        let mut failure = failure;
-        match persist(store, operation) {
-            Ok(()) | Err(StoreError::SourceNotFound(_)) => {
-                failure.0 = None;
-                Ok(())
+    services
+        .favorites()
+        .enqueue_write(operation, move |result| {
+            let _counted = &counted;
+            let mut failure = failure;
+            match result {
+                Ok(()) | Err(StoreError::SourceNotFound(_)) => {
+                    failure.0 = None;
+                }
+                Err(error) => {
+                    log::warn!("iptv favorites: could not save ({error})");
+                }
             }
-            Err(error) => {
-                log::warn!("iptv favorites: could not save ({error})");
-                Err(error)
-            }
-        }
-    }));
-}
-
-/// One write, on the store.
-fn persist(store: &mut Store, write: PendingWrite) -> Result<(), StoreError> {
-    match write {
-        PendingWrite::ClearHistory => store.clear_history(None).map(|_| ()),
-        PendingWrite::MoveFavorite { source, key, index } => store
-            .move_favorite(source, &ContentId::from_stored(key), index)
-            .map(|_| ()),
-        PendingWrite::Favorite { source, key, on } => {
-            store.set_favorite(source, &ContentId::from_stored(key), on)
-        }
-        PendingWrite::WatchTime {
-            source,
-            key,
-            elapsed_ms,
-        } => store.add_channel_watch_time(source, &ContentId::from_stored(key), elapsed_ms),
-        PendingWrite::Watched { source, key, at } => store.record_watch(
-            source,
-            &ContentId::from_stored(key),
-            ContentKind::Live,
-            at,
-            None,
-        ),
-    }
+        });
 }
 
 /// Clear in writer order so older queued plays cannot resurrect deleted history.
@@ -793,13 +696,10 @@ fn write_all(
 ) {
     write_all_with(rx, |write| {
         let operation = write.clone();
-        let result = services.blocking(move |store| persist(store, operation));
+        let result = services.favorites().persist_blocking(operation);
         // Deleting a playlist also deletes its customization/history. A queued
         // change whose owner was explicitly removed must not block other sources.
-        if matches!(
-            &result,
-            Err(iptv_store_sqlite::StoreError::SourceNotFound(_))
-        ) {
+        if matches!(&result, Err(StoreError::SourceNotFound(_))) {
             unsaved.fetch_sub(1, Ordering::AcqRel);
             return true;
         }
@@ -959,7 +859,8 @@ pub(crate) async fn save_order(
             Write::SaveOrder(Box::new(move |prior_saved| {
                 let result = if prior_saved {
                     services
-                        .blocking(move |store| store.save_favorite_order(source, &original, &order))
+                        .favorites()
+                        .save_order_blocking(source, original, order)
                 } else {
                     Err(StoreError::Unavailable(
                         "recent favorite edits are not saved",
@@ -978,17 +879,16 @@ pub(crate) async fn save_order(
         // one of them failed.
         let failed = cooperative_failure(owner);
         let counted = Counted::new(owner);
+        if failed.swap(false, Ordering::AcqRel) {
+            drop(counted);
+            return Err(StoreError::Unavailable(
+                "recent favorite edits are not saved",
+            ));
+        }
         owner
             .services()
-            .call(move |store| {
-                let _counted = counted;
-                if failed.swap(false, Ordering::AcqRel) {
-                    return Err(StoreError::Unavailable(
-                        "recent favorite edits are not saved",
-                    ));
-                }
-                store.save_favorite_order(source, &original, &order)
-            })
+            .favorites()
+            .save_order(source, original, order)
             .await?;
     }
     let changed = owner.organization.favorites().with(|state| {

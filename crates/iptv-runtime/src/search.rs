@@ -2,8 +2,7 @@
 use iptv_core::guide::Schedule;
 use iptv_epg::{ChannelKey, UnixTime};
 use iptv_library::SourceId;
-use iptv_search::{ChannelIndex, ProgramIndex, ProgramIndexBuilder};
-use iptv_store_sqlite::StoreError;
+use iptv_search::{ChannelIndex, ProgramIndex};
 use std::cell::{Cell, RefCell};
 
 /// Search lifetime state stays together; only this module can mutate it.
@@ -31,39 +30,9 @@ fn programs_native(
     sources: Vec<(SourceId, String, Vec<ChannelKey>, usize)>,
     rows: usize,
     from: UnixTime,
-) -> impl std::future::Future<Output = Result<ProgramIndex, StoreError>> + use<> {
-    services.read(move |store| {
-        store.read_snapshot(|store| {
-            let mut builder = ProgramIndexBuilder::new(rows);
-            for (source, incarnation, keys, offset) in sources {
-                if store.source_incarnation(source)? != incarnation {
-                    return Err(StoreError::Unavailable(
-                        "search source changed while indexing",
-                    ));
-                }
-                for (channel, key) in keys.iter().enumerate() {
-                    builder.set_identity(
-                        channel + offset,
-                        iptv_search::ChannelId::in_source(
-                            source.0,
-                            incarnation.clone(),
-                            key.as_str(),
-                        ),
-                    );
-                }
-                store.for_each_epg_title(
-                    source,
-                    &keys,
-                    from,
-                    UnixTime::MAX,
-                    |channel, start, stop, title| {
-                        builder.push(channel + offset, start, stop, title)
-                    },
-                )?;
-            }
-            Ok(builder.finish())
-        })
-    })
+) -> impl std::future::Future<Output = Result<ProgramIndex, crate::store_service::StoreError>> + use<>
+{
+    services.epg().program_index(sources, rows, from)
 }
 
 impl crate::Runtime {
@@ -316,6 +285,7 @@ mod identity_tests {
     use iptv_guide::playback::SourceAuthority;
     use iptv_providers::SecretUrl;
     use iptv_providers::model::{M3uSourceConfig, Source, SourceConfig};
+    use iptv_search::ProgramIndexBuilder;
     use std::rc::Rc;
 
     fn config(source: i64) -> SourceConfig {

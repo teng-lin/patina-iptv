@@ -1,6 +1,5 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use crate::commands::playback_handoff_check;
 use iptv_core::add_playlist::ImportId;
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
@@ -311,10 +310,10 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .read(move |store| {
-                Ok(playback_handoff_check(store, &authority, Some(&group), access)?.is_some())
-            })
-            .await?)
+            .catalog()
+            .playback_handoff(authority, Some(group), access)
+            .await?
+            .is_some())
     }
 
     /// Orders final admission behind queued parental changes. The returned
@@ -327,7 +326,8 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .call(move |store| playback_handoff_check(store, &authority, Some(&group), access))
+            .catalog()
+            .playback_handoff_ordered(authority, Some(group), access)
             .await?)
     }
 
@@ -340,7 +340,8 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .call(move |store| playback_handoff_check(store, &authority, None, access))
+            .catalog()
+            .playback_handoff_ordered(authority, None, access)
             .await?)
     }
 

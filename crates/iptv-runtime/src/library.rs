@@ -1,12 +1,16 @@
 //! Library snapshots, refresh tickets and named persistence commands.
 use crate::model::Activity;
+use crate::model::StoredSource;
+use crate::store_service::StoreError;
 use iptv_import::CancelToken;
-use iptv_library::Playlist;
-use iptv_providers::model::{Source, SourceConfig};
-use iptv_store_sqlite::{SourceId, Store, StoreError, StoredSource};
+use iptv_library::{Playlist, SourceId, SourcePolicy};
+use iptv_providers::model::Source;
+#[cfg(test)]
+use iptv_providers::model::SourceConfig;
+#[cfg(test)]
+use iptv_store_sqlite::Store;
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
     rc::{Rc, Weak},
 };
 pub type ImportCompletion = Rc<ImportWork>;
@@ -124,23 +128,6 @@ pub fn reset_imports(owner: &super::Runtime) {
 
 pub use crate::state::LibrarySnapshot as Snapshot;
 
-pub(crate) fn snapshot_in(store: &Store) -> Result<Snapshot, StoreError> {
-    let playlists = playlists_in(store)?;
-    let mut details = BTreeMap::new();
-    let mut imports = BTreeMap::new();
-    for playlist in &playlists {
-        imports.insert(playlist.id, store.import_status(playlist.id)?);
-        if let Some(source) = store.source(playlist.id)? {
-            details.insert(playlist.id, source);
-        }
-    }
-    Ok(Snapshot {
-        playlists,
-        details,
-        imports,
-        active: store.active_source()?,
-    })
-}
 pub fn install(owner: &super::Runtime, snapshot: Snapshot) -> bool {
     owner.library.with(|current| {
         let changed = current.borrow().as_ref() != Some(&snapshot);
@@ -180,58 +167,13 @@ pub fn reorder_sources(
     owner: &super::Runtime,
     order: Vec<SourceId>,
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
-    let services = owner.services();
-    let current = services.clone();
-    let authorization = owner.parental_snapshot();
-    services.call(move |store| {
-        crate::parental::require_settings_write(store, &authorization, &current.settings())?;
-        store.set_source_order(&order)
-    })
+    owner
+        .services()
+        .catalog()
+        .set_source_order(order, owner.parental_snapshot())
 }
-pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
-    store
-        .sources()?
-        .into_iter()
-        .map(|s| {
-            let guide = store.epg_guide(s.id)?;
-            let policy = store.source_policy(s.id)?;
-            // Only enabled playlists reach the catalog or its empty state.
-            let kinds = if policy.enabled {
-                store.on_demand_kinds(s.id)?
-            } else {
-                (false, false)
-            };
-            let guides = store.guide_sources(s.id)?;
-            let config = store.source(s.id)?.map(|stored| stored.source.config);
-            let (user_agent, from_file) = match &config {
-                Some(SourceConfig::M3u(c)) => {
-                    (c.user_agent.clone(), !c.location.expose().contains("://"))
-                }
-                Some(SourceConfig::Xtream(c)) => (c.user_agent.clone(), false),
-                _ => (None, false),
-            };
-            Ok(Playlist {
-                policy,
-                id: s.id,
-                name: s.name,
-                kind: s.kind,
-                channels: s.import.counts.channels,
-                has_movies: kinds.0,
-                has_series: kinds.1,
-                movies_failed: s.import.movies_error,
-                series_failed: s.import.series_error,
-                updated_at: s.import.last_success_at,
-                failed: s.import.last_error.map(|k| (k, s.import.last_error_at)),
-                guide_failed: guide.as_ref().is_some_and(|g| g.last_error.is_some()),
-                guides,
-                user_agent,
-                from_file,
-            })
-        })
-        .collect()
-}
-
 /// The playlist to open at startup: the one shown last, else the newest.
+#[cfg(test)]
 pub(crate) fn startup_source(store: &Store) -> Result<Option<StoredSource>, StoreError> {
     if let Some(id) = store.active_source()?
         && store.source_policy(id)?.enabled
@@ -278,10 +220,7 @@ pub(crate) fn newest_excluding(
     })
 }
 
-fn policy_native(
-    owner: &super::Runtime,
-    id: SourceId,
-) -> Result<iptv_store_sqlite::SourcePolicy, StoreError> {
+fn policy_native(owner: &super::Runtime, id: SourceId) -> Result<SourcePolicy, StoreError> {
     playlists(owner)
         .map_err(crate::Error::into_store_error)?
         .into_iter()
@@ -333,7 +272,8 @@ pub fn source_details(owner: &super::Runtime, id: SourceId) -> Option<Source> {
 pub fn snapshot(
     owner: &super::Runtime,
 ) -> impl std::future::Future<Output = Result<Snapshot, StoreError>> + use<> {
-    owner.services().read(snapshot_in)
+    let services = owner.services();
+    async move { services.catalog().snapshot().await }
 }
 
 pub fn update_policy(
@@ -342,25 +282,20 @@ pub fn update_policy(
     edit: impl FnOnce(&mut iptv_library::SourcePolicy) + Send + 'static,
 ) -> impl std::future::Future<Output = Result<(iptv_library::SourcePolicy, bool), StoreError>> {
     let services = owner.services();
-    let current = services.clone();
-    let authorization = owner.parental_snapshot();
-    services.call(move |store| {
-        crate::parental::require_settings_write(store, &authorization, &current.settings())?;
-        let mut policy = store.source_policy(id)?;
-        let was_enabled = policy.enabled;
-        edit(&mut policy);
-        store.set_source_policy(id, policy)?;
-        Ok((policy, was_enabled != policy.enabled))
-    })
+    let access = owner.parental_snapshot();
+    async move {
+        services
+            .catalog()
+            .update_source_policy(id, access, edit)
+            .await
+    }
 }
 
 pub fn remember_shown(
     owner: &super::Runtime,
     id: SourceId,
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
-    owner
-        .services()
-        .call(move |store| store.set_active_source(id))
+    owner.services().catalog().set_active_source(id)
 }
 
 pub fn rename_source(
@@ -368,20 +303,17 @@ pub fn rename_source(
     id: SourceId,
     name: String,
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
-    owner
-        .services()
-        .call(move |store| store.rename_source(id, &name))
+    owner.services().catalog().rename_source(id, name)
 }
 
 pub fn delete_source(
     owner: &super::Runtime,
     id: SourceId,
 ) -> impl std::future::Future<Output = Result<bool, StoreError>> + use<> {
-    let snapshot = owner.parental_snapshot();
-    owner.services().call(move |store| {
-        crate::parental::require_admin(store, &snapshot)?;
-        store.delete_source(id)
-    })
+    owner
+        .services()
+        .catalog()
+        .delete_source(id, owner.parental_snapshot())
 }
 
 pub fn edit_guides(
@@ -389,9 +321,7 @@ pub fn edit_guides(
     id: SourceId,
     edit: iptv_library::guides::Edit,
 ) -> impl std::future::Future<Output = Result<bool, StoreError>> + use<> {
-    owner
-        .services()
-        .call(move |store| store.edit_guide_sources(id, &edit))
+    owner.services().catalog().edit_guide_sources(id, edit)
 }
 
 pub fn set_activity(owner: &super::Runtime, id: SourceId, activity: Option<Activity>) {
@@ -423,13 +353,15 @@ pub fn save_all(
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
     owner
         .services()
-        .call(move |store| store.set_all_playlists(all))
+        .catalog()
+        .set_all_playlists(all, owner.parental_snapshot())
 }
 
 pub fn collapsed(
     owner: &super::Runtime,
 ) -> impl std::future::Future<Output = Result<Vec<i64>, StoreError>> + use<> {
-    owner.services().call(|store| store.collapsed_playlists())
+    let services = owner.services();
+    async move { services.catalog().collapsed_playlists().await }
 }
 
 pub fn save_collapsed(
@@ -438,7 +370,8 @@ pub fn save_collapsed(
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
     owner
         .services()
-        .call(move |store| store.set_collapsed_playlists(&collapsed))
+        .catalog()
+        .set_collapsed_playlists(collapsed)
 }
 
 /// Refresh policy belongs to the application; the host supplies timers and
@@ -479,10 +412,7 @@ pub fn playlists(owner: &super::Runtime) -> Result<Vec<Playlist>, crate::Error> 
     playlists_native(owner).map_err(crate::Error::from)
 }
 
-pub fn policy(
-    owner: &super::Runtime,
-    id: SourceId,
-) -> Result<iptv_store_sqlite::SourcePolicy, crate::Error> {
+pub fn policy(owner: &super::Runtime, id: SourceId) -> Result<SourcePolicy, crate::Error> {
     policy_native(owner, id).map_err(crate::Error::from)
 }
 

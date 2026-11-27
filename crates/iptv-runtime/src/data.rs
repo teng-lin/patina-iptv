@@ -79,6 +79,8 @@ pub(crate) use schedule_view::{repair_source_shown, show_repair};
 use std::cell::RefCell;
 #[cfg(test)]
 use std::rc::Rc;
+#[cfg(test)]
+use tokio::sync::mpsc::unbounded_channel;
 
 #[cfg(all(test, feature = "native"))]
 mod playlist_lifecycle_tests {

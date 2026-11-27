@@ -544,7 +544,7 @@ async fn background_shared_input_outlives_the_ui_executor_and_finishes_once() {
         job.status == Status::Recording && job.bytes >= 188
     })
     .await;
-    let state = owner.recordings.clone();
+    let state = owner.recordings.shared().clone();
     drop(playback);
     assert!(owner.drain_services());
     drop(owner);
@@ -1067,7 +1067,7 @@ async fn recording_link_resolution_revalidates_member_authority_before_shared_at
         );
         let services = owner.services();
         let work = services.clone();
-        let state = owner.recordings.clone();
+        let state = owner.recordings.shared().clone();
         let resolving =
             services.spawn(async move { resolve(&work, &state, &job, &CancelToken::new()).await });
         tokio::time::timeout(Duration::from_secs(5), seen)
