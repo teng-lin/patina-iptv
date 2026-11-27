@@ -13,6 +13,65 @@ fn operation() -> InstallOperation {
 }
 
 #[test]
+fn cancelling_authorization_drops_the_wait_and_busy_guard_without_dispatching_a_late_error() {
+    use std::{
+        cell::Cell,
+        future::Future,
+        rc::Rc,
+        task::{Context, Poll, Waker},
+    };
+    struct Dropped(Rc<Cell<bool>>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    let runtime = nsh_core::element::Runtime::default();
+    let _entered = runtime.enter();
+    let (owner, ()) = create_root(|| {
+        let operation = operation();
+        let busy = operation.busy;
+        let dropped = Rc::new(Cell::new(false));
+        let dispatched = Cell::new(false);
+        let guard = Dropped(Rc::clone(&dropped));
+        let (complete, held) = futures_channel::oneshot::channel::<Result<(), &'static str>>();
+        let (cancel, cancelled) = futures_channel::oneshot::channel::<()>();
+        let mut task = std::pin::pin!(async {
+            let _operation = operation;
+            let result = until_cancelled(
+                async move {
+                    let _guard = guard;
+                    held.await.unwrap()
+                },
+                async move {
+                    let _ = cancelled.await;
+                },
+            )
+            .await;
+            if result.is_some() {
+                dispatched.set(true);
+            }
+        });
+        let mut context = Context::from_waker(Waker::noop());
+        assert_eq!(task.as_mut().poll(&mut context), Poll::Pending);
+        assert!(busy.get_untracked());
+        assert!(!dropped.get());
+        cancel.send(()).unwrap();
+        // A late verification error is ready in the same shell turn. Cancel
+        // still wins, so no notification, browser route or handoff is dispatched.
+        complete
+            .send(Err("synthetic verification failure"))
+            .unwrap();
+        assert_eq!(task.as_mut().poll(&mut context), Poll::Ready(()));
+        assert!(dropped.get(), "the authorization waiter is released");
+        assert!(!busy.get_untracked(), "another update can now be started");
+        assert!(!dispatched.get());
+    });
+    owner.dispose();
+}
+
+#[test]
 fn completing_after_later_focuses_the_ready_notice_review_action() {
     let runtime = nsh_core::element::Runtime::default();
     let _entered = runtime.enter();

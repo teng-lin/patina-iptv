@@ -399,6 +399,91 @@ fn default_weekly_notice_physical_right_selects_later_without_opening_or_downloa
 }
 
 #[test]
+fn closing_a_failed_manual_check_restores_review_focus_to_the_waiting_notice() {
+    let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    let mut fixture = personalization::launch(home, Settings::new(), false, |_| {}, |_| {});
+    let directory = fixture.path.parent().unwrap();
+    let schedule = directory
+        .parent()
+        .unwrap()
+        .join(format!(
+            "{}.app-update",
+            directory.file_name().unwrap().to_string_lossy()
+        ))
+        .join("schedule.json");
+    let app = &mut fixture.app;
+    // Let the scheduled request complete behind Settings without opening the
+    // update panel and turning that first request into a manual check.
+    step(app.open_guide_groups());
+    step(app.press("id:navigation-rail >> role:tab[Settings]"));
+    step(app.press("id:settings-content >> text:About >> nth=0"));
+    api.serve(200, release("9.8.7", true));
+    let deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
+    loop {
+        if std::fs::read(&schedule)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|state| state["pending_version"] == "9.8.7")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "scheduled update notice must be pending behind Settings: {:?}",
+            std::fs::read_to_string(&schedule)
+        );
+        // The notice is hidden by Settings, so persistence need not produce a
+        // rendered batch. Keep pumping the app while observing that disk write.
+        app.idle(Duration::from_millis(20)).unwrap();
+    }
+    assert!(!app.screen().matches("id:app-update-notice").unwrap());
+    api.serve(503, "{}".into());
+    step(app.press("id:settings-content >> text:Check for updates"));
+    step(app.wait_for("id:app-update-panel >> text:Update check failed. Try again."));
+    step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
+    let focused = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);
+    let later = "id:app-update-panel >> text:Later";
+    for _ in 0..6 {
+        if app.screen().span_style(later).unwrap().color == focused {
+            break;
+        }
+        step(app.press_key("right"));
+    }
+    assert_eq!(
+        app.screen().span_style(later).unwrap().color,
+        focused,
+        "Later owns the panel's physical remote focus before closing"
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:app-update-panel", Duration::from_secs(5)));
+    for _ in 0..6 {
+        if !app.screen().matches("id:settings-screen").unwrap() {
+            break;
+        }
+        step(app.back());
+        app.idle(Duration::from_millis(50)).unwrap();
+    }
+    step(app.wait_for("id:app-update-notice"));
+    assert_eq!(
+        app.screen()
+            .span_style("id:app-update-notice >> text:View update")
+            .unwrap()
+            .color,
+        focused,
+        "returning from the panel selects the visible Review action"
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for("id:app-update-panel"));
+    step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
+    assert!(
+        app.screen().opened_urls().is_empty(),
+        "Review opens the cached panel without downloading or opening a browser"
+    );
+}
+
+#[test]
 fn compact_large_text_update_panel_keeps_actions_reachable_and_notes_scrollable() {
     use nsh_core::{ApproxTextEngine, Size, TextEngine, platform::Idiom, prelude::px};
     let Some(home) = isolated!() else { return };

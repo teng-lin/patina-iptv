@@ -17,6 +17,9 @@ pub(crate) mod view;
 )))]
 pub(crate) mod view {
     pub(crate) fn open(_: crate::Ui) {}
+    pub(crate) fn close(ui: crate::Ui) {
+        ui.update_dialog_open.set(false);
+    }
     pub(crate) fn bind(_: crate::Ui) {}
     pub(crate) fn key(_: crate::Ui, _: iptv_nav::Action) {}
     pub(crate) fn layer(_: crate::Ui) -> nsh_core::prelude::View {
@@ -460,7 +463,7 @@ pub(crate) fn automatic_install_supported() -> bool {
         let format = std::env::current_exe()
             .ok()
             .and_then(|exe| std::fs::read_to_string(exe.parent()?.join("patina-package")).ok());
-        return appimage_install_enabled(option_env!("PATINA_APPIMAGE_HANDOFF"), format.as_deref());
+        appimage_install_enabled(option_env!("PATINA_APPIMAGE_HANDOFF"), format.as_deref())
     }
     #[cfg(not(target_os = "linux"))]
     {

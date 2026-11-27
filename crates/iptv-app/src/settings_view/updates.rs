@@ -23,7 +23,7 @@ pub(crate) fn is_open(ui: crate::Ui) -> bool {
 }
 
 pub(crate) fn close(ui: crate::Ui) {
-    ui.update_dialog_open.set(false);
+    native::close(ui);
 }
 
 pub(crate) fn key(ui: crate::Ui, action: iptv_nav::Action) {

@@ -98,6 +98,15 @@ pub(crate) fn open(ui: Ui) {
     }
 }
 
+pub(crate) fn close(ui: Ui) {
+    // A retained package or failed re-check can leave a notice waiting behind
+    // this panel. Its first visible action must own remote focus on return.
+    batch(move || {
+        ui.update_focus.set(0);
+        ui.update_dialog_open.set(false);
+    });
+}
+
 fn check(ui: Ui, trigger: Trigger) {
     // A missing Android report is not evidence of a store installation. Do not
     // consume the due check or persist a result for the wrong package channel.
@@ -347,6 +356,39 @@ fn cancel_download(ui: Ui) {
     changed(ui);
 }
 
+async fn until_cancelled<T>(
+    operation: impl std::future::Future<Output = T>,
+    cancellation: impl std::future::Future<Output = ()>,
+) -> Option<T> {
+    let mut operation = std::pin::pin!(operation);
+    let mut cancellation = std::pin::pin!(cancellation);
+    std::future::poll_fn(move |context| {
+        // Cancellation wins when the result arrives before the next shell poll.
+        if cancellation.as_mut().poll(context).is_ready() {
+            return std::task::Poll::Ready(None);
+        }
+        operation.as_mut().poll(context).map(Some)
+    })
+    .await
+}
+
+async fn authorization_cancelled(ui: Ui) {
+    loop {
+        if !ui.owner.is_live() || ui.update_cancel_requested.get_untracked() {
+            return;
+        }
+        let (send, reply) = futures_channel::oneshot::channel();
+        let _timer = ui.owner.run(move || {
+            set_timeout(Duration::from_millis(100), move || {
+                let _ = send.send(());
+            })
+        });
+        if reply.await.is_err() {
+            return;
+        }
+    }
+}
+
 fn download(ui: Ui) {
     if ui.update_install_busy.get_untracked() {
         return;
@@ -363,7 +405,15 @@ fn download(ui: Ui) {
     progress_timer(ui);
     crate::tasks::spawn_in_app(async move {
         let _operation = operation;
-        match crate::host::updates::action_for(&check).await {
+        let Some(result) = until_cancelled(
+            crate::host::updates::action_for(&check),
+            authorization_cancelled(ui),
+        )
+        .await
+        else {
+            return;
+        };
+        match result {
             Ok(Some(action)) => {
                 if ui.update_cancel_requested.get_untracked() {
                     return;
