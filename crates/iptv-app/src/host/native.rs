@@ -74,10 +74,12 @@ static TEST_NATIVE_CAST: std::sync::OnceLock<std::sync::Arc<dyn iptv_runtime::ca
 
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    let sender = casting::Sender::new(&directory);
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
-        ports.cast = Some(std::sync::Arc::new(casting::Sender::default()));
+        ports.cast = Some(std::sync::Arc::new(sender));
     }
     #[cfg(feature = "test-support")]
     if let Some(port) = TEST_CAST.get() {

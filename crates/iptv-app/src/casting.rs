@@ -213,12 +213,18 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
             // Revalidate network identity while an existing cast still owns
             // its relay. Preparing this connection does not bind the new relay.
-            let prepared = if airplay {
-                None
-            } else {
-                let prepared = owner.prepare_cast(receiver.clone(), source.clone()).await?;
+            let prepared = if let Target::Network(network) = &receiver {
+                let grant = check().await?;
+                let pairing = crate::cast_pairing::prompt(ui, ticket);
+                let prepared = owner
+                    .prepare_cast(ticket, network.clone(), source.clone(), grant, pairing)
+                    .await;
+                crate::cast_pairing::close_for(ui, ticket);
+                let prepared = prepared?;
                 check().await?;
                 Some(prepared)
+            } else {
+                None
             };
             if owner.cast_target().is_some() {
                 if airplay
@@ -238,7 +244,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             }
             let prepared = match prepared {
                 Some(prepared) => prepared,
-                None => owner.prepare_cast(receiver.clone(), source).await?,
+                None => owner.prepare_native_cast(source).await?,
             };
             let grant = check().await?;
             let claim = owner
@@ -257,7 +263,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                     ticket,
                     prepared,
                     iptv_runtime::cast::Destination {
-                        receiver,
+                        receiver: receiver.clone(),
                         key: key.clone(),
                         authority: authority.clone(),
                     },
@@ -275,6 +281,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             }
             ui.player.main().key.set(Some(key.clone()));
             ui.playing.set(schedule().find_channel(&key));
+            ui.cast_controls.set(owner.cast_controls());
             ui.cast_remote.set(true);
             ui.paused.set(paused);
             monitor(ui, ticket);
@@ -287,7 +294,12 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         ui.cast_busy.set(false);
         if let Err(e) = result {
             let returning_local = pending_local_current(ui);
-            if !returning_local {
+            if e == Error::PairingIdentityChanged
+                && current()
+                && let Target::Network(receiver) = receiver
+            {
+                crate::cast_pairing::offer_forget(ui, ticket, receiver);
+            } else if !returning_local {
                 report(e);
             }
 
@@ -347,6 +359,7 @@ fn monitor(ui: Ui, ticket: u64) {
                 }
                 Ok(state) => {
                     if runtime().active_cast_ticket() == Some(ticket) {
+                        ui.cast_controls.set(runtime().cast_controls());
                         if matches!(state, RemoteState::Playing | RemoteState::Paused) {
                             ui.paused.set(state == RemoteState::Paused);
                         }
@@ -360,17 +373,17 @@ fn monitor(ui: Ui, ticket: u64) {
     });
 }
 pub(crate) fn set_paused(ui: Ui, paused: bool) {
-    if ui.paused.get_untracked() != paused {
-        control(
-            ui,
-            if paused {
-                Command::Pause
-            } else {
-                Command::Play
-            },
-            false,
-        );
+    let command = if paused {
+        Command::Pause
+    } else {
+        Command::Play
+    };
+    if ui.paused.get_untracked() != paused && supports(ui, command) {
+        control(ui, command, false);
     }
+}
+pub(crate) fn supports(ui: Ui, command: Command) -> bool {
+    !ui.cast_remote.get() || ui.cast_controls.with(|controls| controls.supports(command))
 }
 pub(crate) fn stop(ui: Ui) {
     control(ui, Command::Stop, false);
@@ -437,14 +450,16 @@ pub(crate) fn volume(ui: Ui, command: Command) -> bool {
     if !ui.cast_remote.get_untracked() {
         return false;
     }
-    crate::tasks::spawn_in_app(async move {
-        if let Err(error) = runtime().cast_command(command).await {
-            report(error);
-        }
-    });
+    if supports(ui, command) {
+        crate::tasks::spawn_in_app(async move {
+            if let Err(error) = runtime().cast_command(command).await {
+                report(error);
+            }
+        });
+    }
     true
 }
-fn report(error: Error) {
+pub(crate) fn report(error: Error) {
     log::debug!("cast operation result: {error:?}");
     match error {
         Error::Cancelled => {}
@@ -452,6 +467,15 @@ fn report(error: Error) {
             "The TV did not request the stream. Allow TCP port {port} from the TV in your firewall and check Wi-Fi client isolation.",
             &[("port", relay_port.into())],
         )),
+        Error::AirPlayTiming { port } => notify(&trf(
+            "AirPlay timing did not arrive. Allow UDP port {port} from the receiver.",
+            &[("port", port.into())],
+        )),
+        Error::PairingRejected => notify(tr(
+            "AirPlay pairing was denied or the code expired. Try again.",
+        )),
+        Error::PairingStorage => notify(tr("Could not open the AirPlay pairing store.")),
+        Error::PairingIdentityChanged => notify(tr("The AirPlay receiver identity changed.")),
         Error::Unavailable | Error::Refused | Error::Unknown => {
             notify(tr("Could not start playback on the selected device."))
         }

@@ -1,0 +1,102 @@
+//! Linux host configuration and receiver-owned PIN approval.
+use iptv_cast::{CastBuilder, Connection, Pairing, PinCode};
+use iptv_core::cast::Error;
+use iptv_runtime::cast::PairingPrompt;
+use std::{
+    ffi::{OsStr, OsString},
+    num::NonZeroU16,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+use tokio::time::{Instant, timeout_at};
+
+pub(super) struct Configuration {
+    directory: PathBuf,
+    timing_port: Option<OsString>,
+}
+
+impl Configuration {
+    pub(super) fn from_env(directory: &Path) -> Option<Self> {
+        (std::env::var_os("PATINA_RUST_AIRPLAY").as_deref() == Some(OsStr::new("1"))).then(|| {
+            Self {
+                directory: directory.to_owned(),
+                timing_port: std::env::var_os("PATINA_AIRPLAY_TIMING_PORT"),
+            }
+        })
+    }
+
+    pub(super) async fn configure(&self, builder: CastBuilder) -> Result<CastBuilder, Error> {
+        let port = timing_port(self.timing_port.as_deref())?;
+        let builder = builder.airplay_timing_port(port);
+        #[cfg(not(feature = "test-support"))]
+        {
+            use crate::host::native::credential_key::CastStore;
+            let directory = self.directory.clone();
+            let store = tokio::task::spawn_blocking(move || CastStore::open(&directory))
+                .await
+                .map_err(|_| Error::PairingStorage)?
+                .map_err(|_| Error::PairingStorage)?;
+            Ok(builder.credential_store(store))
+        }
+        #[cfg(feature = "test-support")]
+        {
+            let _ = &self.directory;
+            Ok(builder)
+        }
+    }
+}
+
+fn timing_port(value: Option<&OsStr>) -> Result<Option<NonZeroU16>, Error> {
+    value
+        .map(|value| {
+            value
+                .to_str()
+                .and_then(|port| port.parse().ok())
+                .ok_or(Error::Unavailable)
+        })
+        .transpose()
+}
+
+pub(super) async fn pair(pairing: Pairing, prompt: PairingPrompt) -> Result<Connection, Error> {
+    let deadline = pairing.expires_at().map_or_else(
+        || Instant::now() + Duration::from_secs(30),
+        Instant::from_std,
+    );
+    let code = match timeout_at(deadline, prompt.request()).await {
+        Ok(Ok(code)) => code,
+        Ok(Err(error)) => {
+            pairing.cancel().await;
+            return Err(error);
+        }
+        Err(_) => {
+            pairing.cancel().await;
+            return Err(Error::PairingRejected);
+        }
+    };
+    let pin = match PinCode::parse(&code) {
+        Ok(pin) => pin,
+        Err(error) => {
+            pairing.cancel().await;
+            return Err(super::map_error(&error));
+        }
+    };
+    pairing
+        .submit(pin)
+        .await
+        .map_err(|error| super::map_error(&error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timing_listener_can_use_an_ephemeral_or_explicit_port() {
+        let parse = |value| timing_port(value.map(OsStr::new));
+        assert_eq!(parse(None::<&str>), Ok(None));
+        assert_eq!(parse(Some("47475")), Ok(NonZeroU16::new(47475)));
+        for bad in ["", "0", "65536", "12x"] {
+            assert_eq!(parse(Some(bad)), Err(Error::Unavailable));
+        }
+    }
+}
