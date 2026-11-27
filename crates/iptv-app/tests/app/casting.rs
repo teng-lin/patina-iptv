@@ -1,7 +1,7 @@
 //! The actual picker and playback controls with a generated Cast receiver.
 use crate::{Headless, browse_fixture, personalization};
 use iptv_core::{
-    cast::{Command, Error, Receiver, RemoteState},
+    cast::{Command, Controls, Error, NetworkProtocol, Receiver, RemoteState},
     playback::PlaySource,
 };
 use iptv_runtime::cast::{Admitted, Authorization, Port, Prepared, Remote, Retirement, Task};
@@ -9,7 +9,10 @@ use iptv_settings::{Settings, Value};
 use personalization::step;
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -24,6 +27,12 @@ struct FakeCast {
     initially_paused: bool,
     stop_unconfirmed: bool,
     discovered_name: Arc<Mutex<Option<String>>>,
+    requires_pairing: bool,
+    controls: Option<Controls>,
+    changed_identity: Arc<AtomicBool>,
+    airplay: bool,
+    extra_airplay: bool,
+    pending_forget: Arc<Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>,
 }
 
 impl FakeCast {
@@ -35,25 +44,76 @@ impl FakeCast {
 }
 
 impl Port for FakeCast {
+    fn forget(&self, receiver: Receiver) -> Task<'_, ()> {
+        Box::pin(async move {
+            assert_eq!(receiver.protocol, NetworkProtocol::AirPlay);
+            let wait = self.pending_forget.lock().unwrap().take();
+            if let Some(wait) = wait {
+                self.events.lock().unwrap().push("forget pending");
+                wait.await.map_err(|_| Error::Cancelled)?;
+            }
+            assert!(self.changed_identity.swap(false, Ordering::SeqCst));
+            self.events.lock().unwrap().push("forgot pairing");
+            Ok(())
+        })
+    }
+
     fn discover(&self) -> Task<'_, Vec<Receiver>> {
         Box::pin(async move {
-            Ok(vec![Receiver {
+            let mut receivers = vec![Receiver {
                 name: self
                     .discovered_name
                     .lock()
                     .unwrap()
                     .clone()
                     .unwrap_or_else(|| "Generated TV".into()),
-                id: "googlecast:generated".into(),
-                protocol: iptv_core::cast::NetworkProtocol::GoogleCast,
-            }])
+                id: if self.airplay {
+                    "airplay:generated"
+                } else {
+                    "googlecast:generated"
+                }
+                .into(),
+                protocol: if self.airplay {
+                    NetworkProtocol::AirPlay
+                } else {
+                    NetworkProtocol::GoogleCast
+                },
+            }];
+            if self.extra_airplay {
+                receivers.push(Receiver {
+                    id: "airplay:second".into(),
+                    name: "Generated AirPlay".into(),
+                    protocol: NetworkProtocol::AirPlay,
+                });
+            }
+            Ok(receivers)
         })
     }
-    fn prepare(&self, receiver: Receiver, _source: PlaySource) -> Task<'_, Box<dyn Prepared>> {
-        assert_eq!(receiver.name, "Generated TV");
-        Box::pin(async {
+    fn prepare(
+        &self,
+        receiver: Receiver,
+        _source: PlaySource,
+        pairing: iptv_runtime::cast::PairingPrompt,
+    ) -> Task<'_, Box<dyn Prepared>> {
+        assert!(matches!(
+            receiver.name.as_str(),
+            "Generated TV" | "Generated AirPlay"
+        ));
+        Box::pin(async move {
             if let Some(error) = self.prepare_error.lock().unwrap().take() {
                 return Err(error);
+            }
+            if receiver.protocol == NetworkProtocol::AirPlay
+                && self.changed_identity.load(Ordering::SeqCst)
+            {
+                self.events.lock().unwrap().push("identity changed");
+                return Err(Error::PairingIdentityChanged);
+            }
+            if self.requires_pairing {
+                self.events.lock().unwrap().push("pairing");
+                let code = pairing.request().await?;
+                assert_eq!(code.as_str(), "0123");
+                self.events.lock().unwrap().push("paired");
             }
             Ok(Box::new(self.clone()) as Box<dyn Prepared>)
         })
@@ -80,6 +140,10 @@ impl Prepared for FakeCast {
     }
 }
 impl Remote for FakeCast {
+    fn controls(&self) -> Option<Controls> {
+        Some(self.controls.unwrap_or(Controls::ALL))
+    }
+
     fn command(&self, command: Command) -> Task<'_, ()> {
         Box::pin(async move {
             let event = match command {
@@ -156,9 +220,230 @@ fn select_generated_tv(home: crate::isolated::Home, fake: &FakeCast) -> personal
     let app = &mut fixture.app;
     browse_fixture::choose_fullscreen(app);
     open_cast(app);
-    step(app.wait_for("id:chooser-items >> text:Generated TV"));
-    step(app.press("id:chooser-items >> text:Generated TV"));
+    let suffix = if fake.extra_airplay && !fake.airplay {
+        "id:chooser-items >> text:Generated TV · Chromecast"
+    } else {
+        generated_tv_row(fake.airplay)
+    };
+    step(app.wait_for(suffix));
+    step(app.press(suffix));
     fixture
+}
+
+fn generated_tv_row(airplay: bool) -> &'static str {
+    if airplay {
+        "id:chooser-items >> text:Generated TV · AirPlay"
+    } else {
+        "id:chooser-items >> text:Generated TV"
+    }
+}
+
+fn pick_generated_tv(app: &mut Headless, airplay: bool) {
+    let row = generated_tv_row(airplay);
+    step(app.wait_for(row));
+    step(app.press(row));
+}
+
+#[test]
+fn pairing_cancel_keeps_local_playback_and_retry_preserves_leading_zeroes() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        requires_pairing: true,
+        controls: Some(Controls::NONE),
+        airplay: true,
+        ..Default::default()
+    };
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    let pin = "id:cast-pairing-pin";
+    step(app.wait_for(pin));
+    assert!(iptv_app::player_has_source(0));
+    assert_eq!(*fake.events.lock().unwrap(), ["pairing"]);
+    step(app.press("text:Cancel"));
+    step(
+        app.wait_until("pairing was dismissed", Duration::from_secs(10), |screen| {
+            !screen.matches(pin).unwrap()
+        }),
+    );
+    assert!(iptv_app::player_has_source(0));
+    assert_eq!(*fake.events.lock().unwrap(), ["pairing"]);
+
+    open_cast(app);
+    pick_generated_tv(app, true);
+    step(app.wait_for(pin));
+    step(app.type_text(pin, "012"));
+    step(app.submit(pin));
+    assert!(app.screen().matches(pin).unwrap());
+    step(app.type_text(pin, "3"));
+    step(app.submit(pin));
+    step(
+        app.wait_until("paired handoff", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"allow") && !iptv_app::player_has_source(0)
+        }),
+    );
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["pairing", "pairing", "paired", "load", "allow"]
+    );
+    ready_controls(app);
+    assert!(!app.screen().matches("id:play-bar-play-pause").unwrap());
+    open_cast(app);
+    step(app.press("id:chooser-items >> text:This device"));
+    step(
+        app.wait_until("local playback resumed", Duration::from_secs(10), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        [
+            "pairing",
+            "pairing",
+            "paired",
+            "load",
+            "allow",
+            "retire",
+            "disconnected at stop"
+        ]
+    );
+}
+
+#[test]
+fn a_changed_airplay_identity_requires_an_explicit_forget_and_new_selection() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        changed_identity: Arc::new(AtomicBool::new(true)),
+        airplay: true,
+        ..Default::default()
+    };
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(app.wait_for("text:Forget pairing"));
+    assert!(iptv_app::player_has_source(0));
+    step(app.press("text:Cancel"));
+    assert!(fake.changed_identity.load(Ordering::SeqCst));
+
+    open_cast(app);
+    pick_generated_tv(app, true);
+    step(app.wait_for("text:Forget pairing"));
+    step(app.press("text:Forget pairing"));
+    step(
+        app.wait_until("old pairing removed", Duration::from_secs(10), |_| {
+            !fake.changed_identity.load(Ordering::SeqCst)
+        }),
+    );
+    assert!(iptv_app::player_has_source(0));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["identity changed", "identity changed", "forgot pairing"]
+    );
+    open_cast(app);
+    pick_generated_tv(app, true);
+    step(app.wait_until(
+        "new route selection started playback",
+        Duration::from_secs(10),
+        |_| fake.events.lock().unwrap().contains(&"allow") && !iptv_app::player_has_source(0),
+    ));
+}
+
+#[test]
+fn an_unreadable_airplay_pairing_can_be_reset_without_ending_local_playback() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        prepare_error: Arc::new(Mutex::new(Some(Error::PairingStorage))),
+        changed_identity: Arc::new(AtomicBool::new(true)),
+        airplay: true,
+        ..Default::default()
+    };
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(app.wait_for("text:Could not access the AirPlay pairing."));
+    assert!(iptv_app::player_has_source(0));
+    assert!(!app.screen().matches("text:Forget pairing").unwrap());
+    *fake.prepare_error.lock().unwrap() = Some(Error::PairingInvalid);
+    open_cast(app);
+    pick_generated_tv(app, true);
+    step(app.wait_for("text:The saved AirPlay pairing is invalid."));
+    step(app.press("text:Forget pairing"));
+    step(
+        app.wait_until("invalid pairing removed", Duration::from_secs(10), |_| {
+            !fake.changed_identity.load(Ordering::SeqCst)
+        }),
+    );
+    assert!(iptv_app::player_has_source(0));
+    assert_eq!(*fake.events.lock().unwrap(), ["forgot pairing"]);
+}
+
+#[test]
+fn airplay_timing_errors_identify_the_udp_problem_and_keep_local_playback() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        prepare_error: Arc::new(Mutex::new(Some(Error::AirPlayTimingSocket { port: None }))),
+        airplay: true,
+        ..Default::default()
+    };
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(app.wait_for("text:Could not start AirPlay UDP timing."));
+    assert!(iptv_app::player_has_source(0));
+
+    for (error, notification) in [
+        (
+            Error::AirPlayTimingSocket { port: Some(54183) },
+            "text:AirPlay UDP timing failed on port 54183.",
+        ),
+        (
+            Error::AirPlayTiming { port: 54183 },
+            "text:AirPlay timing did not arrive. Allow UDP port 54183 from the receiver.",
+        ),
+    ] {
+        *fake.prepare_error.lock().unwrap() = Some(error);
+        open_cast(app);
+        pick_generated_tv(app, true);
+        step(app.wait_for(notification));
+        assert!(iptv_app::player_has_source(0));
+    }
+    assert!(fake.events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn casting_stop_is_honored_while_forgetting_another_receivers_pairing() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        changed_identity: Arc::new(AtomicBool::new(true)),
+        extra_airplay: true,
+        ..Default::default()
+    };
+    let (release, wait) = tokio::sync::oneshot::channel();
+    *fake.pending_forget.lock().unwrap() = Some(wait);
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(
+        app.wait_until("first cast started", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"allow") && !iptv_app::player_has_source(0)
+        }),
+    );
+    open_cast(app);
+    step(app.wait_for("id:chooser-items >> text:Generated AirPlay · AirPlay"));
+    step(app.press("id:chooser-items >> text:Generated AirPlay · AirPlay"));
+    step(app.wait_for("text:Forget pairing"));
+    step(app.press("text:Forget pairing"));
+    step(
+        app.wait_until("forget is pending", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"forget pending")
+        }),
+    );
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
+    release.send(()).unwrap();
+    step(
+        app.wait_until("active receiver retired", Duration::from_secs(10), |_| {
+            fake.events
+                .lock()
+                .unwrap()
+                .contains(&"disconnected at stop")
+        }),
+    );
+    assert!(!iptv_app::player_has_source(0));
 }
 
 #[test]

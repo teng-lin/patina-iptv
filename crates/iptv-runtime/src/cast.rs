@@ -2,7 +2,7 @@
 use crate::{ExternalPlaybackAuthorization, Runtime};
 use futures_channel::oneshot;
 use iptv_core::{
-    cast::{Command, Error, Receiver, RemoteState, Target},
+    cast::{Command, Controls, Error, Receiver, RemoteState, Target},
     playback::PlaySource,
 };
 use iptv_import::CancelToken;
@@ -12,11 +12,22 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
+mod pairing;
+pub use pairing::{PairingPrompt, PairingRequest, pairing_prompt};
+
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
 pub trait Port: Send + Sync {
     fn discover(&self) -> Task<'_, Vec<Receiver>>;
+    fn forget(&self, _receiver: Receiver) -> Task<'_, ()> {
+        Box::pin(std::future::ready(Err(Error::Unsupported)))
+    }
     /// Connects and prepares the handoff without opening the upstream.
-    fn prepare(&self, receiver: Receiver, source: PlaySource) -> Task<'_, Box<dyn Prepared>>;
+    fn prepare(
+        &self,
+        receiver: Receiver,
+        source: PlaySource,
+        pairing: PairingPrompt,
+    ) -> Task<'_, Box<dyn Prepared>>;
 }
 /// A system route picker is mounted by the host; its player remains owned by
 /// this runtime's transport. The opaque view identity carries no media metadata.
@@ -65,6 +76,10 @@ pub struct Admitted {
 pub type Retirement<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 pub trait Remote: Send + Sync {
     fn command(&self, command: Command) -> Task<'_, ()>;
+    /// The most recent session capabilities, available without making a network request.
+    fn controls(&self) -> Option<Controls> {
+        Some(Controls::ALL)
+    }
     /// Reports the owned media session, or a transport error if its state is unknown.
     fn state(&self) -> Task<'_, RemoteState>;
     /// Joins upstream retirement before the account claim can be released.
@@ -193,35 +208,80 @@ impl Runtime {
             .as_ref()
             .map(|active| (active.receiver.clone(), active.key.clone()))
     }
-    pub async fn prepare_cast(
-        &self,
-        receiver: Target,
-        source: PlaySource,
-    ) -> Result<Box<dyn Prepared>, Error> {
-        if receiver == Target::AirPlay {
-            let port = self
-                .services()
-                .ports()
-                .native_cast
-                .clone()
-                .ok_or(Error::Unavailable)?;
-            return self
-                .spawn_network(async move { port.prepare(source).await })
-                .await
-                .map_err(|_| Error::Unavailable)?;
-        }
-        let Target::Network(receiver) = receiver else {
-            unreachable!()
-        };
+    pub fn cast_controls(&self) -> Option<Controls> {
+        self.cast
+            .borrow()
+            .as_ref()
+            .and_then(|active| active.remote.controls())
+    }
+    pub async fn forget_cast_pairing(&self, receiver: Receiver) -> Result<(), Error> {
         let port = self
             .services()
             .ports()
             .cast
             .clone()
             .ok_or(Error::Unavailable)?;
-        self.spawn_network(async move { port.prepare(receiver, source).await })
+        self.spawn_network(async move { port.forget(receiver).await })
             .await
             .map_err(|_| Error::Unavailable)?
+    }
+    pub async fn prepare_native_cast(
+        &self,
+        source: PlaySource,
+    ) -> Result<Box<dyn Prepared>, Error> {
+        let port = self
+            .services()
+            .ports()
+            .native_cast
+            .clone()
+            .ok_or(Error::Unavailable)?;
+        self.spawn_network(async move { port.prepare(source).await })
+            .await
+            .map_err(|_| Error::Unavailable)?
+    }
+
+    pub async fn prepare_cast(
+        &self,
+        ticket: u64,
+        receiver: Receiver,
+        source: PlaySource,
+        grant: ExternalPlaybackAuthorization,
+        pairing: PairingPrompt,
+    ) -> Result<Box<dyn Prepared>, Error> {
+        let port = self
+            .services()
+            .ports()
+            .cast
+            .clone()
+            .ok_or(Error::Unavailable)?;
+        let generation = self.cast_generation.clone();
+        let services = self.services();
+        let cancel = CancelOnDrop(CancelToken::new());
+        let signal = cancel.0.clone();
+        self.spawn_cast_worker(signal.clone(), async move {
+            let check = || {
+                if signal.is_canceled()
+                    || generation.load(std::sync::atomic::Ordering::Acquire) != ticket
+                {
+                    Err(Error::Cancelled)
+                } else if !grant.is_current() {
+                    Err(Error::Denied)
+                } else {
+                    Ok(())
+                }
+            };
+            let mut prepare = port.prepare(receiver, source, pairing);
+            loop {
+                check()?;
+                let deadline = crate::time::Instant::now() + std::time::Duration::from_millis(250);
+                if let Ok(result) = services.timeout_at(deadline, prepare.as_mut()).await {
+                    check()?;
+                    return result;
+                }
+            }
+        })
+        .await
+        .map_err(|_| Error::Unavailable)?
     }
     pub async fn load_cast(
         &self,
@@ -334,11 +394,11 @@ impl Runtime {
         Err(Error::Denied)
     }
 
-    fn spawn_cast_worker(
+    fn spawn_cast_worker<T: crate::MaybeSend + 'static>(
         &self,
         cancel: CancelToken,
-        work: impl Future<Output = Result<(), Error>> + crate::MaybeSend + 'static,
-    ) -> crate::execution::Join<Result<(), Error>> {
+        work: impl Future<Output = Result<T, Error>> + crate::MaybeSend + 'static,
+    ) -> crate::execution::Join<Result<T, Error>> {
         let (done, waiting) = mpsc::channel();
         let mut workers = self.cast_workers.borrow_mut();
         workers.retain(|worker| matches!(worker.done.try_recv(), Err(mpsc::TryRecvError::Empty)));

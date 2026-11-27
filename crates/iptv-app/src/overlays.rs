@@ -22,6 +22,7 @@ pub(crate) enum Overlay {
     Leave,
     StoreStartupFailure,
     Parental,
+    CastPairing,
     RestoreReview,
     Wizard,
     Recordings,
@@ -60,6 +61,7 @@ impl Overlay {
             Self::QuitConfirm => Context::Menu,
             Self::StoreStartupFailure
             | Self::RestoreReview
+            | Self::CastPairing
             | Self::Wizard
             | Self::Vod
             | Self::Recordings
@@ -85,11 +87,12 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 25] = [
+    pub(crate) const ALL: [Overlay; 26] = [
         Overlay::QuitConfirm,
         Overlay::Leave,
         Overlay::StoreStartupFailure,
         Overlay::Parental,
+        Overlay::CastPairing,
         Overlay::RestoreReview,
         Overlay::Wizard,
         Overlay::Recordings,
@@ -120,6 +123,7 @@ impl Overlay {
             Overlay::Leave => crate::chooser::is_open(ui, true),
             Overlay::StoreStartupFailure => ui.store_startup_failure.with(Option::is_some),
             Overlay::Parental => crate::parental_view::is_open(ui),
+            Overlay::CastPairing => crate::cast_pairing::is_open(ui),
             Overlay::RestoreReview => crate::backup::is_open(ui),
             Overlay::Wizard => crate::wizard_view::is_open(ui),
             Overlay::Vod => crate::vod_view::is_open(ui),
@@ -170,6 +174,7 @@ impl Overlay {
             Overlay::QuitConfirm
             | Overlay::StoreStartupFailure
             | Overlay::Parental
+            | Overlay::CastPairing
             | Overlay::RestoreReview
             | Overlay::Wizard
             | Overlay::Vod
@@ -208,6 +213,7 @@ impl Overlay {
             | Overlay::Leave
             | Overlay::StoreStartupFailure
             | Overlay::Parental
+            | Overlay::CastPairing
             | Overlay::RestoreReview
             | Overlay::Wizard
             | Overlay::Vod
@@ -292,6 +298,7 @@ mod tests {
             | Overlay::Leave
             | Overlay::StoreStartupFailure
             | Overlay::Parental
+            | Overlay::CastPairing
             | Overlay::RestoreReview
             | Overlay::Wizard
             | Overlay::Vod
@@ -315,7 +322,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 25);
+        assert_eq!(Overlay::ALL.len(), 26);
     }
 
     #[test]
