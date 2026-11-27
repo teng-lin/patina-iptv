@@ -359,6 +359,11 @@ fn an_unreadable_airplay_pairing_can_be_reset_without_ending_local_playback() {
     let app = &mut fixture.app;
     step(app.wait_for("text:Could not access the AirPlay pairing."));
     assert!(iptv_app::player_has_source(0));
+    assert!(!app.screen().matches("text:Forget pairing").unwrap());
+    *fake.prepare_error.lock().unwrap() = Some(Error::PairingInvalid);
+    open_cast(app);
+    pick_generated_tv(app, true);
+    step(app.wait_for("text:The saved AirPlay pairing is invalid."));
     step(app.press("text:Forget pairing"));
     step(
         app.wait_until("invalid pairing removed", Duration::from_secs(10), |_| {

@@ -81,7 +81,7 @@ impl CastStore {
                 let secret = Zeroizing::new(secret);
                 let bytes = URL_SAFE_NO_PAD
                     .decode(secret.as_slice())
-                    .map_err(StoreError::new)?;
+                    .map_err(|_| StoreError::invalid_credential())?;
                 Ok(Some(Credential::from_bytes(bytes)))
             }
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -155,6 +155,17 @@ pub(super) fn verify_disposable_pairing_store() {
             [1, 128]
         );
         reopened.remove_record(key).await.unwrap();
+        reopened.remove_record(key).await.unwrap();
+        assert!(reopened.load_record(key).await.unwrap().is_none());
+        reopened
+            .run(key, |entry| {
+                entry
+                    .set_secret(b"generated%bad-encoding")
+                    .map_err(StoreError::new)
+            })
+            .await
+            .unwrap();
+        assert!(reopened.load_record(key).await.is_err());
         reopened.remove_record(key).await.unwrap();
         assert!(reopened.load_record(key).await.unwrap().is_none());
     });

@@ -64,12 +64,13 @@ fn configured_relay_port(value: Option<&OsStr>) -> Result<u16, Error> {
 }
 
 fn map_error(error: &iptv_cast::Error) -> Error {
-    if error.kind() == ErrorKind::TimedOut
-        && let Some(Diagnostic::TimingListener { local_addr }) = error.diagnostic()
-    {
-        return Error::AirPlayTiming {
-            port: local_addr.port(),
-        };
+    if let Some(Diagnostic::TimingListener { local_addr }) = error.diagnostic() {
+        let port = local_addr.port();
+        match error.kind() {
+            ErrorKind::TimedOut => return Error::AirPlayTiming { port },
+            ErrorKind::Unavailable if port != 0 => return Error::AirPlayTimingBind { port },
+            _ => {}
+        }
     }
     match error.kind() {
         ErrorKind::Unavailable | ErrorKind::Unreachable => Error::Unavailable,
@@ -81,6 +82,7 @@ fn map_error(error: &iptv_cast::Error) -> Error {
             Error::PairingRejected
         }
         ErrorKind::Storage => Error::PairingStorage,
+        ErrorKind::InvalidCredential => Error::PairingInvalid,
         ErrorKind::IdentityMismatch => Error::PairingIdentityChanged,
         _ => Error::Unknown,
     }
@@ -133,7 +135,10 @@ impl Sender {
                     });
                 }
                 Ok(Client {
-                    cast: Cast::builder().build().map_err(|error| map_error(&error))?,
+                    cast: Cast::builder()
+                        .airplay_enabled(false)
+                        .build()
+                        .map_err(|error| map_error(&error))?,
                     airplay: false,
                 })
             })

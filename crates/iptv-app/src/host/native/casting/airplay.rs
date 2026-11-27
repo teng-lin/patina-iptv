@@ -29,6 +29,7 @@ impl Configuration {
         // The timing configuration is checked when an AirPlay route is chosen
         // so a bad value cannot prevent Chromecast discovery.
         let builder = builder
+            .airplay_enabled(true)
             .airplay_timing_port(timing_port(self.timing_port.as_deref()).unwrap_or_default());
         #[cfg(not(feature = "test-support"))]
         {
@@ -93,7 +94,7 @@ mod tests {
 
     #[test]
     fn timing_listener_can_use_an_ephemeral_or_explicit_port() {
-        let parse = |value| timing_port(value.map(OsStr::new));
+        let parse = |value: Option<&str>| timing_port(value.map(OsStr::new));
         assert_eq!(parse(None::<&str>), Ok(None));
         assert_eq!(parse(Some("47475")), Ok(NonZeroU16::new(47475)));
         for bad in ["", "0", "65536", "12x"] {

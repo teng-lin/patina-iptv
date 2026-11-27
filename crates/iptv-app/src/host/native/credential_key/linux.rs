@@ -75,6 +75,9 @@ impl Entry {
     pub(super) fn delete_secret(&self) -> Result<(), keyring::Error> {
         let found = self.broker.search_items(self.attributes()).map_err(error)?;
         for item in found.unlocked.iter().chain(&found.locked) {
+            if item.is_locked().map_err(error)? {
+                item.unlock().map_err(error)?;
+            }
             item.delete().map_err(error)?;
         }
         Ok(())

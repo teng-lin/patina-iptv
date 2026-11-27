@@ -295,7 +295,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         ui.cast_busy.set(false);
         if let Err(e) = result {
             let returning_local = pending_local_current(ui);
-            if matches!(e, Error::PairingIdentityChanged | Error::PairingStorage)
+            if matches!(e, Error::PairingIdentityChanged | Error::PairingInvalid)
                 && current()
                 && let Target::Network(receiver) = receiver
             {
@@ -462,7 +462,7 @@ pub(crate) fn volume(ui: Ui, command: Command) -> bool {
     }
     true
 }
-pub(crate) fn report(error: Error) {
+fn report(error: Error) {
     log::debug!("cast operation result: {error:?}");
     match error {
         Error::Cancelled => {}
@@ -472,6 +472,10 @@ pub(crate) fn report(error: Error) {
         )),
         Error::AirPlayTiming { port } => notify(&trf(
             "AirPlay timing did not arrive. Allow UDP port {port} from the receiver.",
+            &[("port", port.into())],
+        )),
+        Error::AirPlayTimingBind { port } => notify(&trf(
+            "Could not open AirPlay UDP timing port {port}.",
             &[("port", port.into())],
         )),
         Error::AirPlayRelayAddress => {
@@ -484,6 +488,7 @@ pub(crate) fn report(error: Error) {
             "AirPlay pairing was denied or the code expired. Try again.",
         )),
         Error::PairingStorage => notify(tr("Could not access the AirPlay pairing.")),
+        Error::PairingInvalid => notify(tr("The saved AirPlay pairing is invalid.")),
         Error::PairingIdentityChanged => notify(tr("The AirPlay receiver identity changed.")),
         Error::Unavailable | Error::Refused | Error::Unknown => {
             notify(tr("Could not start playback on the selected device."))

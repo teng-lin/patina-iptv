@@ -108,6 +108,9 @@ fn submit(ui: Ui) {
 }
 
 fn forget(ui: Ui) {
+    if ui.cast_busy.get_untracked() {
+        return;
+    }
     let Some(Pending {
         ticket,
         request: Request::Forget { receiver, .. },
@@ -123,8 +126,8 @@ fn forget(ui: Ui) {
     crate::tasks::spawn_in_app(async move {
         let result = runtime().forget_cast_pairing(receiver).await;
         if ui.cast_busy.try_set(false) {
-            if let Err(error) = result {
-                crate::casting::report(error);
+            if result.is_err() {
+                crate::settings_view::notify(tr("Could not forget the AirPlay pairing."));
             }
             crate::casting::finish_pending_stop(ui);
         }
@@ -214,7 +217,7 @@ fn forget_card(ui: Ui, scale: Scale) -> View {
                     open,
                     Some(Pending {
                         request: Request::Forget {
-                            reason: Error::PairingStorage,
+                            reason: Error::PairingInvalid,
                             ..
                         },
                         ..
@@ -222,7 +225,7 @@ fn forget_card(ui: Ui, scale: Scale) -> View {
                 )
             });
             if storage {
-                tr("Could not access the AirPlay pairing.")
+                tr("The saved AirPlay pairing is invalid.")
             } else {
                 tr("The AirPlay receiver identity changed.")
             }
@@ -243,13 +246,12 @@ fn forget_card(ui: Ui, scale: Scale) -> View {
                     move || !wants_forget(),
                     move || close(ui),
                 ))
-                .child(ui_kit::button(
-                    ui,
-                    scale,
-                    tr("Forget pairing"),
-                    wants_forget,
-                    move || forget(ui),
-                )),
+                .child(
+                    ui_kit::button(ui, scale, tr("Forget pairing"), wants_forget, move || {
+                        forget(ui)
+                    })
+                    .disabled(move || ui.cast_busy.get()),
+                ),
         )
 }
 
