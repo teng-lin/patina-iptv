@@ -1,6 +1,7 @@
 //! Android LAN leases, media controls and Keystore callbacks.
 use super::{
     Playing,
+    android_credential::decode_credential,
     android_events::{HostEvents, ServiceState},
     finished,
 };
@@ -176,21 +177,6 @@ impl CredentialStore for CastStore {
         })
         .await
         .map_err(|_| store_error())?
-    }
-}
-
-fn decode_credential(mut payload: Vec<u8>) -> Result<Option<Credential>, StoreError> {
-    match payload.as_slice() {
-        [0] => Ok(None),
-        [1, value @ ..] if !value.is_empty() && value.len() <= 4096 => {
-            // Retain the allocation instead of making a second plaintext copy.
-            payload.remove(0);
-            Ok(Some(Credential::from_bytes(payload)))
-        }
-        _ => {
-            payload.fill(0);
-            Err(StoreError::invalid_credential())
-        }
     }
 }
 

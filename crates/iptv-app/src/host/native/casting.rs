@@ -32,6 +32,8 @@ mod airplay;
 #[cfg(target_os = "android")]
 pub(super) mod android;
 #[cfg(any(target_os = "android", test))]
+mod android_credential;
+#[cfg(any(target_os = "android", test))]
 mod android_events;
 
 pub(super) struct Sender {
