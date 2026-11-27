@@ -576,19 +576,20 @@ struct Playing {
 }
 
 impl Remote for Playing {
-    fn controls(&self) -> Controls {
+    fn controls(&self) -> Option<Controls> {
         self.session
             .try_lock()
             .ok()
             .and_then(|slot| slot.as_ref().map(Session::snapshot))
-            .map_or(Controls::NONE, |snapshot| {
+            .map(|snapshot| {
                 let available = |feature| snapshot.availability(feature) == Availability::Available;
+                let output = snapshot.volume_scope().is_some();
                 Controls {
                     play: available(Feature::Play),
                     pause: available(Feature::Pause),
-                    volume: available(Feature::SetVolume),
-                    step_volume: available(Feature::StepVolume),
-                    toggle_mute: available(Feature::ToggleMute),
+                    volume: output && available(Feature::SetVolume),
+                    step_volume: output && available(Feature::StepVolume),
+                    toggle_mute: output && available(Feature::ToggleMute),
                 }
             })
     }
@@ -665,7 +666,7 @@ fn output_control(
     change: OutputChange,
 ) -> Result<iptv_cast::Command, Error> {
     Ok(iptv_cast::Command::Output {
-        scope: scope.ok_or(Error::Unsupported)?,
+        scope: scope.ok_or(Error::Unavailable)?,
         change,
     })
 }

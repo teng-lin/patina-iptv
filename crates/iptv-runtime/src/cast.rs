@@ -77,8 +77,8 @@ pub type Retirement<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 pub trait Remote: Send + Sync {
     fn command(&self, command: Command) -> Task<'_, ()>;
     /// The most recent session capabilities, available without making a network request.
-    fn controls(&self) -> Controls {
-        Controls::ALL
+    fn controls(&self) -> Option<Controls> {
+        Some(Controls::ALL)
     }
     /// Reports the owned media session, or a transport error if its state is unknown.
     fn state(&self) -> Task<'_, RemoteState>;
@@ -208,11 +208,11 @@ impl Runtime {
             .as_ref()
             .map(|active| (active.receiver.clone(), active.key.clone()))
     }
-    pub fn cast_controls(&self) -> Controls {
+    pub fn cast_controls(&self) -> Option<Controls> {
         self.cast
             .borrow()
             .as_ref()
-            .map_or(Controls::NONE, |active| active.remote.controls())
+            .and_then(|active| active.remote.controls())
     }
     pub async fn forget_cast_pairing(&self, receiver: Receiver) -> Result<(), Error> {
         let port = self

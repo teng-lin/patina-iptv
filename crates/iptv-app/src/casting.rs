@@ -7,7 +7,7 @@ use crate::{
 };
 use iptv_core::{
     capabilities::FormFactor,
-    cast::{Command, Error, Receiver, RemoteState, Target},
+    cast::{Command, Controls, Error, Receiver, RemoteState, Target},
 };
 use nsh_core::prelude::set_timeout;
 use std::time::Duration;
@@ -281,7 +281,8 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             }
             ui.player.main().key.set(Some(key.clone()));
             ui.playing.set(schedule().find_channel(&key));
-            ui.cast_controls.set(owner.cast_controls());
+            ui.cast_controls
+                .set(owner.cast_controls().unwrap_or(Controls::NONE));
             ui.cast_remote.set(true);
             ui.paused.set(paused);
             monitor(ui, ticket);
@@ -294,11 +295,11 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         ui.cast_busy.set(false);
         if let Err(e) = result {
             let returning_local = pending_local_current(ui);
-            if e == Error::PairingIdentityChanged
+            if matches!(e, Error::PairingIdentityChanged | Error::PairingStorage)
                 && current()
                 && let Target::Network(receiver) = receiver
             {
-                crate::cast_pairing::offer_forget(ui, ticket, receiver);
+                crate::cast_pairing::offer_forget(ui, ticket, receiver, e);
             } else if !returning_local {
                 report(e);
             }
@@ -359,7 +360,9 @@ fn monitor(ui: Ui, ticket: u64) {
                 }
                 Ok(state) => {
                     if runtime().active_cast_ticket() == Some(ticket) {
-                        ui.cast_controls.set(runtime().cast_controls());
+                        if let Some(controls) = runtime().cast_controls() {
+                            ui.cast_controls.set(controls);
+                        }
                         if matches!(state, RemoteState::Playing | RemoteState::Paused) {
                             ui.paused.set(state == RemoteState::Paused);
                         }
@@ -480,7 +483,7 @@ pub(crate) fn report(error: Error) {
         Error::PairingRejected => notify(tr(
             "AirPlay pairing was denied or the code expired. Try again.",
         )),
-        Error::PairingStorage => notify(tr("Could not open the AirPlay pairing store.")),
+        Error::PairingStorage => notify(tr("Could not access the AirPlay pairing.")),
         Error::PairingIdentityChanged => notify(tr("The AirPlay receiver identity changed.")),
         Error::Unavailable | Error::Refused | Error::Unknown => {
             notify(tr("Could not start playback on the selected device."))

@@ -8,7 +8,7 @@ use crate::{
     ui_kit,
     wizard_view::entry::{frame, sheet_buttons, sheet_field},
 };
-use iptv_core::cast::Receiver;
+use iptv_core::cast::{Error, Receiver};
 use iptv_runtime::cast::{PairingPrompt, PairingRequest, pairing_prompt};
 use nsh_core::prelude::*;
 use std::{cell::RefCell, rc::Rc};
@@ -23,7 +23,11 @@ pub(crate) struct Pending {
 #[derive(Clone)]
 enum Request {
     Pin(Rc<RefCell<InputState>>),
-    Forget { receiver: Receiver, selected: bool },
+    Forget {
+        receiver: Receiver,
+        reason: Error,
+        selected: bool,
+    },
 }
 
 struct InputState {
@@ -50,11 +54,12 @@ pub(crate) fn prompt(ui: Ui, ticket: u64) -> PairingPrompt {
     prompt
 }
 
-pub(crate) fn offer_forget(ui: Ui, ticket: u64, receiver: Receiver) {
+pub(crate) fn offer_forget(ui: Ui, ticket: u64, receiver: Receiver, reason: Error) {
     ui.cast_pairing.set(Some(Pending {
         ticket,
         request: Request::Forget {
             receiver,
+            reason,
             selected: false,
         },
     }));
@@ -203,10 +208,25 @@ fn forget_card(ui: Ui, scale: Scale) -> View {
     };
     view()
         .gap(move || scale.px(14.0))
-        .child(ui_kit::title(
-            scale,
-            tr("The AirPlay receiver identity changed."),
-        ))
+        .child(ui_kit::title(scale, move || {
+            let storage = ui.cast_pairing.with(|open| {
+                matches!(
+                    open,
+                    Some(Pending {
+                        request: Request::Forget {
+                            reason: Error::PairingStorage,
+                            ..
+                        },
+                        ..
+                    })
+                )
+            });
+            if storage {
+                tr("Could not access the AirPlay pairing.")
+            } else {
+                tr("The AirPlay receiver identity changed.")
+            }
+        }))
         .child(ui_kit::body(
             scale,
             tr("Forget this pairing to choose the receiver again."),

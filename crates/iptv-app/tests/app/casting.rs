@@ -140,8 +140,8 @@ impl Prepared for FakeCast {
     }
 }
 impl Remote for FakeCast {
-    fn controls(&self) -> Controls {
-        self.controls.unwrap_or(Controls::ALL)
+    fn controls(&self) -> Option<Controls> {
+        Some(self.controls.unwrap_or(Controls::ALL))
     }
 
     fn command(&self, command: Command) -> Task<'_, ()> {
@@ -344,6 +344,29 @@ fn a_changed_airplay_identity_requires_an_explicit_forget_and_new_selection() {
         Duration::from_secs(10),
         |_| fake.events.lock().unwrap().contains(&"allow") && !iptv_app::player_has_source(0),
     ));
+}
+
+#[test]
+fn an_unreadable_airplay_pairing_can_be_reset_without_ending_local_playback() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        prepare_error: Arc::new(Mutex::new(Some(Error::PairingStorage))),
+        changed_identity: Arc::new(AtomicBool::new(true)),
+        airplay: true,
+        ..Default::default()
+    };
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(app.wait_for("text:Could not access the AirPlay pairing."));
+    assert!(iptv_app::player_has_source(0));
+    step(app.press("text:Forget pairing"));
+    step(
+        app.wait_until("invalid pairing removed", Duration::from_secs(10), |_| {
+            !fake.changed_identity.load(Ordering::SeqCst)
+        }),
+    );
+    assert!(iptv_app::player_has_source(0));
+    assert_eq!(*fake.events.lock().unwrap(), ["forgot pairing"]);
 }
 
 #[test]
