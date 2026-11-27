@@ -462,7 +462,9 @@ fn a_guide_check_due_during_a_refresh_waits_for_it() {
     );
     s.confirm_guide_deletion();
     s.until_pending("the revoked update kept a guide check");
-    // The check the update asked for, hours away, comes due.
+    // Registration is visible before the engine polls the task that arms its
+    // timer. Let it set the deadline on the current clock before jumping ahead.
+    s.app.settle();
     step(s.app.fast_forward(LATER));
     assert!(s.pending(), "due while the refresh runs: it waits again");
     // The refresh fails with no guide stored: it sets no check itself.
