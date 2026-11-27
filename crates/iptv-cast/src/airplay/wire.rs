@@ -10,6 +10,7 @@ const FRAME: usize = 1024;
 const TAG: usize = 16;
 const MAX_HEADER: usize = 16 * 1024;
 const MAX_BODY: usize = 256 * 1024;
+const HEADER_END: &[u8] = b"\r\n\r\n";
 
 pub(super) type Result<T> = std::result::Result<T, Fault>;
 
@@ -170,12 +171,19 @@ pub(super) struct Message {
 
 impl Message {
     fn parse(data: &mut Vec<u8>) -> Result<Option<Self>> {
-        let Some(header_end) = data.windows(4).position(|part| part == b"\r\n\r\n") else {
-            return if data.len() > MAX_HEADER {
-                Err(Fault::InvalidMessage)
-            } else {
-                Ok(None)
-            };
+        let Some(header_end) = data
+            .windows(HEADER_END.len())
+            .position(|part| part == HEADER_END)
+        else {
+            if data.len() > MAX_HEADER {
+                let excess = data.len() - MAX_HEADER;
+                let split_delimiter =
+                    (excess..HEADER_END.len()).any(|length| data.ends_with(&HEADER_END[..length]));
+                if !split_delimiter {
+                    return Err(Fault::InvalidMessage);
+                }
+            }
+            return Ok(None);
         };
         if header_end > MAX_HEADER {
             return Err(Fault::InvalidMessage);
@@ -227,7 +235,7 @@ impl Message {
                 return Err(Fault::InvalidMessage);
             }
         }
-        let body_start = header_end + 4;
+        let body_start = header_end + HEADER_END.len();
         let end = body_start + length.unwrap_or(0);
         if data.len() < end {
             return Ok(None);
@@ -259,6 +267,7 @@ pub(super) struct Wire {
     cipher: Option<Cipher>,
     encrypted: Vec<u8>,
     decoded: Vec<u8>,
+    frame_fault: Option<Fault>,
 }
 
 impl Wire {
@@ -273,6 +282,7 @@ impl Wire {
             cipher: None,
             encrypted: Vec::new(),
             decoded: Vec::new(),
+            frame_fault: None,
         }
     }
 
@@ -303,11 +313,20 @@ impl Wire {
     pub(super) async fn receive(&mut self) -> Result<Message> {
         let mut buffer = [0; 4096];
         loop {
-            if let Some(cipher) = &mut self.cipher {
-                cipher.read.open(&mut self.encrypted, &mut self.decoded)?;
+            if self.frame_fault.is_none()
+                && let Some(cipher) = &mut self.cipher
+            {
+                self.frame_fault = cipher
+                    .read
+                    .open(&mut self.encrypted, &mut self.decoded)
+                    .err();
             }
+            // A read can contain both authenticated messages and a later bad frame.
             if let Some(message) = Message::parse(&mut self.decoded)? {
                 return Ok(message);
+            }
+            if let Some(fault) = self.frame_fault {
+                return Err(fault);
             }
 
             let count = self.stream.read(&mut buffer).await?;
@@ -355,13 +374,23 @@ impl Wire {
     }
 
     pub(super) async fn receive_response(&mut self, version: Version) -> Result<Message> {
-        let response = self.receive().await?;
-        let response_version_matches = response.version == version
-            || (version == Version::Http && response.version == Version::Http10);
-        if !response_version_matches || response.start == Start::Request {
-            return Err(Fault::InvalidMessage);
+        loop {
+            let response = self.receive().await?;
+            let response_version_matches = response.version == version
+                || (version == Version::Http && response.version == Version::Http10);
+            let Start::Response(status) = response.start else {
+                return Err(Fault::InvalidMessage);
+            };
+            if !response_version_matches {
+                return Err(Fault::InvalidMessage);
+            }
+            if version == Version::Rtsp || status >= 200 {
+                return Ok(response);
+            }
+            if status == 101 || !response.body.is_empty() {
+                return Err(Fault::InvalidMessage);
+            }
         }
-        Ok(response)
     }
 
     pub(super) async fn ack_event(&mut self, request: &Message) -> Result<()> {

@@ -498,7 +498,9 @@ impl Challenge {
         // Retire the approval connection. Persist only a record successfully
         // verified against a fresh encrypted playback connection.
         drop(self.wire);
-        let verified = verify(self.address, &keys).await?;
+        let verified = verify(self.address, &keys)
+            .await
+            .map_err(|AuthFailure(fault, _)| AuthFailure(fault, Delivery::Acknowledged))?;
         Ok((verified, keys))
     }
 }

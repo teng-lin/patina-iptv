@@ -440,6 +440,28 @@ async fn approval_can_be_denied_or_expire() {
     server.await.unwrap();
 }
 
+#[tokio::test]
+async fn verified_setup_acknowledgement_survives_failure_to_reconnect() {
+    let accessory = Accessory::bind().await;
+    let address = accessory.address();
+    let receiver = tokio::spawn(async move {
+        accessory.pair().await.unwrap();
+        drop(accessory);
+    });
+    let wire = start_pairing(address).await.unwrap();
+    let challenge = Challenge::receive(wire, address, Instant::now() + Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(matches!(
+        challenge.finish(PIN).await,
+        Err(AuthFailure(
+            AuthFault::Wire(Fault::Unreachable),
+            Delivery::Acknowledged
+        ))
+    ));
+    receiver.await.unwrap();
+}
+
 async fn time_out_after_write<T>(
     operation: impl std::future::Future<Output = T>,
     received: tokio::sync::oneshot::Receiver<()>,
@@ -481,6 +503,7 @@ async fn distinguishes_connect_failure_timeout_after_auth_write_and_explicit_rep
         pair.respond(&approval, 200, &[]).await;
         let request = pair.receive().await.unwrap();
         assert_eq!(request.request_target, "POST /pair-setup");
+        pair.respond(&request, 103, &[]).await;
         received_setup.send(()).unwrap();
         assert!(matches!(pair.receive().await, Err(Fault::Closed)));
         let mut verify = accessory.accept().await;
