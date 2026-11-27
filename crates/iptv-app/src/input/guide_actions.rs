@@ -2,7 +2,7 @@
 use super::{Action, Move, Pane, RemoteKey, Ui, ViewMode};
 
 pub(super) fn apply(ui: Ui, key: RemoteKey, action: Action) {
-    let mv = |m: Move| crate::lists::navigate(ui, m);
+    let mv = |m: Move| crate::guide::lists::navigate(ui, m);
     match action {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.guide.focus.with(|f| f.pane) == Pane::Groups => {
@@ -35,18 +35,18 @@ pub(super) fn apply(ui: Ui, key: RemoteKey, action: Action) {
                 .with(|f| matches!(f.pane, Pane::Guide | Pane::Groups))
                 || !crate::menu_view::open_empty_group_settings(ui)
             {
-                crate::lists::ok(ui);
+                crate::guide::lists::ok(ui);
             }
         }
         Action::ShowGuide => ui.chrome.mode.apply(crate::mode::Action::ShowGuide),
-        Action::ShowGroups => crate::lists::open_groups(ui),
+        Action::ShowGroups => crate::guide::lists::open_groups(ui),
         Action::OpenSearch => crate::search_view::open(ui),
         a @ (Action::JumpToNow
         | Action::HourBack
         | Action::HourForward
         | Action::DayBack
         | Action::DayForward
-        | Action::ToggleGroups) => crate::grid::keys::apply(ui.guide, a),
+        | Action::ToggleGroups) => crate::guide::grid::keys::apply(ui.guide, a),
         Action::ReturnToPlayer if ui.playback.playing.get().is_some() => {
             ui.chrome.mode.apply(crate::mode::Action::ReturnToPlayer);
         }
@@ -54,9 +54,9 @@ pub(super) fn apply(ui: Ui, key: RemoteKey, action: Action) {
             if let Some(channel) = if ui.chrome.mode.get() == ViewMode::Fullscreen {
                 ui.playback.playing.get()
             } else {
-                crate::lists::focused_channel(ui.guide)
+                crate::guide::lists::focused_channel(ui.guide)
             } {
-                crate::favorites::toggle(ui, channel);
+                crate::guide::favorites::toggle(ui, channel);
             }
         }
         Action::PageUp => page(ui, -1),

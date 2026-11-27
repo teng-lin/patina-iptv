@@ -15,34 +15,26 @@ pub use airplay_probe::AirPlayProbe;
 pub use host::set_tui_mode;
 
 /// Guide values and navigation used by the shell.
-pub mod guide {
-    pub use iptv_core::guide::{
-        Airing, CHANNELS, DAY, GROUPS, GroupName, HISTORY, HORIZON, HOUR, Listing, Program,
-        SYNTHETIC_EPOCH_UNIX, Schedule, SyntheticSchedule, VISIBLE, catchup_days, floor, floor_of,
-        group_start, now_minute, program_at, secs_to_next_minute, unix_of,
-    };
-    pub use iptv_presentation::guide::{
-        Focus, Move, PAST, Pane, ProgramSelection, STEP, home_window, moves, page_row, view_range,
-    };
-}
+pub mod guide;
 #[cfg(feature = "test-support")]
 mod guide_window_walkthrough;
+mod playback;
 pub mod theme;
 
 mod airplay;
-mod archive_playback;
+
 mod backup;
 /// The document pickers a device has, and the ones headless apps get.
 #[cfg(feature = "test-support")]
 pub use backup::{Pickers, set_pickers_for_test};
-mod browse_playback;
+use playback::browse_playback;
 mod capabilities;
 mod capture_limits;
 mod cast_pairing;
 mod casting;
 mod channels_view;
 mod chooser;
-mod clock;
+
 mod content_image;
 mod custom_groups;
 mod data;
@@ -51,20 +43,20 @@ mod device;
 mod device_wiring;
 mod epg_sources_view;
 mod exit_confirmation;
-mod external_player;
-mod fav_editor;
-mod favorites;
+use guide::fav_editor;
+use guide::favorites;
+use playback::external_player;
 mod fonts;
-mod grid;
+use guide::grid;
 mod guide_assign_view;
-mod guide_clock;
+use guide::guide_clock;
 mod guide_inspect_view;
 mod guide_repair_view;
-mod header;
+use guide::header;
 mod host;
 pub mod layout;
 mod tasks;
-pub mod timeline;
+pub use guide::timeline;
 // A browser host exports nothing: the glob is empty there.
 #[allow(unused_imports)]
 #[doc(inline)]
@@ -79,13 +71,13 @@ pub use input::keyboard_repeats;
 /// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
 #[cfg(feature = "test-support")]
 pub use input::use_remote_key_phases;
-mod interruption;
+use playback::interruption;
 mod keyboard;
-mod list_rows;
+
 mod listen;
-mod listing_labels;
-mod lists;
-mod media;
+
+use guide::lists;
+use playback::media;
 mod menu_view;
 mod mode;
 pub(crate) mod parental_view;
@@ -94,20 +86,19 @@ mod performance_probe;
 mod recordings_view;
 mod vod_view;
 use iptv_runtime as runtime;
-mod multiview;
-mod multiview_picker;
-mod multiview_view;
+use playback::multiview;
+use playback::multiview_picker;
+use playback::multiview_view;
 mod navigation;
-mod numbers;
-mod on_demand;
+
 mod organization_view;
 mod overlays;
-mod panels;
-mod pip;
-mod play_bar;
-mod player;
-mod player_keys;
-mod player_panels;
+use playback::panels;
+use playback::pip;
+use playback::play_bar;
+use playback::player;
+
+use playback::player_panels;
 mod playlists_view;
 mod rail;
 mod remote_editor;
@@ -119,7 +110,7 @@ use runtime_owner::runtime;
 pub use runtime_owner::schedule;
 mod scale;
 mod search_view;
-mod seek;
+
 mod settings;
 mod settings_offer;
 mod settings_view;
@@ -129,13 +120,13 @@ pub mod startup;
 mod startup_view;
 /// The app's guide clock and its UI tick.
 pub mod time {
-    pub use crate::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
-    pub use crate::guide_clock::{start, tick};
+    pub use crate::guide::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
+    pub use crate::guide::guide_clock::{start, tick};
 }
 mod toast;
-mod touch_zap;
+use playback::touch_zap;
 mod ui_kit;
-mod video;
+use playback::video;
 mod wizard_view;
 
 pub use header::debug_overlay;

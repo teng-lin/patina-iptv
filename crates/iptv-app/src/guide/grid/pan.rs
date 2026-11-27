@@ -1,0 +1,330 @@
+//! The guide's timeline under a finger or a mouse drag: the core's
+//! [`Timeline`] model, shown by sliding the rows' programs, the ruler's
+//! times and the now line with one animated offset, so a pan moves no cell
+//! and rebuilds them only when its [`Band`] moves (`crate::guide::timeline`).
+//!
+//! A horizontal drag over the grid pans (NSH's pan activation decides the
+//! axis on the platform's thread: past [`SLOP`] horizontally it is ours,
+//! past it vertically first the channel list scrolls); released moving, it
+//! flings on, one step per display frame. Taps stay taps. The view follows
+//! the focus model's window while nothing pans (keys and Now), and a pan
+//! that came to rest hands its window back to it. Its bounds are the
+//! guide's view ([`view_range`]: as far back as retained listings go).
+//!
+//! Units: NSH's pan reports the finger's movement and speed in dp (the
+//! Android view divides its pixels by the density, 1.5 on a 1920 × 1200
+//! tablet), the same unit as the program area's laid-out width, so
+//! `delta / ppm` follows the finger 1:1 and nothing is scaled twice.
+
+use nsh_core::time::Instant;
+
+use crate::guide::timeline::{Band, MARGIN, SLOP, Timeline};
+use iptv_presentation::guide::view_range;
+use nsh_core::prelude::*;
+
+use crate::Ui;
+
+/// One display frame, for the first step of a fling.
+const FRAME_S: f32 = 1.0 / 60.0;
+
+/// The panned view, shared by the grid's parts (`Copy`).
+#[derive(Clone, Copy)]
+pub(crate) struct Pan {
+    ui: Ui,
+    model: Stored<Timeline>,
+    /// The program area's width (dp): [`VISIBLE`] minutes span it.
+    width: Signal<f32>,
+    span: Memo<i32>,
+    /// The minutes the rows hold cells for, and the minute a cell's start
+    /// is clamped to (the window at rest, so its title shows; the band's
+    /// start while panning).
+    band: Signal<Band>,
+    clip: Signal<i32>,
+    /// The cells' slide (dp): minus the view's offset into the band, and
+    /// the last value set (a key that keeps the window sends nothing).
+    offset: AnimatedValue,
+    slid: Stored<f32>,
+    /// The view is away from now: the Now button shows.
+    away: Signal<bool>,
+    /// Bumped by each fling: an older one's frames stop.
+    fling: Stored<u32>,
+    /// A wheel scroll is under way (`wheel.rs`).
+    wheeling: Stored<bool>,
+}
+
+impl Pan {
+    /// The window's state this pan belongs to.
+    pub(super) fn ui(&self) -> Ui {
+        self.ui
+    }
+
+    pub(crate) fn new(ui: Ui, width: Signal<f32>) -> Pan {
+        let (window, now) = ui.guide.focus.with_untracked(|f| (f.window, f.now));
+        let bounds = view_range(&crate::guide::lists::view(ui.guide), now);
+        let model = Timeline::new(window, bounds);
+        let band = Band::around(model.view());
+        let pan = Pan {
+            ui,
+            model: stored(model),
+            width,
+            span: computed(move || ui.guide.focus.with(|f| f.visible)),
+            band: signal(band),
+            clip: signal(window),
+            offset: animated_value(0.0),
+            slid: stored(0.0),
+            away: signal(false),
+            fling: stored(0),
+            wheeling: stored(false),
+        };
+        pan.follow_focus();
+        effect(move || {
+            width.get();
+            pan.show();
+        });
+        pan
+    }
+
+    /// Dp per minute now.
+    pub(crate) fn ppm(&self) -> f32 {
+        self.width.get_untracked() / self.span.get_untracked() as f32
+    }
+
+    /// Dp per minute (reactive: the cells' geometry).
+    pub(crate) fn scale(&self) -> f32 {
+        self.width.get() / self.span.get() as f32
+    }
+
+    pub(crate) fn minutes(&self) -> i32 {
+        self.span.get() + 2 * MARGIN
+    }
+
+    pub(crate) fn band(&self) -> Band {
+        self.band.get()
+    }
+
+    pub(crate) fn clip(&self) -> i32 {
+        self.clip.get()
+    }
+
+    pub(crate) fn offset(&self) -> AnimatedValue {
+        self.offset
+    }
+
+    pub(crate) fn away(&self) -> bool {
+        self.away.get()
+    }
+
+    /// The view follows the focus model's window and the schedule's
+    /// bounds while nothing pans.
+    fn follow_focus(self) {
+        let ui = self.ui;
+        effect(move || {
+            ui.guide_data();
+            let (window, now, span) = ui.guide.focus.with(|f| (f.window, f.now, f.visible));
+            let bounds = untracked(|| view_range(&crate::guide::lists::view(ui.guide), now));
+            self.model.with(|m| {
+                m.set_span(span);
+                m.set_bounds(bounds);
+                m.follow(window);
+            });
+            untracked(|| self.show());
+        });
+    }
+
+    /// Puts the model's view on screen: the band (cells rebuilt only when
+    /// it moves), the slide, the Now button.
+    fn show(&self) {
+        let (view, moving) = self.model.with(|m| (m.view(), m.moving()));
+        let moving = moving || self.wheeling.with(|w| *w);
+        let mut band = self.band.get_untracked();
+        if band.follow(view) {
+            self.band.set(band);
+        }
+        let clip = if moving {
+            band.base
+        } else {
+            view.round() as i32
+        };
+        if self.clip.get_untracked() != clip {
+            self.clip.set(clip);
+        }
+        let slide = -band.offset(view) * self.ppm();
+        if self.slid.with(|s| std::mem::replace(s, slide)) != slide {
+            self.offset.set(slide);
+        }
+        let now = self.ui.guide.focus.with_untracked(|f| f.now);
+        let away = self.model.with(|m| m.away_from_now(now));
+        if self.away.get_untracked() != away {
+            self.away.set(away);
+        }
+    }
+
+    /// The pan came to rest: the focus model takes its window.
+    fn settle(&self) {
+        if self.model.with(|m| m.moving()) {
+            return;
+        }
+        let window = self.model.with(|m| m.window());
+        let view = crate::guide::lists::view(self.ui.guide);
+        // The pan moves the focus along its row: still the anchored
+        // channel. The anchor moves first, so browse playback never sees
+        // the new focus without it.
+        let mut next = self.ui.guide.focus.get_untracked();
+        next.pan_to(window, &view);
+        if self.ui.guide.pan_anchor.with_untracked(Option::is_some) {
+            self.ui
+                .guide
+                .pan_anchor
+                .update(|a| a.iter_mut().for_each(|a| a.panned(&next)));
+        }
+        self.ui.guide.focus.update(|f| f.pan_to(window, &view));
+        self.show();
+    }
+
+    /// A pan starts from the focus: a live program anchors its channel
+    /// for browse playback while the pan moves the focus along the row
+    /// (`browse_playback::current`); a pan from where an earlier one left
+    /// the focus keeps that anchor; any other focus has none.
+    fn anchor(&self) {
+        let ui = self.ui;
+        let focus = ui.guide.focus.get_untracked();
+        let Some(channel) = untracked(|| crate::guide::lists::focused_channel(ui.guide))
+            .and_then(|ch| crate::runtime_owner::schedule().channel_key(ch))
+        else {
+            return ui.guide.pan_anchor.set(None);
+        };
+        let held = ui
+            .guide
+            .pan_anchor
+            .with_untracked(|a| a.as_ref().is_some_and(|a| a.holds(&channel, &focus)));
+        if held {
+            return;
+        }
+        let next = focused(ui)
+            .2
+            .then(|| iptv_presentation::browse_playback::PanAnchor::new(channel, &focus));
+        if next.is_some() || ui.guide.pan_anchor.with_untracked(Option::is_some) {
+            ui.guide.pan_anchor.set(next);
+        }
+    }
+
+    /// The platform found a horizontal drag: it pans from here.
+    fn grabbed(&self) {
+        self.ui.touched();
+        self.anchor();
+        crate::playback::browse_playback::dragged(self.ui);
+        self.fling.with(|g| *g += 1);
+        self.model.with(Timeline::grab);
+        self.show();
+    }
+
+    fn dragged(&self, gesture: &PanGesture) {
+        crate::playback::browse_playback::activity(self.ui);
+        let (dx, dy, ppm) = (gesture.delta.x.0, gesture.delta.y.0, self.ppm());
+        if self.model.with(|m| m.drag(dx, dy, ppm)) {
+            self.show();
+        }
+    }
+
+    fn released(&self, gesture: &PanGesture) {
+        crate::playback::browse_playback::activity(self.ui);
+        let ppm = self.ppm();
+        if !self.model.with(|m| m.release(gesture.vx, ppm)) {
+            self.settle();
+            return;
+        }
+        // Ask for the days it lands in now (both edges of the screen it
+        // stops at): they read while the fling runs, so its cells are
+        // there when it arrives. The days it passes are asked for as the
+        // rows show them.
+        let rest = self.model.with(|m| m.rest()).round() as i32;
+        let schedule = crate::runtime_owner::schedule();
+        for minute in [
+            rest - MARGIN,
+            rest + self.ui.guide.focus.with_untracked(|f| f.visible) + MARGIN,
+        ] {
+            crate::data::pages::want(&*schedule, minute);
+        }
+        let pan = *self;
+        let generation = self.fling.with(|g| *g);
+        spawn(async move {
+            let mut last: Option<Instant> = None;
+            loop {
+                let at = next_frame().await;
+                if pan.fling.with(|g| *g) != generation {
+                    return;
+                }
+                let dt = last.map_or(FRAME_S, |l| (at - l).as_secs_f32().min(0.1));
+                last = Some(at);
+                let flinging = pan.model.with(|m| m.step(dt, pan.ppm()));
+                pan.show();
+                if !flinging {
+                    pan.settle();
+                    return;
+                }
+            }
+        });
+    }
+
+    /// A wheel or touchpad scrolled `dx` dp sideways (positive: later).
+    pub(super) fn wheeled(&self, dx: f32) {
+        let ppm = self.ppm();
+        if self.model.with(|m| m.dragging()) {
+            return;
+        }
+        if !self.wheeling.with(|w| *w) {
+            self.anchor();
+        }
+        crate::playback::browse_playback::dragged(self.ui);
+        self.wheeling.with(|w| *w = true);
+        self.fling.with(|g| *g += 1);
+        if self.model.with(|m| m.wheel(dx, ppm)) {
+            self.show();
+        }
+    }
+
+    /// The wheel's scroll rested: as a pan does.
+    pub(super) fn settle_wheel(&self) {
+        if self.wheeling.with(|w| std::mem::replace(w, false)) {
+            self.settle();
+        }
+    }
+
+    fn canceled(&self) {
+        self.model.with(Timeline::cancel);
+        self.settle();
+    }
+
+    /// Straight to now's window (the Now button): the focused channel's
+    /// live program, as Home.
+    pub(crate) fn to_now(self) {
+        self.ui.touched();
+        self.fling.with(|g| *g += 1);
+        self.model.with(Timeline::cancel);
+        self.ui.guide.focus.update(|f| f.jump_to_now());
+    }
+}
+
+/// The focused row, its program's start, and whether that airs now.
+fn focused(ui: Ui) -> (usize, i32, bool) {
+    let view = crate::guide::lists::view(ui.guide);
+    ui.guide.focus.with_untracked(|f| {
+        let p = f.program(&view);
+        (
+            f.channel,
+            p.start,
+            p.airing(f.now) == iptv_core::guide::Airing::Live,
+        )
+    })
+}
+
+/// The pan's touch handling on `area` (the grid around the channel list).
+pub(crate) fn panning<E: Interactive>(area: E, pan: Pan) -> E {
+    let claim = TouchClaim::on_pan(PanActivation::horizontal(px(SLOP), px(SLOP)));
+    crate::playback::browse_playback::watch_drags(area, pan.ui)
+        .claim_touches(claim)
+        .on_responder_grant(move |_: &ResponderEvent| pan.grabbed())
+        .on_responder_move(move |e: &ResponderEvent| pan.dragged(&e.gesture))
+        .on_responder_release(move |e: &ResponderEvent| pan.released(&e.gesture))
+        .on_responder_terminate(move |_: &ResponderEvent| pan.canceled())
+}

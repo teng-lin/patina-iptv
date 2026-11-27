@@ -10,7 +10,7 @@ use crate::i18n::{tr, trf};
 
 use super::*;
 use crate::fonts::{LIST_ITEM, SANS, SECTION};
-use crate::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
 use crate::scale::Scale;
 use crate::theme::LIST_TEXT;
 use crate::ui_kit::{self, HEADING_ROW};
@@ -483,7 +483,7 @@ fn row_view(
         move || {
             let side = move || size.whole(32.0);
             let inset = move || px((ui_kit::TOUCH - side()) / 2.0);
-            let bg = crate::play_bar::back_bg(ui);
+            let bg = crate::playback::play_bar::back_bg(ui);
             view()
                 .flex_row()
                 .items_center()

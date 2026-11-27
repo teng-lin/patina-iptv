@@ -22,7 +22,7 @@ use iptv_presentation::tracks::entries_in;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
-use crate::list_rows::{self, Mark, ROW};
+use crate::guide::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::RADIUS_LARGE;
 use crate::ui_kit;
@@ -136,7 +136,7 @@ fn picture_label(size: PictureSize) -> &'static str {
 
 /// Stable source-scoped identity; on-demand content uses the global size.
 pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
-    if surface == 0 && crate::on_demand::active(ui) {
+    if surface == 0 && crate::playback::on_demand::active(ui) {
         return None;
     }
     let key = ui.playback.player.stream(surface).key.get()?;
@@ -171,7 +171,7 @@ fn title(kind: Kind) -> &'static str {
 }
 
 fn volume_index(ui: Ui) -> usize {
-    (usize::from(crate::media::audible_volume(ui.playback)) + 5) / 10
+    (usize::from(crate::playback::media::audible_volume(ui.playback)) + 5) / 10
 }
 
 /// The entries, what each sets, and the one in effect.
@@ -267,7 +267,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
 fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
     let s = crate::runtime_owner::schedule();
     let now = ui.guide.focus.with_untracked(|f| f.now);
-    let h = crate::favorites::history(ui.playback.playing.get_untracked());
+    let h = crate::guide::favorites::history(ui.playback.playing.get_untracked());
     let labels = h
         .channels
         .iter()
@@ -277,9 +277,9 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
             let marker = if h.playing == Some(row) { "  ▶" } else { "" };
             format!(
                 "{}  {}{marker} · {}",
-                crate::lists::number(ui.guide, ch),
+                crate::guide::lists::number(ui.guide, ch),
                 s.channel_name(ch),
-                crate::listing_labels::listing(s.listing(ch, p))
+                crate::guide::listing_labels::listing(s.listing(ch, p))
             )
         })
         .collect();
@@ -375,7 +375,9 @@ pub fn pick(ui: Ui, index: usize) {
             None => ui.playback.sleep.update(|t| t.cancel()),
             Some(minutes) => start_sleep(ui, *minutes),
         },
-        Kind::Track(k) if !value.is_empty() => crate::media::choose(ui.playback, k, value),
+        Kind::Track(k) if !value.is_empty() => {
+            crate::playback::media::choose(ui.playback, k, value)
+        }
         Kind::Track(_) => {}
         Kind::AudioDelay => {
             if let Some(ms) = audio_delays().get(index) {
@@ -384,14 +386,14 @@ pub fn pick(ui: Ui, index: usize) {
         }
         Kind::Volume => {
             if index <= 10 {
-                crate::media::set_volume(ui, index as i32 * 10);
+                crate::playback::media::set_volume(ui, index as i32 * 10);
             }
         }
         Kind::More => {
             if let Some(more) = open.more
                 && let Some(&control) = more.controls.get(index)
             {
-                crate::play_bar::activate(ui, control, more.window);
+                crate::playback::play_bar::activate(ui, control, more.window);
             }
         }
         Kind::Cast => {
@@ -435,10 +437,10 @@ pub fn pick(ui: Ui, index: usize) {
 
 /// History: plays a recent channel live, full screen, with its card.
 fn play_recent(ui: Ui, key: &str) {
-    let Some(channel) = crate::favorites::channel_of(key) else {
+    let Some(channel) = crate::guide::favorites::channel_of(key) else {
         return;
     };
-    crate::lists::show_channel(ui, channel);
+    crate::guide::lists::show_channel(ui, channel);
     let live = ui.playback.playback.get_untracked() == Playback::Live;
     if ui.playback.playing.get_untracked() != Some(channel) || !live {
         ui.play(channel, Playback::Live);
@@ -460,7 +462,7 @@ fn start_sleep(ui: Ui, minutes: u32) {
         ui.playback.sleep.update(|t| fired = t.fire_if_due(now));
         if fired {
             log::info!("iptv sleep timer: stopping playback");
-            crate::player_keys::stop_playback(ui);
+            crate::playback::player_keys::stop_playback(ui);
         }
     });
 }

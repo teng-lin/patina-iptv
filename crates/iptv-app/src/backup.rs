@@ -41,7 +41,7 @@ pub(crate) fn export_ui() {
         if !answer.is_ok_and(|a| a.action.as_deref() == Some("export")) {
             return;
         }
-        if !crate::favorites::flush().await {
+        if !crate::guide::favorites::flush().await {
             crate::toast::notify(tr("Recent channel changes could not be saved; try again"));
             return;
         }

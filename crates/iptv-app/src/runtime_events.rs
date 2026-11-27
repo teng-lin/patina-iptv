@@ -14,7 +14,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 crate::parental_view::admitted(ui, channel, move || {
                     ui.play(channel, crate::Playback::Live);
                     if ui.playback.playing.get_untracked() == Some(channel) {
-                        crate::lists::resumed(ui, channel);
+                        crate::guide::lists::resumed(ui, channel);
                     }
                 });
             }
@@ -28,7 +28,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             });
         }
         RuntimeEvent::EarlyResume { source, done } => crate::tasks::spawn_in_app(async move {
-            crate::player::resume::early(ui, &source).await;
+            crate::playback::player::resume::early(ui, &source).await;
             let _ = done.send(());
         }),
         RuntimeEvent::Message(message) => crate::toast::notify(&message),
@@ -48,7 +48,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             ui.app.list_version.update(|version| *version += 1);
         }
         RuntimeEvent::FavoriteOrderChanged => {
-            crate::lists::favorites_changed(ui);
+            crate::guide::lists::favorites_changed(ui);
             ui.app.list_version.update(|version| *version += 1);
         }
         RuntimeEvent::RefreshProgress(source, activity) => {
@@ -67,15 +67,15 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             current,
             cause,
         } => schedule_changed(ui, previous, current, cause),
-        RuntimeEvent::SourceReady(resume) => crate::player::source_ready(ui, resume),
-        RuntimeEvent::SourceChanged => crate::player::source_changed(ui),
+        RuntimeEvent::SourceReady(resume) => crate::playback::player::source_ready(ui, resume),
+        RuntimeEvent::SourceChanged => crate::playback::player::source_changed(ui),
         RuntimeEvent::AccountStreams(limit) => {
-            crate::multiview::set_account_streams(limit);
+            crate::playback::multiview::set_account_streams(limit);
             if ui.app.account_streams.get_untracked() != limit {
                 ui.app.account_streams.set(limit);
             }
         }
-        RuntimeEvent::ForgetSource(source) => crate::player::forget_source(source),
+        RuntimeEvent::ForgetSource(source) => crate::playback::player::forget_source(source),
         RuntimeEvent::OpenPlaylists => crate::playlists_view::open(ui),
         RuntimeEvent::ClosePlaylists => crate::playlists_view::close(ui),
         RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
@@ -98,7 +98,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::GuideChanged => ui.app.guide_pages.update(|version| *version += 1),
         RuntimeEvent::LibraryChanged => {
             ui.app.library.version.update(|version| *version += 1);
-            crate::external_player::enforce(ui);
+            crate::playback::external_player::enforce(ui);
         }
         RuntimeEvent::SettingsChanged => ui.app.settings.update(|version| *version += 1),
     }
@@ -114,23 +114,23 @@ fn schedule_changed(
     // Effects such as preview autoplay must see the new schedule together
     // with the list and focus built from it.
     batch(|| {
-        let kept = crate::lists::keep_in(ui, previous.clone());
-        crate::player::stop_archive_after_clock_edit(ui, &*previous, &*current);
+        let kept = crate::guide::lists::keep_in(ui, previous.clone());
+        crate::playback::player::stop_archive_after_clock_edit(ui, &*previous, &*current);
         crate::menu_view::invalidate_shifted_context(ui, &*previous, &*current);
         if let ScheduleCause::Catalog { has_vod, any_vod } = cause {
-            crate::clock::mark_shown();
+            crate::guide::clock::mark_shown();
             if ui
                 .playback
                 .playing
                 .get_untracked()
                 .is_some_and(|ch| ch >= current.channel_count())
             {
-                crate::player::row_dropped(ui, &*current);
+                crate::playback::player::row_dropped(ui, &*current);
             }
             ui.app.has_vod.set(has_vod);
             ui.app.any_vod.set(any_vod);
         }
-        crate::lists::restore(ui, kept, current.clone());
+        crate::guide::lists::restore(ui, kept, current.clone());
         if catalog_changed {
             let n = ui.guide.list.with_untracked(|l| l.len());
             let rows = ui.guide.visible_rows.get_untracked();
@@ -143,9 +143,9 @@ fn schedule_changed(
             ui.screens.editor.set(None);
             ui.app.data_version.update(|version| *version += 1);
         }
-        crate::player::enforce_guide_blocks(ui, &*current);
+        crate::playback::player::enforce_guide_blocks(ui, &*current);
         if catalog_changed {
-            crate::external_player::enforce(ui);
+            crate::playback::external_player::enforce(ui);
         } else {
             ui.app.data_version.update(|version| *version += 1);
         }
@@ -155,7 +155,7 @@ fn schedule_changed(
 
 /// UI context supplied to the runtime's foreground scheduling hint.
 pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
-    crate::lists::focused_channel(ui.guide)
+    crate::guide::lists::focused_channel(ui.guide)
 }
 
 /// The headless scenarios' stand-in for an import reporting the shown

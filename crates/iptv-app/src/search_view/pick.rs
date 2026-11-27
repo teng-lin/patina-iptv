@@ -48,7 +48,7 @@ pub(super) fn choose(ui: Ui, id: &ResultId) -> bool {
     else {
         return true;
     };
-    if crate::multiview::picked(ui, channel) {
+    if crate::playback::multiview::picked(ui, channel) {
         close(ui);
     }
     true

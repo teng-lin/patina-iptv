@@ -36,9 +36,12 @@ fn item_height(ui: Ui) -> f32 {
         return ITEM_H;
     }
     let inset = safe_area();
-    let available =
-        window().height.0 - crate::panels::header_now().0 - inset.top.0 - inset.bottom.0 - 16.0;
-    item_height_for(available.max(0.0), crate::lists::rail(ui).len())
+    let available = window().height.0
+        - crate::playback::panels::header_now().0
+        - inset.top.0
+        - inset.bottom.0
+        - 16.0;
+    item_height_for(available.max(0.0), crate::guide::lists::rail(ui).len())
 }
 
 /// The rail's width now (0 while the guide has the focus).
@@ -96,7 +99,11 @@ pub(crate) fn icon(item: RailItem) -> ImageSrc {
 
 fn item_view(ui: Ui, size: Scale, item: RailItem) -> impl IntoElement {
     // Its place in the rail now (discovery shelves follow imported VOD).
-    let index = move || crate::lists::rail(ui).iter().position(|&i| i == item);
+    let index = move || {
+        crate::guide::lists::rail(ui)
+            .iter()
+            .position(|&i| i == item)
+    };
     let open = move || ui.guide.focus.with(|f| f.layout_pane()) == Pane::Rail;
     let focused = move || {
         open()
@@ -151,7 +158,7 @@ fn item_view(ui: Ui, size: Scale, item: RailItem) -> impl IntoElement {
         .on_press(move || {
             ui.touched();
             if let Some(i) = index() {
-                crate::lists::tap_rail(ui, i);
+                crate::guide::lists::tap_rail(ui, i);
             }
         })
         .child(
@@ -180,7 +187,7 @@ fn item_view(ui: Ui, size: Scale, item: RailItem) -> impl IntoElement {
 pub fn column(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     effect(move || {
-        let items = crate::lists::rail(ui);
+        let items = crate::guide::lists::rail(ui);
         if ui
             .guide
             .focus

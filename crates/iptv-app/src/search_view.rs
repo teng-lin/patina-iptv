@@ -379,7 +379,7 @@ fn run_search(ui: Ui, query: &str) {
     };
     let mut programs = crate::runtime_owner::runtime().search_programs(
         query,
-        crate::clock::wall_unix(),
+        crate::guide::clock::wall_unix(),
         &*schedule,
         opts,
     );
@@ -472,7 +472,7 @@ pub fn close(ui: Ui) {
         .search
         .with_untracked(|s| s.as_ref().is_some_and(|s| s.pick));
     if picking {
-        crate::multiview::list_closed(ui);
+        crate::playback::multiview::list_closed(ui);
     }
     save_history(ui);
     crate::runtime_owner::runtime().release_program_index();
@@ -566,7 +566,7 @@ fn choose(ui: Ui, id: ResultId) {
 fn watch(ui: Ui, channel: usize, playback: Playback) {
     save_history(ui);
     let now = ui.guide.focus.with(|f| f.now);
-    crate::lists::tap(ui, channel, now);
+    crate::guide::lists::tap(ui, channel, now);
     ui.play(channel, playback);
     // Full screen first: the resume effect ignores a suspended screen in full screen.
     ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);

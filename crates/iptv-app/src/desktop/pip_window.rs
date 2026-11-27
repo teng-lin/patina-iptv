@@ -50,7 +50,10 @@ const MARGIN: f32 = 24.0;
 
 /// The window, open while the player shows in it.
 pub fn window(ui: Ui) -> impl IntoElement {
-    when(move || crate::pip::in_window(ui), move || open(ui))
+    when(
+        move || crate::playback::pip::in_window(ui),
+        move || open(ui),
+    )
 }
 
 fn open(ui: Ui) -> impl IntoElement {
@@ -106,7 +109,7 @@ fn closed(ui: Ui, cause: WindowCloseCause) {
             Exit::BackToApp
         }
     };
-    crate::pip::exit(ui, how);
+    crate::playback::pip::exit(ui, how);
 }
 
 fn content(ui: Ui) -> impl IntoElement {
@@ -213,7 +216,7 @@ fn clicked(ui: Ui, hover: Signal<Hover>, drags: Signal<bool>, clicks: u32) {
     let mut double = false;
     hover.update(|h| double = h.click(now));
     if double || clicks >= 2 {
-        crate::pip::exit(ui, Exit::BackToApp);
+        crate::playback::pip::exit(ui, Exit::BackToApp);
         return;
     }
     drags.set(false);
@@ -244,7 +247,7 @@ fn controls(ui: Ui) -> impl IntoElement {
                 32.0,
                 move || {
                     ui.touched();
-                    crate::pip::exit(ui, Exit::BackToApp);
+                    crate::playback::pip::exit(ui, Exit::BackToApp);
                 },
             )
             .absolute()
@@ -259,7 +262,7 @@ fn controls(ui: Ui) -> impl IntoElement {
                 32.0,
                 move || {
                     ui.touched();
-                    crate::pip::exit(ui, Exit::Close);
+                    crate::playback::pip::exit(ui, Exit::Close);
                 },
             )
             .absolute()
@@ -336,9 +339,9 @@ fn button(
 /// placeholder with a way back.
 pub fn placeholder(ui: Ui) -> impl IntoElement {
     when(
-        move || crate::pip::in_window(ui),
+        move || crate::playback::pip::in_window(ui),
         move || {
-            let rect = move || crate::video::layout_rect(ui, 0);
+            let rect = move || crate::playback::video::layout_rect(ui, 0);
             let size = crate::scale::Scale::new();
             view()
                 .test_id("pip-placeholder")
@@ -368,7 +371,7 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
                         tr("Back to the app"),
                         || false,
                         move || {
-                            crate::pip::exit(ui, Exit::BackToApp);
+                            crate::playback::pip::exit(ui, Exit::BackToApp);
                         },
                     )
                     .test_id("pip-return"),

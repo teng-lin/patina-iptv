@@ -650,7 +650,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     )
                     .element_ref(&controls)
                     .accessibility_elements_hidden(move || contents_hidden(ui))
-                    .estimated_item_size(crate::list_rows::pitch(size, crate::list_rows::ROW))
+                    .estimated_item_size(crate::guide::list_rows::pitch(
+                        size,
+                        crate::guide::list_rows::ROW,
+                    ))
                     .h(move || size.px(if on_members_page(ui) { 260.0 } else { 480.0 })),
                 )
                 .child(when(
@@ -662,7 +665,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         )
                         .element_ref(&members)
                         .accessibility_elements_hidden(move || contents_hidden(ui))
-                        .estimated_item_size(crate::list_rows::pitch(size, crate::list_rows::ROW))
+                        .estimated_item_size(crate::guide::list_rows::pitch(
+                            size,
+                            crate::guide::list_rows::ROW,
+                        ))
                         .flex_1()
                     },
                 ))

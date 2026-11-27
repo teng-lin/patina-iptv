@@ -66,10 +66,10 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                 let previous = at.index().checked_sub(1).and_then(|n| s.visible().nth(n));
                 previous
                     .is_none_or(|p| {
-                        crate::clock::date_only(p.request.start)
-                            != crate::clock::date_only(current.request.start)
+                        crate::guide::clock::date_only(p.request.start)
+                            != crate::guide::clock::date_only(current.request.start)
                     })
-                    .then(|| crate::clock::date_only(current.request.start))
+                    .then(|| crate::guide::clock::date_only(current.request.start))
             })
             .unwrap_or_default()
     };
@@ -163,8 +163,8 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                                         format!(
                                             "{} · {} – {} · {}",
                                             status(&j),
-                                            crate::clock::time_only(j.request.start),
-                                            crate::clock::time_only(j.request.end),
+                                            crate::guide::clock::time_only(j.request.start),
+                                            crate::guide::clock::time_only(j.request.end),
                                             j.request.channel_name
                                         )
                                     })
@@ -199,7 +199,7 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                             .child(
                                 ui_kit::round_more(
                                     || 32.0,
-                                    crate::play_bar::back_bg(ui),
+                                    crate::playback::play_bar::back_bg(ui),
                                     move || {
                                         let name =
                                             job().map(|j| j.request.title).unwrap_or_default();

@@ -569,7 +569,7 @@ fn play_authorized(
                     return;
                 }
                 flush(ui);
-                crate::player::play_vod(ui, playing, source, full_screen);
+                crate::playback::player::play_vod(ui, playing, source, full_screen);
                 if full_screen {
                     // The screen waits under the player: Back from the
                     // title returns to its details (`return_from_player`).
@@ -600,7 +600,7 @@ fn stop_ended(ui: Ui, ended: &Key) {
         .vod
         .with_untracked(|p| p.as_ref().is_some_and(|(p, _)| p.ended && &p.key == ended))
     {
-        crate::player_keys::stopped(ui);
+        crate::playback::player_keys::stopped(ui);
     }
 }
 
@@ -788,7 +788,7 @@ pub fn title(ui: Ui) -> Option<String> {
 }
 
 pub fn flush(ui: Ui) {
-    crate::on_demand::flush(ui, false);
+    crate::playback::on_demand::flush(ui, false);
 }
 
 pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) {
@@ -923,10 +923,10 @@ fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u
             );
         }),
         Watched::Details => {
-            crate::player_keys::stopped(ui);
+            crate::playback::player_keys::stopped(ui);
             select_next(ui, details, &key, season, true);
         }
-        Watched::Elsewhere => crate::player_keys::stopped(ui),
+        Watched::Elsewhere => crate::playback::player_keys::stopped(ui),
     }
 }
 

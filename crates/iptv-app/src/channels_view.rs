@@ -9,8 +9,8 @@
 //! persistent layer: preview mode only changes its rectangle
 //! ([`preview_rect`]).
 
+use crate::guide::lists::{browser_entry_name, visible_entries};
 use crate::i18n::tr;
-use crate::lists::{browser_entry_name, visible_entries};
 
 use crate::layout::ListPanel;
 use iptv_nav::Action;
@@ -19,8 +19,8 @@ use iptv_presentation::lists::{ALL, ChannelList as Rows, FAVORITES, VisibleEntri
 use nsh_core::prelude::*;
 
 use crate::fonts::{CONDENSED, HEADER_TIMES, MEDIUM, SANS, SECTION, TITLE};
-use crate::list_rows::{self, INSET, Mark, ROW, ROW_TWO};
-use crate::panels::GROUPS_W;
+use crate::guide::list_rows::{self, INSET, Mark, ROW, ROW_TWO};
+use crate::playback::panels::GROUPS_W;
 use crate::scale::Scale;
 use crate::theme::BRIGHT_TEXT;
 use crate::{Ui, ViewMode, clock, tint};
@@ -50,20 +50,20 @@ pub fn open(ui: Ui, mode: ListMode) {
     ui.playback.panels.update(|p| p.hide());
     let list = ui.guide.list.get_untracked();
     // Picking for multiview: from the active tile's channel.
-    let from = crate::multiview::pick_from(ui).or(ui.playback.playing.get_untracked());
+    let from = crate::playback::multiview::pick_from(ui).or(ui.playback.playing.get_untracked());
     let state = ChannelList::open(mode, from, &list);
     ui.playback.channels.set(Some(state));
 }
 
 pub fn close(ui: Ui) {
     ui.playback.channels.set(None);
-    crate::multiview::list_closed(ui);
+    crate::playback::multiview::list_closed(ui);
 }
 
 /// What OK on a channel compares with: nothing while picking for
 /// multiview (every channel is a choice), else the playing channel.
 fn playing(ui: Ui) -> Option<usize> {
-    if crate::multiview::picking(ui) {
+    if crate::playback::multiview::picking(ui) {
         None
     } else {
         ui.playback.playing.get_untracked()
@@ -132,18 +132,18 @@ fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, VisibleEntries) -> Out
     match outcome {
         Outcome::Stay => {}
         Outcome::Close => close(ui),
-        Outcome::Play(channel) if crate::multiview::picking(ui) => {
-            if crate::multiview::picked(ui, channel) {
+        Outcome::Play(channel) if crate::playback::multiview::picking(ui) => {
+            if crate::playback::multiview::picked(ui, channel) {
                 close(ui);
             }
         }
         Outcome::Play(channel) => {
             log::info!("iptv channel list: play {channel}");
-            crate::lists::show_channel(ui, channel);
-            crate::browse_playback::select(ui);
+            crate::guide::lists::show_channel(ui, channel);
+            crate::playback::browse_playback::select(ui);
         }
         Outcome::Preview(entry) => {
-            crate::lists::preview(ui, entry);
+            crate::guide::lists::preview(ui, entry);
             let list = ui.guide.list.get_untracked();
             ui.playback
                 .channels
@@ -172,7 +172,7 @@ pub fn key(ui: Ui, action: Action) {
             Outcome::Stay
         }),
         Action::Select => update(ui, |c, l, _| c.select(playing, l)),
-        Action::ShowMenu if !crate::multiview::picking(ui) => {
+        Action::ShowMenu if !crate::playback::multiview::picking(ui) => {
             if let Some(list) = ui.playback.channels.get_untracked() {
                 match list.pane {
                     ListPane::Groups => {
@@ -185,9 +185,9 @@ pub fn key(ui: Ui, action: Action) {
         Action::Back => back(ui),
         // Picking for multiview: nothing plays here.
         Action::ChannelUp | Action::ChannelDown | Action::PlayPause
-            if crate::multiview::picking(ui) => {}
+            if crate::playback::multiview::picking(ui) => {}
         Action::ChannelUp | Action::ChannelDown => {
-            crate::player_keys::zap(ui, if action == Action::ChannelUp { -1 } else { 1 });
+            crate::playback::player_keys::zap(ui, if action == Action::ChannelUp { -1 } else { 1 });
             if let Some(ch) = ui.playback.playing.get_untracked() {
                 update(ui, |c, l, _| {
                     c.follow(ch, l);
@@ -205,7 +205,7 @@ pub fn back(ui: Ui) {
 }
 
 fn open_channel_menu(ui: Ui, row: usize) {
-    if !crate::multiview::picking(ui)
+    if !crate::playback::multiview::picking(ui)
         && let Some(channel) = ui.guide.list.with_untracked(|list| list.channel(row))
     {
         batch(|| {
@@ -215,7 +215,7 @@ fn open_channel_menu(ui: Ui, row: usize) {
                     state.focus_row(row);
                 }
             });
-            crate::browse_playback::hold(ui);
+            crate::playback::browse_playback::hold(ui);
             crate::menu_view::open_channel(ui, channel);
         });
     }
@@ -296,7 +296,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .element_ref(&entries)
             .flex_1(),
         );
-    let channels_column = crate::browse_playback::watch_drags(view(), ui)
+    let channels_column = crate::playback::browse_playback::watch_drags(view(), ui)
         .test_id("channel-list")
         .w(move || px(panel_now(ui).list))
         .pt_safe_area()
@@ -306,9 +306,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(
             heading(Box::new(move || {
                 if groups() || visible_entries(ui).is_empty() {
-                    crate::lists::list_name(ui)
+                    crate::guide::lists::list_name(ui)
                 } else {
-                    format!("◂  {}", crate::lists::list_name(ui))
+                    format!("◂  {}", crate::guide::lists::list_name(ui))
                 }
             }))
             .on_press(move || {
@@ -333,7 +333,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .estimated_item_size(list_rows::pitch(size, ROW_TWO))
             .element_ref(&rows)
             // Scrolling never tunes (`browse_playback::dragged`).
-            .on_scroll_drag_start(move |_: &Point<Points>| crate::browse_playback::dragged(ui))
+            .on_scroll_drag_start(move |_: &Point<Points>| {
+                crate::playback::browse_playback::dragged(ui)
+            })
             .flex_1(),
         );
     // Mounted while closed: no view in it may say `PointerEvents::Auto`
@@ -409,7 +411,7 @@ fn entry_row(
         })
         .on_long_press(move || {
             ui.touched();
-            if !crate::multiview::picking(ui)
+            if !crate::playback::multiview::picking(ui)
                 && let Some(entry) = visible()
             {
                 crate::menu_view::open_group_options(ui, entry);
@@ -417,7 +419,7 @@ fn entry_row(
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
             ui.touched();
-            if !crate::multiview::picking(ui)
+            if !crate::playback::multiview::picking(ui)
                 && let Some(entry) = visible()
             {
                 crate::menu_view::open_group_options(ui, entry);
@@ -429,7 +431,7 @@ fn entry_row(
                 .mr(move || {
                     px(group_more_room(
                         ui,
-                        current() && !crate::multiview::picking(ui),
+                        current() && !crate::playback::multiview::picking(ui),
                         entry(),
                     ))
                 }),
@@ -439,7 +441,7 @@ fn entry_row(
             size,
             entry,
             current,
-            move || !crate::multiview::picking(ui),
+            move || !crate::playback::multiview::picking(ui),
             move || name().trim_start().to_owned(),
         ))
 }
@@ -475,7 +477,7 @@ pub(crate) fn group_more(
                 .child(
                     crate::ui_kit::round_more(
                         || GROUP_MORE,
-                        crate::play_bar::back_bg(ui),
+                        crate::playback::play_bar::back_bg(ui),
                         {
                             let name = name.clone();
                             move || {
@@ -538,7 +540,7 @@ fn channel_row(
             format!(
                 "{}  {}",
                 clock(p.start),
-                crate::listing_labels::listing(s.listing(ch, p))
+                crate::guide::listing_labels::listing(s.listing(ch, p))
             ),
         ))
     };
@@ -570,10 +572,10 @@ fn channel_row(
         .flex_row()
         .items_center()
         .child(when(
-            move || is_open(ui) && crate::grid::show_channel_logos(ui),
+            move || is_open(ui) && crate::guide::grid::show_channel_logos(ui),
             move || {
                 image(crate::content_image::source(move || {
-                    crate::grid::channel_logo(ui, channel())
+                    crate::guide::grid::channel_logo(ui, channel())
                 }))
                 .test_id("player-channel-logo")
                 .accessibility_elements_hidden(true)
@@ -622,7 +624,7 @@ fn channel_row(
                     .child(
                         crate::ui_kit::round_more(
                             || MORE,
-                            crate::play_bar::back_bg(ui),
+                            crate::playback::play_bar::back_bg(ui),
                             move || {
                                 let channel = name();
                                 crate::i18n::trf(
@@ -649,7 +651,7 @@ const MORE: f32 = 32.0;
 /// pointer (keys have Menu), and not while multiview picks a channel,
 /// where rows have no menu.
 fn more_shown(ui: Ui) -> bool {
-    is_open(ui) && !ui.keys_shown() && !crate::multiview::picking(ui)
+    is_open(ui) && !ui.keys_shown() && !crate::playback::multiview::picking(ui)
 }
 
 /// The room the row's text leaves at its end for the ⋯.
@@ -669,7 +671,7 @@ fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
         let p = s.program_at(ch, now);
         Some((
             format!("{}  {}", Rows::number(row), s.channel_name(ch)),
-            crate::listing_labels::listing(s.listing(ch, p)),
+            crate::guide::listing_labels::listing(s.listing(ch, p)),
             format!("{}–{}", clock(p.start), clock(p.end)),
         ))
     };

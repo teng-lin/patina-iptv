@@ -64,8 +64,8 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
         .p(px(40.0))
         // Clear of the play bar while it shows.
         .pb(move || {
-            px(if crate::play_bar::shows(ui) {
-                crate::play_bar::height(ui) + 16.0
+            px(if crate::playback::play_bar::shows(ui) {
+                crate::playback::play_bar::height(ui) + 16.0
             } else {
                 40.0
             })
@@ -112,7 +112,7 @@ fn bind_more(ui: Ui, width: Signal<Option<f32>>) {
         let Some(width) = width.get() else {
             return;
         };
-        let controls = crate::play_bar::overflow(ui, width);
+        let controls = crate::playback::play_bar::overflow(ui, width);
         if controls.is_empty() {
             close(ui);
         } else if ui.screens.chooser.with_untracked(|chooser| {
@@ -141,7 +141,7 @@ fn row(ui: Ui, size: Scale, at: Position) -> View {
                 let index = at.index();
                 let label = match c.kind {
                     Kind::More => {
-                        crate::play_bar::label(ui, *c.more.as_ref()?.controls.get(index)?)
+                        crate::playback::play_bar::label(ui, *c.more.as_ref()?.controls.get(index)?)
                             .to_owned()
                     }
                     Kind::Cast | Kind::History | Kind::Volume => c.labels.get(index)?.clone(),

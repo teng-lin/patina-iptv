@@ -97,7 +97,7 @@ impl UpdatePrompts for Prompts {
     }
 
     fn flush_bookmarks(&self) {
-        crate::player::watch_time::flush(self.0);
+        crate::playback::player::watch_time::flush(self.0);
     }
 }
 
@@ -379,8 +379,8 @@ fn details(ui: Ui) -> String {
         .map(|time| {
             let time = format!(
                 "{} {}",
-                crate::clock::date_only(time),
-                crate::clock::time_only(time)
+                crate::guide::clock::date_only(time),
+                crate::guide::clock::time_only(time)
             );
             trf(
                 "Last successful check: {time}",

@@ -2,8 +2,8 @@
 use crate::runtime::model::InspectionControl;
 use crate::{
     Ui,
+    guide::list_rows::{self, Mark, ROW_TWO},
     i18n::tr,
-    list_rows::{self, Mark, ROW_TWO},
     scale::Scale,
     ui_kit,
 };
@@ -464,7 +464,7 @@ fn title(ui: Ui, row: &Row) -> String {
                 format!(
                     "{} · {}",
                     tr("History"),
-                    crate::clock::label(h.created_at, crate::clock::wall_unix())
+                    crate::guide::clock::label(h.created_at, crate::guide::clock::wall_unix())
                 )
             })
         })
@@ -609,8 +609,8 @@ fn feeds(ui: Ui, size: Scale) -> impl IntoElement {
                         }))
                 },
             )
-            .estimated_item_size(crate::list_rows::pitch(size, ROW_TWO))
-            .h(move || px(crate::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
+            .estimated_item_size(crate::guide::list_rows::pitch(size, ROW_TWO))
+            .h(move || px(crate::guide::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
         },
     )
 }
@@ -658,8 +658,8 @@ fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
                         }))
                 },
             )
-            .estimated_item_size(crate::list_rows::pitch(size, ROW_TWO))
-            .h(move || px(crate::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
+            .estimated_item_size(crate::guide::list_rows::pitch(size, ROW_TWO))
+            .h(move || px(crate::guide::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
         },
     )
 }
@@ -760,8 +760,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     state(ui, |s| {
                         format!(
                             "{} — {}",
-                            crate::clock::label(s.request.window.from, crate::clock::wall_unix()),
-                            crate::clock::label(s.request.window.to, crate::clock::wall_unix())
+                            crate::guide::clock::label(
+                                s.request.window.from,
+                                crate::guide::clock::wall_unix()
+                            ),
+                            crate::guide::clock::label(
+                                s.request.window.to,
+                                crate::guide::clock::wall_unix()
+                            )
                         )
                     })
                     .unwrap_or_default()

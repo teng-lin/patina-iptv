@@ -24,7 +24,7 @@ pub use state::Picker as Open;
 use state::{Effect, Key, Picker, Row, Subject};
 
 use crate::data::assign::{self, Applied};
-use crate::list_rows::{self, Mark, ROW_TWO};
+use crate::guide::list_rows::{self, Mark, ROW_TWO};
 use crate::scale::Scale;
 use crate::ui_kit;
 use crate::{Ui, tint};

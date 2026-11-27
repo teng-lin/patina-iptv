@@ -8,7 +8,7 @@ use nsh_core::Checked;
 
 use super::*;
 use crate::fonts::{CAPTION, CONDENSED, SANS};
-use crate::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
 use crate::scale::Scale;
 use crate::ui_kit;
 

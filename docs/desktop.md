@@ -21,7 +21,7 @@ rule was checked on.
 | Movies and Shows posters | Scrolls the posters | Nothing | Nothing (no menu yet; #90) | — |
 | Recordings | Scrolls the recordings | Nothing | The recording's actions | ⋯ at the end of each row |
 
-- **Now:** all rows above (`crates/iptv-app/src/grid/wheel.rs`,
+- **Now:** all rows above (`crates/iptv-app/src/guide/grid/wheel.rs`,
   `channels_view.rs`, `panels.rs`, `recordings_view/rows.rs`). A wheel, a
   right-click or a ⋯ never plays, tunes or stops anything.
 - **Now:** hovering never changes the channel or the focus that playback

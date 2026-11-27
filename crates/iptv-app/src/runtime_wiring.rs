@@ -25,7 +25,7 @@ pub(crate) fn start(ui: Ui) {
                 if !runtime().flush_files(Duration::from_secs(5)) {
                     log::error!("iptv persistence: queued file writes did not finish at shutdown");
                 }
-                if !crate::favorites::flush_on_shutdown() {
+                if !crate::guide::favorites::flush_on_shutdown() {
                     log::error!(
                         "iptv persistence: queued favorite changes could not be saved at shutdown"
                     );
@@ -46,12 +46,12 @@ pub(crate) fn start(ui: Ui) {
     effect(move || {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
         let target = crate::host::EXTERNAL_PLAYER
-            .then(|| crate::external_player::handoff_target(ui))
+            .then(|| crate::playback::external_player::handoff_target(ui))
             .flatten()
             .or_else(|| runtime().cast_parental_target());
         runtime().set_foreground_for_external(!background, target.as_ref());
         if was_background.replace(background) && !background && crate::host::ANDROID {
-            crate::external_player::returned(ui);
+            crate::playback::external_player::returned(ui);
         }
         if background && !runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");

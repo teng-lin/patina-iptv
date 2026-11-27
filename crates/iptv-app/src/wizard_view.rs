@@ -23,7 +23,7 @@ use nsh_core::picker::FilePickRequest;
 use nsh_core::prelude::*;
 
 use crate::data::{self, Job, Purpose, Update};
-use crate::list_rows::Mark;
+use crate::guide::list_rows::Mark;
 use crate::scale::Scale;
 use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};

@@ -174,7 +174,7 @@ fn category_button(
 ) -> View {
     let label = label.into_reactive();
     let spoken = label.clone();
-    let mark = move || crate::list_rows::Mark::of(focused(), false);
+    let mark = move || crate::guide::list_rows::Mark::of(focused(), false);
     view()
         .min_h(move || size.px(ui_kit::TOUCH))
         .px(move || size.px(16.0))
@@ -708,7 +708,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
     let offered = computed(move || {
         ui.app.library.version.get();
         (
-            !crate::lists::live_only(),
+            !crate::guide::lists::live_only(),
             crate::capabilities::recordings_library(ui),
         )
     });

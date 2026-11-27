@@ -16,7 +16,7 @@ use nsh_core::prelude::*;
 use super::view::swatch_color;
 use super::{WHITE, state, update, words};
 use crate::fonts::TITLE;
-use crate::list_rows::{self, Mark, ROW};
+use crate::guide::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::ui_kit;

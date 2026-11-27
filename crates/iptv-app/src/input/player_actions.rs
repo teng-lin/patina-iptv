@@ -8,21 +8,21 @@ pub(super) fn transport(ui: Ui, key: RemoteKey, press: Press, action: Action) ->
         && ui.cast.remote.get_untracked()
         && action == Action::PlayPause
     {
-        crate::player_keys::play_pause(ui, key, press);
+        crate::playback::player_keys::play_pause(ui, key, press);
         return true;
     }
     if action == Action::Stop
         && ui.playback.player_surface == 0
         && (ui.cast.remote.get_untracked() || ui.cast.busy.get_untracked())
     {
-        crate::player_keys::stop_playback(ui);
+        crate::playback::player_keys::stop_playback(ui);
         return true;
     }
     if action == Action::Stop
         && ui.playback.player_surface == 0
-        && crate::external_player::is_playing(ui)
+        && crate::playback::external_player::is_playing(ui)
     {
-        crate::player_keys::stop_playback(ui);
+        crate::playback::player_keys::stop_playback(ui);
         return true;
     }
     false
@@ -45,7 +45,7 @@ pub(super) fn auxiliary(ui: Ui, action: Action) -> bool {
 }
 
 pub(super) fn preview(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) -> bool {
-    let mv = |m: Move| crate::lists::navigate(ui, m);
+    let mv = |m: Move| crate::guide::lists::navigate(ui, m);
     // The preview owns focus, not the guide row left underneath it. Keep
     // program/list commands from acting on a different channel.
     if ui.chrome.mode.get() == ViewMode::Guide && ui.guide.focus.with(|f| f.pane == Pane::Preview) {
@@ -54,18 +54,19 @@ pub(super) fn preview(ui: Ui, key: RemoteKey, press: Press, action: Action, repe
             Action::MoveDown => mv(Move::Down),
             Action::MoveLeft => mv(Move::Left),
             Action::MoveRight => mv(Move::Right),
-            Action::Select | Action::ReturnToPlayer => crate::lists::ok(ui),
+            Action::Select | Action::ReturnToPlayer => crate::guide::lists::ok(ui),
             Action::ShowMenu | Action::ShowControls
-                if ui.playback.playing.get().is_some() || crate::on_demand::active(ui) =>
+                if ui.playback.playing.get().is_some()
+                    || crate::playback::on_demand::active(ui) =>
             {
                 ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
-                crate::play_bar::remote(ui);
+                crate::playback::play_bar::remote(ui);
             }
             Action::Back => {
                 crate::go_back(ui);
             }
             Action::PlayPause | Action::Stop => {
-                crate::player_keys::apply(ui, key, press, action, repeat);
+                crate::playback::player_keys::apply(ui, key, press, action, repeat);
             }
             _ => {}
         }
@@ -75,6 +76,6 @@ pub(super) fn preview(ui: Ui, key: RemoteKey, press: Press, action: Action, repe
 }
 
 pub(super) fn controls(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) -> bool {
-    crate::play_bar::key(ui, key, action, repeat)
-        || crate::player_keys::apply(ui, key, press, action, repeat)
+    crate::playback::play_bar::key(ui, key, action, repeat)
+        || crate::playback::player_keys::apply(ui, key, press, action, repeat)
 }

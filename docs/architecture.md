@@ -527,7 +527,7 @@ following source deletion and recreation. These native recording, parental
 and VOD APIs remain experimental outside runtime contract v1.
 
 There is one persistent player surface under the UI
-(`iptv-app/src/video.rs`). It is a native component named `tv.player`:
+(`iptv-app/src/playback/video.rs`). It is a native component named `tv.player`:
 
 - on Android the Kotlin host (`hosts/android`) registers it, on Media3;
 - on Linux, macOS, iPad and Windows `iptv-player-mpv` registers it, on libmpv.

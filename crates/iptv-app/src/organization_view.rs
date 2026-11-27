@@ -1,7 +1,7 @@
 //! Channel and provider-group organization, including hidden-item recovery.
+use crate::guide::list_rows::{self, Mark, ROW};
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
-use crate::list_rows::{self, Mark, ROW};
 use crate::runtime::{Error, model::SourceId};
 use crate::scale::Scale;
 use crate::ui_kit::entry::{self, TextSheet};
@@ -25,7 +25,7 @@ async fn items(source: SourceId, kind: &Kind, order: Option<Sort>) -> Result<Ite
         &crate::runtime_owner::runtime(),
         source,
         kind.clone(),
-        crate::favorites::ordered_keys(),
+        crate::guide::favorites::ordered_keys(),
         order,
     )
     .await
@@ -100,8 +100,8 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
         ui.chrome
             .mode
             .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
-        crate::lists::open_groups(ui);
-        crate::browse_playback::hold(ui);
+        crate::guide::lists::open_groups(ui);
+        crate::playback::browse_playback::hold(ui);
         ui.screens
             .organization
             .open(Open::with_editor(None, editor, Placement::Groups));
@@ -112,10 +112,10 @@ pub fn open_group_reorder(ui: Ui, source: SourceId, focus: Option<String>, list:
     batch(|| {
         leave_fullscreen_for_reorder(ui);
         if let Some(entry) = list.resolve(&*crate::runtime_owner::schedule()) {
-            crate::lists::preview(ui, entry);
+            crate::guide::lists::preview(ui, entry);
         }
-        crate::lists::open_groups(ui);
-        crate::browse_playback::hold(ui);
+        crate::guide::lists::open_groups(ui);
+        crate::playback::browse_playback::hold(ui);
         open_with(
             ui,
             source,
@@ -143,9 +143,9 @@ pub fn open_context_reorder(
             && let Some(&channel) = guide_order_keys(ui, source, &list).get(id)
         {
             let now = ui.guide.focus.with_untracked(|f| f.now);
-            crate::lists::tap(ui, channel, now);
+            crate::guide::lists::tap(ui, channel, now);
         }
-        crate::browse_playback::hold(ui);
+        crate::playback::browse_playback::hold(ui);
         open_with(ui, source, kind, focus, Mode::Reorder, None, placement);
     });
 }
@@ -166,7 +166,7 @@ fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
     {
         Placement::Panel(list)
     } else if *kind == Kind::Groups {
-        crate::lists::open_groups(ui);
+        crate::guide::lists::open_groups(ui);
         Placement::Groups
     } else {
         guide_reorder_placement(ui, list)
@@ -176,7 +176,7 @@ fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
 fn guide_reorder_placement(ui: Ui, list: ListId) -> Placement {
     let return_to_groups = ui.guide.focus.with_untracked(|f| f.pane == Pane::Groups);
     let entry = list.find(&*crate::runtime_owner::schedule());
-    crate::lists::preview(ui, entry);
+    crate::guide::lists::preview(ui, entry);
     ui.guide.focus.update(|f| {
         f.close_columns();
         f.hint = false;
@@ -353,7 +353,7 @@ fn close(ui: Ui) {
         )
     }) == Some(true)
     {
-        crate::lists::open_groups(ui);
+        crate::guide::lists::open_groups(ui);
     }
     ui.screens.organization.close();
     dismiss_keyboard();
@@ -732,7 +732,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     if scope_kind == Kind::Favorites
         && matches!(edit, Edit::Earlier | Edit::Later | Edit::First | Edit::Last)
     {
-        let keys = crate::favorites::ordered_keys();
+        let keys = crate::guide::favorites::ordered_keys();
         let Some(at) = keys.iter().position(|key| key == &item.id) else {
             return;
         };
@@ -742,12 +742,12 @@ fn apply_edit(ui: Ui, edit: Edit) {
             Edit::First => 0,
             _ => keys.len().saturating_sub(1),
         };
-        crate::favorites::reorder(ui, &item.id, to);
+        crate::guide::favorites::reorder(ui, &item.id, to);
         finish(ui, &s, generation, Ok(()));
         return;
     }
     if scope_kind == Kind::Favorites && edit == Edit::ResetOrder {
-        let keys = crate::favorites::ordered_keys();
+        let keys = crate::guide::favorites::ordered_keys();
         let ordered = crate::runtime::commands::favorite_provider_order(
             &crate::runtime_owner::runtime(),
             source,
@@ -760,7 +760,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             }
             let result = ordered.map(|keys| {
                 for (at, key) in keys.iter().enumerate() {
-                    crate::favorites::reorder(ui, key, at);
+                    crate::guide::favorites::reorder(ui, key, at);
                 }
             });
             finish(ui, &s, generation, result);
@@ -1537,7 +1537,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
                 return String::new();
             }
             let catalog = crate::runtime_owner::schedule();
-            crate::lists::entry_name(list.find(&*catalog), &*catalog)
+            crate::guide::lists::entry_name(list.find(&*catalog), &*catalog)
         })
         .unwrap_or_default()
     };
@@ -1630,10 +1630,10 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .absolute()
                 .right(move || size.px(20.0))
                 .bottom(move || {
-                    px(
-                        window().height.0 - safe_area().top.0 - crate::panels::header_now().0
-                            + size.of(12.0),
-                    )
+                    px(window().height.0
+                        - safe_area().top.0
+                        - crate::playback::panels::header_now().0
+                        + size.of(12.0))
                 })
                 .rounded(px(crate::theme::RADIUS))
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
@@ -1689,10 +1689,10 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
         .child(when(groups, move || {
             view()
                 .absolute()
-                .top(move || px(safe_area().top.0 + crate::panels::header_now().0))
+                .top(move || px(safe_area().top.0 + crate::playback::panels::header_now().0))
                 .bottom(px(0.0))
                 .left(move || px(crate::rail::width(ui)))
-                .w(move || px(crate::panels::groups_width(ui)))
+                .w(move || px(crate::playback::panels::groups_width(ui)))
                 .px(px(8.0))
                 .py(px(6.0))
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))

@@ -235,7 +235,10 @@ fn UpdateOverlap() -> impl IntoElement {
         directory.path().to_owned(),
     ));
     let ui = crate::runtime_owner::with_runtime(application.clone(), || {
-        let ui = Ui::new(crate::SharedUi::new(), crate::player::Player::new());
+        let ui = Ui::new(
+            crate::SharedUi::new(),
+            crate::playback::player::Player::new(),
+        );
         update_ui(ui).ready.set(true);
         let release = |version: &str| ReleaseCheck {
             installed_version: "1.0.0".into(),

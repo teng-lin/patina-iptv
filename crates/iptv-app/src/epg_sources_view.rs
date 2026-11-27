@@ -32,7 +32,7 @@ pub use state::Screen as Open;
 use state::{Act, Effect, Item, Key, Layer, Screen};
 
 use crate::data::stored::{self, GuideStatus};
-use crate::list_rows::{self, Mark};
+use crate::guide::list_rows::{self, Mark};
 use crate::scale::Scale;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::ui_kit::entry;
@@ -221,7 +221,7 @@ fn mark(ui: Ui, focused: bool) -> Mark {
 }
 
 fn time_label(at: i64) -> String {
-    crate::clock::label(at, crate::clock::wall_unix())
+    crate::guide::clock::label(at, crate::guide::clock::wall_unix())
 }
 
 fn contents_hidden(ui: Ui) -> bool {

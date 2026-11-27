@@ -119,10 +119,10 @@ const MESSAGE_TYPES: &[&str] = &["Notify"];
 /// (`wizard_view::button(…)`, `super::button(…)`).
 const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
     ("iptv-app/src/parental_view.rs", "notify_message", 0),
-    ("iptv-app/src/fav_editor.rs", "button", 0),
+    ("iptv-app/src/guide/fav_editor.rs", "button", 0),
     // `.label(move || tr(name))`, and the tile buttons' `tr(what)`.
-    ("iptv-app/src/multiview_view/chrome.rs", "pill", 0),
-    ("iptv-app/src/multiview_view/chrome.rs", "label", 0),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "pill", 0),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "label", 0),
     ("iptv-app/src/search_view/view.rs", "button", 2),
     ("iptv-app/src/settings_view/editors.rs", "button", 2),
     ("iptv-app/src/settings_view/words.rs", "with_unit", 0),
@@ -195,11 +195,11 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     // `RuntimeEvent::Notify` (MESSAGE_TYPES).
     ("iptv-app/src/runtime_events.rs", "message"),
     // The labels of TRANSLATING_HELPERS.
-    ("iptv-app/src/fav_editor.rs", "label"),
-    ("iptv-app/src/multiview_view/chrome.rs", "name"),
-    ("iptv-app/src/multiview_view/chrome.rs", "what"),
+    ("iptv-app/src/guide/fav_editor.rs", "label"),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "name"),
+    ("iptv-app/src/playback/multiview_view/chrome.rs", "what"),
     // Each typed control label arm is a checked key(…) message.
-    ("iptv-app/src/play_bar.rs", "control_label"),
+    ("iptv-app/src/playback/play_bar.rs", "control_label"),
     ("iptv-app/src/search_view/view.rs", "label"),
     ("iptv-app/src/settings_view/editors.rs", "label"),
     ("iptv-app/src/settings_view/words.rs", "message"),
@@ -1926,7 +1926,7 @@ fn the_core_calls_are_followed_like_tr() {
 fn a_translating_helper_and_a_message_type_are_followed_like_tr() {
     let wizard = "iptv-app/src/wizard_view.rs";
     let entry = "iptv-app/src/wizard_view/entry.rs";
-    let chrome = "iptv-app/src/multiview_view/chrome.rs";
+    let chrome = "iptv-app/src/playback/multiview_view/chrome.rs";
     let view = "iptv-app/src/some_view.rs";
     let all = |names: &[&str]| {
         names

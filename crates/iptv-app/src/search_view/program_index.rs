@@ -93,7 +93,7 @@ pub fn build(
     }
     let keep = crate::data::stored::MAX_STORED_GUIDE_PAST_DAYS;
     let padding = i64::from(iptv_core::organization::GROUP_EPG_OFFSET_MAX) * 60;
-    let from: UnixTime = crate::clock::wall_unix()
+    let from: UnixTime = crate::guide::clock::wall_unix()
         .saturating_sub(i64::from(keep).saturating_mul(DAY))
         .saturating_sub(padding);
     let started = Instant::now();

@@ -54,7 +54,7 @@ impl DragList {
 
     fn pitch(self) -> f32 {
         if self.column.is_some() {
-            self.size.whole(crate::list_rows::ROW)
+            self.size.whole(crate::guide::list_rows::ROW)
         } else {
             list_rows::pitch(self.size, ROW)().0
         }

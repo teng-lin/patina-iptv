@@ -336,7 +336,7 @@ class Selection(unittest.TestCase):
         self.assertTrue(package_lock_only["helpers_full"])
 
     def test_native_and_ui_changes_keep_both_form_factors(self):
-        for path in ("crates/iptv-app/src/video.rs", "crates/iptv-runtime/src/lib.rs", "hosts/android/app/src/main/Synthetic.kt",
+        for path in ("crates/iptv-app/src/playback/video.rs", "crates/iptv-runtime/src/lib.rs", "hosts/android/app/src/main/Synthetic.kt",
                      "crates/iptv-player-mpv/src/player.rs", "crates/iptv-nav/src/lib.rs"):
             self.assertTrue(v.select([path])["smoke"], path)
 
@@ -353,7 +353,7 @@ class Selection(unittest.TestCase):
         self.assertTrue(plan["host"])
         self.assertTrue(plan["windows"])
         self.assertFalse(any(plan[lane] for lane in ("android", "ios", "smoke", "packages", "windows-package")))
-        self.assertTrue(v.select([*paths, "crates/iptv-app/src/play_bar.rs"])["smoke"])
+        self.assertTrue(v.select([*paths, "crates/iptv-app/src/playback/play_bar.rs"])["smoke"])
 
     def test_leaf_workflow_edits_exercise_their_lane(self):
         for path, selected in v.LANE_WORKFLOWS.items():

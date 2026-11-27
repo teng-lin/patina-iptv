@@ -16,7 +16,7 @@ use nsh_core::element::ImageSrc;
 use nsh_core::prelude::*;
 
 use crate::fonts::{CAPTION, LIST_ITEM, LIST_SECONDARY, MEDIUM, SANS, SECTION, TITLE};
-use crate::list_rows::{self, Mark, ROW};
+use crate::guide::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::{FOCUS_ALPHA, LIST_TEXT, RADIUS, RADIUS_LARGE, RESTING_ALPHA};
 use crate::{Ui, tint};

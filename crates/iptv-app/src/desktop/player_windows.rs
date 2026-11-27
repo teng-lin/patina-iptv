@@ -15,7 +15,7 @@ pub fn mounted(ui: Ui, surface: usize) -> bool {
 pub fn can_open(ui: Ui, channel: usize) -> bool {
     if ui.playback.player_surface != 0
         || !crate::host::PLAYER_POPUPS
-        || crate::multiview::session(ui)
+        || crate::playback::multiview::session(ui)
     {
         return false;
     }
@@ -30,8 +30,8 @@ pub fn can_open(ui: Ui, channel: usize) -> bool {
         return true;
     }
     let count = ui.playback.player_windows.with(|w| w.sessions().len());
-    count < crate::player::SURFACES - 1
-        && crate::multiview::account_limit().is_none_or(|limit| {
+    count < crate::playback::player::SURFACES - 1
+        && crate::playback::multiview::account_limit().is_none_or(|limit| {
             count + usize::from(ui.playback.playing.get().is_some()) < limit as usize
         })
 }
@@ -51,7 +51,7 @@ pub fn open(ui: Ui, channel: usize) {
         return;
     }
     admit_session(ui.playback.player_windows, key, |surface| {
-        crate::player::start_surface(ui, surface, channel)
+        crate::playback::player::start_surface(ui, surface, channel)
     });
 }
 
@@ -103,14 +103,14 @@ fn follow_lists(local: Ui) {
             let next = crate::runtime_owner::schedule();
             let previous = catalog.replace(next.clone());
             if !std::rc::Rc::ptr_eq(&previous, &next) {
-                let kept = crate::lists::keep_in(local, previous);
-                crate::lists::restore(local, kept, next);
+                let kept = crate::guide::lists::keep_in(local, previous);
+                crate::guide::lists::restore(local, kept, next);
                 // These open presentations also contain catalog row indices.
                 local.screens.menu.set(None);
                 local.screens.description.set(None);
                 local.screens.chooser.set(None);
             } else {
-                crate::lists::favorites_changed(local);
+                crate::guide::lists::favorites_changed(local);
             }
         });
     });
@@ -133,7 +133,7 @@ pub fn close(ui: Ui, id: SessionId) {
         .with_untracked(|w| w.sessions().iter().find(|s| s.id == id).map(|s| s.surface));
     if let Some(surface) = surface {
         super::pointer_forget(surface);
-        crate::player::stop_surface(ui, surface);
+        crate::playback::player::stop_surface(ui, surface);
         ui.playback.player_windows.update(|w| w.close(id));
     }
 }
@@ -170,7 +170,7 @@ pub fn bind(ui: Ui) {
 }
 
 pub fn windows(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
-    view().children((1..crate::player::SURFACES).map(move |surface| {
+    view().children((1..crate::playback::player::SURFACES).map(move |surface| {
         when(
             move || mounted(ui, surface),
             move || player_window(ui, surface, back_action),
@@ -271,7 +271,7 @@ fn bind_pip(
     let was_compact = std::cell::Cell::new(false);
     let key_window = window.clone();
     on_key("escape", move |_| {
-        if crate::pip::exit(local, iptv_presentation::pip_window::Exit::BackToApp) {
+        if crate::playback::pip::exit(local, iptv_presentation::pip_window::Exit::BackToApp) {
             return;
         }
         if local.top_overlay().is_some() {
@@ -288,7 +288,7 @@ fn bind_pip(
         key_window.close();
     });
     effect(move || {
-        let compact = crate::pip::in_window(local);
+        let compact = crate::playback::pip::in_window(local);
         if was_compact.replace(compact) == compact {
             return;
         }
@@ -314,7 +314,7 @@ fn bind_pip(
                 if let Some(placement) = saved.take() {
                     window.set_placement(placement);
                 }
-                crate::play_bar::pointer_moved(local);
+                crate::playback::play_bar::pointer_moved(local);
             }
             window.focus();
         });
@@ -370,7 +370,7 @@ fn player_content(
     local.guide.focus.set(parent.guide.focus.get_untracked());
     local.guide.list.set(parent.guide.list.get_untracked());
     follow_clock(parent.guide.focus, local.guide.focus, move || {
-        crate::lists::view(local.guide)
+        crate::guide::lists::view(local.guide)
     });
     local.playback.media.volume.set(initial.volume);
     local.playback.media.delay_ms.set(initial.audio_delay);
@@ -422,9 +422,9 @@ fn player_content(
     let window = nsh_core::element::desktop::current_window();
     super::keep_reachable(window.clone());
     follow_lists(local);
-    crate::lists::bind_categories(local);
+    crate::guide::lists::bind_categories(local);
     let input = stored(Some(crate::input::bind(local)));
-    crate::pip::bind(local);
+    crate::playback::pip::bind(local);
     bind_pip(parent, local, id, window.clone(), back_action);
     let back_window = window.clone();
     effect(move || {
@@ -432,25 +432,25 @@ fn player_content(
             back_window.close();
         }
     });
-    crate::browse_playback::bind(local);
-    crate::play_bar::bind(local);
-    crate::play_bar::pointer_moved(local);
+    crate::playback::browse_playback::bind(local);
+    crate::playback::play_bar::bind(local);
+    crate::playback::play_bar::pointer_moved(local);
     #[cfg(feature = "test-support")]
     if std::env::var_os("PATINA_GUIDE_WINDOW_WALKTHROUGH").is_some() {
-        crate::play_bar::hover(local, true);
+        crate::playback::play_bar::hover(local, true);
         let _reveal = set_timeout(std::time::Duration::from_secs(9), move || {
-            crate::play_bar::pointer_moved(local)
+            crate::playback::play_bar::pointer_moved(local)
         });
         if std::env::var_os("PATINA_GUIDE_PIP_WALKTHROUGH").is_some() {
             let _compact = set_timeout(std::time::Duration::from_secs(2), move || {
-                crate::pip::enter(local);
+                crate::playback::pip::enter(local);
             });
         }
     }
 
     // Keep the controls visible for the first moments of a newly opened player.
     let _show = set_timeout(std::time::Duration::from_millis(250), move || {
-        crate::play_bar::pointer_moved(local)
+        crate::playback::play_bar::pointer_moved(local)
     });
     crate::input::window(view().flex_1(), input)
         .test_id(&format!("auxiliary-player-{}", id.0))
@@ -460,17 +460,17 @@ fn player_content(
         .on_mouse_enter(move |e: &MouseEvent| {
             let at = e.page_position;
             super::pointer_entered(surface, at.x.0, at.y.0);
-            if !crate::pip::in_window(local)
+            if !crate::playback::pip::in_window(local)
                 && !untracked(|| {
                     local.overlay_open(crate::overlays::Overlay::keeps_pointer_from_play_bar)
                 })
             {
                 local.touched();
-                crate::play_bar::pointer_moved(local);
+                crate::playback::play_bar::pointer_moved(local);
             }
         })
         .on_mouse_move(move |event: &MouseEvent| {
-            if !crate::pip::in_window(local) {
+            if !crate::playback::pip::in_window(local) {
                 crate::pointer_moved(local, event);
             }
         })
@@ -478,17 +478,17 @@ fn player_content(
             native(iptv_player_mpv::PIP_VIEW)
                 .prop("surface", move || serde_json::json!(surface))
                 .prop("compact", move || {
-                    serde_json::json!(crate::pip::in_window(local))
+                    serde_json::json!(crate::playback::pip::in_window(local))
                 })
                 .absolute()
                 .inset_0(),
         )
         .child(when(
-            move || crate::pip::in_window(local),
+            move || crate::playback::pip::in_window(local),
             move || super::pip_window::chrome(local),
         ))
         .child(when(
-            move || !crate::pip::in_window(local),
+            move || !crate::playback::pip::in_window(local),
             move || {
                 let window = window.clone();
                 view()
@@ -514,14 +514,14 @@ fn player_content(
                                 }
                             }),
                     )
-                    .child(crate::player_panels::status(local))
-                    .child(crate::player_panels::layer(local))
+                    .child(crate::playback::player_panels::status(local))
+                    .child(crate::playback::player_panels::layer(local))
                     .child(crate::channels_view::layer(local))
                     .child(crate::search_view::layer(local))
                     .child(crate::menu_view::layer(local))
                     .child(crate::organization_view::layer(local))
                     .child(crate::chooser::layer(local, false))
-                    .child(crate::play_bar::layer(local, back_action))
+                    .child(crate::playback::play_bar::layer(local, back_action))
             },
         ))
 }

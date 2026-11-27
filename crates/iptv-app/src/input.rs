@@ -36,10 +36,10 @@ impl Ui {
         // PIN entry continues the choice that opened the prompt. Dismissing
         // the prompt cancels it in `parental_view::abort`.
         if self.top_overlay() != Some(crate::overlays::Overlay::Parental) {
-            crate::external_player::cancel_pending(*self);
+            crate::playback::external_player::cancel_pending(*self);
         }
         self.playback.pending_zap.set(None);
-        crate::browse_playback::activity(*self);
+        crate::playback::browse_playback::activity(*self);
         self.chrome
             .input
             .set(self.chrome.last_press.get_untracked());
@@ -193,10 +193,10 @@ fn surface(ui: &Ui) -> Surface {
         } else {
             InputOwner::Overlay(overlay)
         }
-    } else if crate::multiview::is_open(*ui) {
+    } else if crate::playback::multiview::is_open(*ui) {
         InputOwner::Multiview
     } else if ui.chrome.mode.get() == ViewMode::Fullscreen {
-        if crate::play_bar::captures(*ui) {
+        if crate::playback::play_bar::captures(*ui) {
             InputOwner::PlayBar
         } else {
             match ui.playback.panels.with(|p| p.shown) {
@@ -368,12 +368,12 @@ pub fn context(ui: &Ui) -> Context {
     if let Some(overlay) = ui.top_overlay() {
         return overlay.key_context();
     }
-    if crate::multiview::is_open(*ui) {
+    if crate::playback::multiview::is_open(*ui) {
         return Context::Multiview; // Up/Down/Left/Right, OK, Long OK, Menu
     }
     match (ui.chrome.mode.get(), ui.guide.focus.with(|f| f.pane)) {
         (ViewMode::Fullscreen, _)
-            if crate::play_bar::captures(*ui)
+            if crate::playback::play_bar::captures(*ui)
                 || ui.playback.panels.with(|p| p.captures_input()) =>
         {
             Context::Controls
@@ -483,7 +483,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
             return;
         }
         if ui.playback.player_surface != 0
-            && crate::pip::exit(ui, iptv_presentation::pip_window::Exit::BackToApp)
+            && crate::playback::pip::exit(ui, iptv_presentation::pip_window::Exit::BackToApp)
         {
             return;
         }
@@ -491,13 +491,21 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     });
     // Desktop sound keys (remotes and tablets use the system volume). F11
     // (window full screen; Ctrl+Cmd+F on macOS) is the platform's.
-    on_key("ctrl+m", move |_| crate::media::toggle_mute(ui));
-    on_key("ctrl+up", move |_| crate::media::step_volume(ui, true));
-    on_key("ctrl+down", move |_| crate::media::step_volume(ui, false));
+    on_key("ctrl+m", move |_| crate::playback::media::toggle_mute(ui));
+    on_key("ctrl+up", move |_| {
+        crate::playback::media::step_volume(ui, true)
+    });
+    on_key("ctrl+down", move |_| {
+        crate::playback::media::step_volume(ui, false)
+    });
     // macOS keeps Ctrl+Up/Down for Mission Control: Cmd+Up/Down there.
     if crate::host::MACOS {
-        on_key("cmd+up", move |_| crate::media::step_volume(ui, true));
-        on_key("cmd+down", move |_| crate::media::step_volume(ui, false));
+        on_key("cmd+up", move |_| {
+            crate::playback::media::step_volume(ui, true)
+        });
+        on_key("cmd+down", move |_| {
+            crate::playback::media::step_volume(ui, false)
+        });
     }
     // Spike shortcuts for the view modes.
     if ui.playback.player_surface == 0 {
@@ -513,7 +521,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
 
 fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if ui.playback.player_surface != 0
-        && crate::pip::in_window(ui)
+        && crate::playback::pip::in_window(ui)
         && !matches!(
             key,
             RemoteKey::PlayPause | RemoteKey::Play | RemoteKey::Pause | RemoteKey::Stop
@@ -525,7 +533,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         if key != RemoteKey::Back {
             ui.chrome.exit_deadline.set(None);
         }
-        crate::browse_playback::activity(ui);
+        crate::playback::browse_playback::activity(ui);
     }
     // Menu has no hold: held, its repeats would close and reopen what its
     // press opened (a menu, the play bar).
@@ -641,7 +649,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         let has_long = long_press()
             && nav.keymap.has_long(ctx, key)
             && (crate::remote_editor::overridden(ctx, key)
-                || !crate::player_keys::seeks(&ui, ctx, key));
+                || !crate::playback::player_keys::seeks(&ui, ctx, key));
         let decision = nav.presses.feed(here, key, phase, now, has_long);
         let deadline = (phase == Phase::Down)
             .then(|| nav.presses.long_deadline_ms())
@@ -750,7 +758,7 @@ fn resolve(
             let action = if crate::remote_editor::overridden(ctx, key) {
                 action
             } else {
-                crate::player_keys::remap(&ui, ctx, key, action)
+                crate::playback::player_keys::remap(&ui, ctx, key, action)
             };
             action.map(|a| (key, press, a))
         }
@@ -784,8 +792,8 @@ fn keep_controls(ui: Ui) {
     if ui.playback.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.update_panels(|p, now| p.touch(now));
     }
-    if untracked(|| crate::play_bar::shows(ui)) {
-        crate::play_bar::used(ui);
+    if untracked(|| crate::playback::play_bar::shows(ui)) {
+        crate::playback::play_bar::used(ui);
     }
 }
 
@@ -805,7 +813,7 @@ fn release_controls(ui: Ui) {
         ui.playback.panels.update(|p| p.release_hold());
     }
     if untracked(|| ui.playback.play_bar.try_get()).is_some_and(|b| b.holding()) {
-        crate::play_bar::release_hold(ui);
+        crate::playback::play_bar::release_hold(ui);
     }
 }
 
@@ -814,8 +822,8 @@ fn keep_controls_until(ui: Ui, at: u64) {
     if ui.playback.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.playback.panels.update(|p| p.keep_until(at));
     }
-    if untracked(|| crate::play_bar::shows(ui)) {
-        crate::play_bar::keep_until(ui, at);
+    if untracked(|| crate::playback::play_bar::shows(ui)) {
+        crate::playback::play_bar::keep_until(ui, at);
     }
 }
 
@@ -829,7 +837,7 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
         return;
     }
     if action != Action::Ignore {
-        crate::external_player::cancel_pending(ui);
+        crate::playback::external_player::cancel_pending(ui);
     }
     if player_actions::auxiliary(ui, action) {
         return;
@@ -837,7 +845,7 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
     if !matches!(action, Action::ChannelUp | Action::ChannelDown) {
         ui.playback.pending_zap.set(None);
     }
-    crate::browse_playback::activity(ui);
+    crate::playback::browse_playback::activity(ui);
     // The first key after touch or a pointer starts from a row on screen.
     if ui.chrome.input.get() != Input::Keys {
         if let Some((first, last)) = ui.guide.visible_rows.get() {
@@ -850,8 +858,8 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
     if modal_actions::apply(ui, action) {
         return;
     }
-    if crate::multiview::is_open(ui) {
-        crate::multiview::key(ui, action);
+    if crate::playback::multiview::is_open(ui) {
+        crate::playback::multiview::key(ui, action);
         return;
     }
     if number::apply(ui, action) {
@@ -887,9 +895,12 @@ mod tests {
             directory.path().to_owned(),
         ));
         let ui = crate::runtime_owner::with_runtime(runtime, || {
-            Ui::new(crate::SharedUi::new(), crate::player::Player::new())
+            Ui::new(
+                crate::SharedUi::new(),
+                crate::playback::player::Player::new(),
+            )
         });
-        crate::external_player::cancel_pending(ui);
+        crate::playback::external_player::cancel_pending(ui);
         view()
             .child(text(move || {
                 format!("Request {}", ui.cast.external.request.get())

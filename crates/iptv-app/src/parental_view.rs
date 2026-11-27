@@ -55,7 +55,7 @@ pub fn close(ui: Ui) {
 /// Lifecycle teardown must invalidate an in-flight authorization even when
 /// user dismissal is temporarily disabled during a credential write.
 pub fn abort(ui: Ui) {
-    crate::external_player::cancel_pending(ui);
+    crate::playback::external_player::cancel_pending(ui);
     ui.screens.parental.set(None);
     crate::runtime_owner::runtime().parental_lock();
     dismiss_keyboard();
@@ -170,7 +170,7 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
         crate::Playback::CatchUp { start, offset } => {
             let schedule = crate::runtime_owner::schedule();
             if let Some(pending) =
-                crate::player::PendingArchive::capture(&*schedule, channel, start, offset)
+                crate::playback::player::PendingArchive::capture(&*schedule, channel, start, offset)
             {
                 request(ui, target, move || {
                     if let Some((channel, playback)) =
@@ -259,7 +259,7 @@ fn manage_pick(ui: Ui, index: usize) {
     }
 }
 pub fn enforce(ui: Ui) {
-    crate::external_player::enforce(ui);
+    crate::playback::external_player::enforce(ui);
     let denied = ui.screens.vod.with_untracked(|s| {
         s.cards
             .iter()
@@ -294,21 +294,21 @@ pub fn enforce(ui: Ui) {
                 .as_ref()
                 .is_some_and(|parent| !owner.parental_allowed(&Runtime::vod_target(parent)))
         {
-            crate::player::stop(ui);
+            crate::playback::player::stop(ui);
         }
     }
     if let Some((job, _)) = ui.playback.player.recorded.get_untracked() {
         let target = Target::live(job.request.source, job.request.channel.as_str());
         if !crate::runtime_owner::runtime().parental_allowed(&target) {
-            crate::player::stop(ui);
+            crate::playback::player::stop(ui);
         }
     }
-    for surface in 0..crate::player::SURFACES {
-        if let Some((channel, _)) = crate::player::target(ui, surface)
+    for surface in 0..crate::playback::player::SURFACES {
+        if let Some((channel, _)) = crate::playback::player::target(ui, surface)
             && let Some(target) = live_target(ui, channel)
             && !crate::runtime_owner::runtime().parental_allowed(&target)
         {
-            crate::player::stop_surface(ui, surface);
+            crate::playback::player::stop_surface(ui, surface);
         }
     }
 }

@@ -8,7 +8,7 @@ pub(super) fn bind(ui: Ui) {
     effect(move || {
         // A modal may open and close before the digit timer fires. Cancel on
         // opening so its keys can never resume an abandoned channel number.
-        if ui.top_overlay().is_some() || crate::multiview::is_open(ui) {
+        if ui.top_overlay().is_some() || crate::playback::multiview::is_open(ui) {
             ui.playback.channel_number.update(|entry| {
                 entry.take();
             });
@@ -30,7 +30,8 @@ fn resolve(ui: Ui, number: u32) -> Option<iptv_search::ChannelId> {
     let mut matching = (0..list.len())
         .filter_map(|row| list.channel(row))
         .filter(|&channel| {
-            !schedule.channel_hidden(channel) && crate::lists::number(ui.guide, channel) == number
+            !schedule.channel_hidden(channel)
+                && crate::guide::lists::number(ui.guide, channel) == number
         });
     let channel = matching.next()?;
     if matching.next().is_some() {
@@ -56,7 +57,7 @@ fn commit(ui: Ui, identity: Option<iptv_search::ChannelId>) {
     {
         return;
     }
-    crate::lists::show_channel(ui, channel);
+    crate::guide::lists::show_channel(ui, channel);
     ui.play(channel, crate::Playback::Live);
     ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
@@ -70,7 +71,7 @@ fn arm(ui: Ui) {
         crate::toast::notify(&digits);
     }
     let _task = set_timeout(Duration::from_millis(timeout()), move || {
-        if ui.top_overlay().is_some() || crate::multiview::is_open(ui) {
+        if ui.top_overlay().is_some() || crate::playback::multiview::is_open(ui) {
             ui.playback.channel_number.update(|entry| {
                 entry.take();
             });

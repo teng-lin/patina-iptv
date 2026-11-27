@@ -355,7 +355,7 @@ fn run(ui: Ui, key: &'static str) {
     }
     match key {
         "history.clear" => {
-            crate::player::watch_time::reset(ui);
+            crate::playback::player::watch_time::reset(ui);
             let owner = crate::runtime_owner::runtime();
             let saved = owner.clear_watch_history();
             ui.playback
@@ -364,7 +364,7 @@ fn run(ui: Ui, key: &'static str) {
                 .set(iptv_presentation::playback::ChannelHistory::default());
             crate::tasks::spawn_in_app(async move {
                 if saved.await {
-                    crate::lists::favorites_changed(ui);
+                    crate::guide::lists::favorites_changed(ui);
                     owner.refresh_watch_order();
                 } else {
                     notify(tr("Recent channel changes could not be saved; try again"));
@@ -554,7 +554,7 @@ fn sources_value() -> String {
 
 /// A past time as the guide writes it (`14:05`, `Tue 10 · 14:05`).
 fn time_label(unix: i64) -> String {
-    crate::clock::label(unix, crate::clock::wall_unix())
+    crate::guide::clock::label(unix, crate::guide::clock::wall_unix())
 }
 
 /// The runtime reports publication semantics; the shell chooses the wording

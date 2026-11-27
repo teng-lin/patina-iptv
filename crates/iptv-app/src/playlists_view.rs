@@ -33,7 +33,7 @@ use state::{Act, EditKind, Effect, Item, Key, Layer, Screen};
 pub(crate) use words::masked_link;
 
 use crate::data::{self, Activity, Playlist};
-use crate::list_rows::{self, Mark};
+use crate::guide::list_rows::{self, Mark};
 use crate::scale::Scale;
 use crate::ui_kit::entry::{self, TextSheet};
 use crate::ui_kit::{self, ERROR, ROW_THREE};
@@ -600,7 +600,11 @@ fn row(
     };
     let activity = move |id: SourceId| ui.app.library.activity.with(|a| a.get(&id).cloned());
     let status = move || match (playlist(), item()) {
-        (Some(p), _) => words::status(&p, activity(p.id).as_ref(), crate::clock::wall_unix()),
+        (Some(p), _) => words::status(
+            &p,
+            activity(p.id).as_ref(),
+            crate::guide::clock::wall_unix(),
+        ),
         (None, Some(Item::RefreshAll)) => (words::refreshing(refreshing()), false),
         _ => (String::new(), false),
     };

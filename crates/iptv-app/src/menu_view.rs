@@ -25,7 +25,7 @@ use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, LIST_ITEM, MEDIUM, SANS, SECTION, TITLE};
-use crate::list_rows::{self, Mark, ROW};
+use crate::guide::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::{LIST_TEXT, RADIUS_LARGE};
 use crate::{Ui, ViewMode, channel_name, clock, tint};
@@ -126,7 +126,7 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
 }
 
 fn title(channel: usize, p: crate::guide::Program) -> String {
-    crate::listing_labels::listing(crate::runtime_owner::schedule().listing(channel, p))
+    crate::guide::listing_labels::listing(crate::runtime_owner::schedule().listing(channel, p))
 }
 
 /// The full menu reached from the program header (in full screen, the
@@ -138,7 +138,7 @@ pub fn open(ui: Ui) {
     let (channel, minute) = match (ui.chrome.mode.get(), ui.playback.playing.get()) {
         (ViewMode::Fullscreen, Some(ch)) => (ch, now),
         _ => {
-            let Some(ch) = crate::lists::focused_channel(ui.guide) else {
+            let Some(ch) = crate::guide::lists::focused_channel(ui.guide) else {
                 return; // an empty list
             };
             (ch, ui.guide.focus.with(|f| f.cursor))
@@ -253,7 +253,7 @@ pub fn open_channel(ui: Ui, channel: usize) {
     open_channel_at(
         ui,
         channel,
-        crate::clock::now_minute(),
+        crate::guide::clock::now_minute(),
         current_list(ui),
         false,
     );
@@ -269,7 +269,7 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_co
         channel,
         program_start: program.start,
     };
-    let offset = crate::player::guide_offset(&*schedule, channel);
+    let offset = crate::playback::player::guide_offset(&*schedule, channel);
     let rows = channel_rows(ui, origin, &list, true);
     let mut menu = Menu::new(
         rows,
@@ -341,8 +341,8 @@ pub(crate) fn invalidate_shifted_context(
             .channel_key(channel)
             .and_then(|key| after.find_channel(&key))
             .is_some_and(|next| {
-                crate::player::guide_offset(before, channel)
-                    != crate::player::guide_offset(after, next)
+                crate::playback::player::guide_offset(before, channel)
+                    != crate::playback::player::guide_offset(after, next)
             })
     };
     if ui.screens.menu.with_untracked(|menu| {
@@ -397,7 +397,7 @@ pub fn close(ui: Ui) {
             .with(|list| list.row_of(origin.channel))
             .is_some()
     {
-        crate::lists::tap(ui, origin.channel, origin.program_start);
+        crate::guide::lists::tap(ui, origin.channel, origin.program_start);
     }
 }
 
@@ -822,7 +822,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
                 menu.list
                     .resolve(&*catalog)
                     .map_or_else(String::new, |entry| {
-                        crate::lists::entry_name(entry, &*catalog)
+                        crate::guide::lists::entry_name(entry, &*catalog)
                     })
             }
         }
@@ -927,7 +927,7 @@ fn bind_live_rows(ui: Ui) {
                 origin,
                 &list,
                 opened == program
-                    && offset == crate::player::guide_offset(&*schedule, origin.channel),
+                    && offset == crate::playback::player::guide_offset(&*schedule, origin.channel),
             ),
             Target::Program { .. } => {
                 // The catalog no longer has this occurrence. Leave the
@@ -1030,8 +1030,8 @@ fn description(ui: Ui) -> impl IntoElement {
         .px(px(40.0))
         .pt(px(40.0))
         .pb(move || {
-            px(if crate::play_bar::shows(ui) {
-                crate::play_bar::height(ui) + 8.0
+            px(if crate::playback::play_bar::shows(ui) {
+                crate::playback::play_bar::height(ui) + 8.0
             } else {
                 40.0
             })
@@ -1092,7 +1092,7 @@ fn description(ui: Ui) -> impl IntoElement {
                             text(move || {
                                 program()
                                     .and_then(|(channel, program)| {
-                                        crate::header::program_description(
+                                        crate::guide::header::program_description(
                                             &*crate::runtime_owner::schedule(),
                                             channel,
                                             program,
@@ -1140,8 +1140,8 @@ pub fn open_at(ui: Ui, channel: usize) {
     ui.touched();
     batch(|| {
         let minute = ui.guide.focus.with_untracked(|focus| focus.cursor);
-        crate::lists::tap(ui, channel, minute);
-        crate::browse_playback::hold(ui);
+        crate::guide::lists::tap(ui, channel, minute);
+        crate::playback::browse_playback::hold(ui);
         let minute = ui.guide.focus.with_untracked(|focus| focus.cursor);
         open_channel_at(ui, channel, minute, current_list(ui), false);
     });
@@ -1151,8 +1151,8 @@ pub fn open_at(ui: Ui, channel: usize) {
 /// a touch hold, or a right-click. Keep the focused program and hold
 /// autoplay while opening the same compact channel actions on every device.
 pub fn open_timeline_context(ui: Ui) {
-    crate::browse_playback::hold(ui);
-    if let Some(channel) = crate::lists::focused_channel(ui.guide) {
+    crate::playback::browse_playback::hold(ui);
+    if let Some(channel) = crate::guide::lists::focused_channel(ui.guide) {
         let minute = ui.guide.focus.with_untracked(|focus| focus.cursor);
         open_channel_at(ui, channel, minute, current_list(ui), false);
     } else {
@@ -1167,7 +1167,7 @@ mod tests {
     #[test]
     fn catch_up_is_available_only_on_the_primary_surface() {
         assert!(implemented(MenuItem::StartFromBeginning, 0));
-        for surface in 1..crate::player::SURFACES {
+        for surface in 1..crate::playback::player::SURFACES {
             assert!(!implemented(MenuItem::StartFromBeginning, surface));
             assert!(implemented(MenuItem::Description, surface));
         }

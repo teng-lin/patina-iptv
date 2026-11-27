@@ -3,8 +3,8 @@ use crate::input::dismiss_keyboard;
 use crate::runtime::model::{InspectionControl, ProbeRequest, ProbeTarget};
 use crate::{
     Ui,
+    guide::list_rows::{self, Mark, ROW_TWO},
     i18n::tr,
-    list_rows::{self, Mark, ROW_TWO},
     scale::Scale,
     ui_kit,
 };
@@ -57,7 +57,7 @@ fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
 }
 
 pub fn open(ui: Ui, source: SourceId) {
-    let from = crate::clock::wall_unix();
+    let from = crate::guide::clock::wall_unix();
     let screen = Screen::new(
         source,
         TimeWindow {
@@ -487,8 +487,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     state(ui, |s| {
                         format!(
                             "{} — {}",
-                            crate::clock::label(s.window.from, crate::clock::wall_unix()),
-                            crate::clock::label(s.window.to, crate::clock::wall_unix())
+                            crate::guide::clock::label(
+                                s.window.from,
+                                crate::guide::clock::wall_unix()
+                            ),
+                            crate::guide::clock::label(
+                                s.window.to,
+                                crate::guide::clock::wall_unix()
+                            )
                         )
                     })
                     .unwrap_or_default()
@@ -596,13 +602,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                         s.samples.get(at.index()).map(|p| {
                                             format!(
                                                 "{} — {} · {}",
-                                                crate::clock::label(
+                                                crate::guide::clock::label(
                                                     p.start,
-                                                    crate::clock::wall_unix()
+                                                    crate::guide::clock::wall_unix()
                                                 ),
-                                                crate::clock::label(
+                                                crate::guide::clock::label(
                                                     p.stop,
-                                                    crate::clock::wall_unix()
+                                                    crate::guide::clock::wall_unix()
                                                 ),
                                                 p.title
                                             )

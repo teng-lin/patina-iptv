@@ -73,7 +73,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("device.rs", "ACCESSIBILITY"), // Reactive handle of the host's accessibility report.
     ("fonts.rs", "FITTED"),         // Font measurement cache.
     ("fonts.rs", "FONTS_IN"),       // Font registration flag.
-    ("header.rs", "ON"),            // Debug overlay environment flag cache.
+    ("guide/header.rs", "ON"),      // Debug overlay environment flag cache.
     ("i18n.rs", "SYSTEM"),          // System locale cache.
     ("i18n.rs", "WORDING_SETTINGS"), // cfg(test)-only scoped wording preferences.
     ("i18n/pseudo.rs", "ENABLED"),  // test-support-only pseudolocale environment flag.
@@ -84,26 +84,26 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("runtime_owner.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
     ("host.rs", "TUI_MODE"), // Host flag: TUI backend bypasses StickyCells trackball wrapper.
     ("lib.rs", "LEAVE"),     // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
-    ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
+    ("guide/lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
     ("host/native/platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.
     ("host/web.rs", "FILES"), // Restored browser files are shared across app owners.
     ("host/web.rs", "HOST_STOP"), // The root owner's weak handle, as natively.
     ("host/native/recording_host/android.rs", "HOST"), // JNI VM/class handle for the recording host.
-    ("seek.rs", "PRESSES"),                            // Key gesture state.
-    ("seek.rs", "HOLD"),                               // Held-key gesture state.
+    ("playback/seek.rs", "PRESSES"),                   // Key gesture state.
+    ("playback/seek.rs", "HOLD"),                      // Held-key gesture state.
     ("settings.rs", "REVISION"),                       // Reactive settings subscription handle.
-    ("pip.rs", "PIP_SUPPORTED"), // The host's picture-in-picture report, for the settings offer.
-    ("settings_view.rs", "PAGES"), // Immutable screen definitions.
-    ("settings_view.rs", "LAST"), // Last selected settings tab.
-    ("toast.rs", "NOTICE"),      // Toast signal handle.
+    ("playback/pip.rs", "PIP_SUPPORTED"), // The host's picture-in-picture report, for the settings offer.
+    ("settings_view.rs", "PAGES"),        // Immutable screen definitions.
+    ("settings_view.rs", "LAST"),         // Last selected settings tab.
+    ("toast.rs", "NOTICE"),               // Toast signal handle.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
     ("startup.rs", "MARKED"),                                  // Startup phase instrumentation.
     ("startup.rs", "FALLBACK"),                                // Startup clock instrumentation.
-    ("clock.rs", "SHOWN"),                                     // Visible guide clock origin.
-    ("video.rs", "OPENS"),   // Native player open instrumentation.
-    ("video.rs", "SOURCED"), // Native player source projection.
+    ("guide/clock.rs", "SHOWN"),                               // Visible guide clock origin.
+    ("playback/video.rs", "OPENS"), // Native player open instrumentation.
+    ("playback/video.rs", "SOURCED"), // Native player source projection.
     // Synthetic receiver for headless Cast journeys.
     ("host/native.rs", "TEST_CAST"),
     ("host/native.rs", "TEST_NATIVE_CAST"), // Synthetic native sender port in isolated test processes.

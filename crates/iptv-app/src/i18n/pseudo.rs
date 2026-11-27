@@ -12,20 +12,23 @@ pub(super) fn fixed(source: &str) -> Option<&'static str> {
     static FIXED: OnceLock<HashMap<&'static str, String>> = OnceLock::new();
     FIXED
         .get_or_init(|| {
-            include_str!("../../../iptv-presentation/src/i18n/messages.tsv")
-                .lines()
-                .filter_map(|line| {
-                    let source = line.split('\t').next()?;
-                    // Formatted/plural messages retain their real locale rules.
-                    // Separate Russian/CJK tests exercise those without altering
-                    // placeholders or expanding provider values.
-                    if source.contains(['{', '}']) {
-                        return None;
-                    }
-                    let accented: String = source.chars().map(accent).collect();
-                    Some((source, format!("⟦{accented} {accented}⟧")))
-                })
-                .collect()
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../iptv-presentation/src/i18n/messages.tsv"
+            ))
+            .lines()
+            .filter_map(|line| {
+                let source = line.split('\t').next()?;
+                // Formatted/plural messages retain their real locale rules.
+                // Separate Russian/CJK tests exercise those without altering
+                // placeholders or expanding provider values.
+                if source.contains(['{', '}']) {
+                    return None;
+                }
+                let accented: String = source.chars().map(accent).collect();
+                Some((source, format!("⟦{accented} {accented}⟧")))
+            })
+            .collect()
         })
         .get(source)
         .map(String::as_str)

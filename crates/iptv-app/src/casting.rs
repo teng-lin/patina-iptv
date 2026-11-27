@@ -23,7 +23,7 @@ pub(crate) struct CastUi {
     pub(crate) remote: Memo<bool>,
     pub(crate) prompt: Memo<Option<Prompt>>,
     pub(crate) pairing: Stored<Option<iptv_runtime::cast::PairingRequest>>,
-    pub(crate) external: crate::external_player::ExternalUi,
+    pub(crate) external: crate::playback::external_player::ExternalUi,
 }
 
 impl CastUi {
@@ -38,7 +38,7 @@ impl CastUi {
             remote: computed(move || state.with(|state| state.remote)),
             prompt: computed(move || state.with(State::prompt)),
             pairing: stored(None),
-            external: crate::external_player::ExternalUi::new(),
+            external: crate::playback::external_player::ExternalUi::new(),
         }
     }
 }
@@ -97,8 +97,8 @@ pub(super) fn available(ui: Ui) -> bool {
     runtime().cast_available()
         && crate::device::host().form_factor != FormFactor::Tv
         && ui.playback.player_surface == 0
-        && !crate::multiview::is_open(ui)
-        && !crate::pip::in_window(ui)
+        && !crate::playback::multiview::is_open(ui)
+        && !crate::playback::pip::in_window(ui)
         && (ui.cast.remote.get()
             || (ui.playback.playing.get().is_some()
                 && ui.playback.playback.get() == Playback::Live))
@@ -218,7 +218,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let resolution = epg.resolve(
         local,
         None,
-        crate::runtime::time::playback_clock(crate::clock::wall_unix(), None),
+        crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
     let context = epg.shared_playback();
     let Some(target) = crate::parental_view::live_target(ui, channel) else {
@@ -338,7 +338,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             ui.playback.paused.set(true);
             let prepared = owner.load_cast(ticket, prepared, grant).await?;
             check().await?;
-            crate::player::stop_for_handoff(ui, &target);
+            crate::playback::player::stop_for_handoff(ui, &target);
             transferred = true;
             retired = true;
             owner.retire_viewing_inputs(0).await;

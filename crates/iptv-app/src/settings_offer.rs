@@ -281,7 +281,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
     }
     // No enabled playlist can supply movies or series: their settings go
     // as the rail's Movies and Shows do (`lists::live_only`).
-    if key.starts_with("vod.") && crate::lists::live_only() {
+    if key.starts_with("vod.") && crate::guide::lists::live_only() {
         return Offer::Hidden;
     }
     // Sound follows the selected tile: not on a phone, nor where multiview
@@ -296,7 +296,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
         return Offer::Hidden;
     }
     if matches!(key, "guide.autoplay" | "guide.switch_delay") {
-        return if !crate::browse_playback::autoplay_supported(host) {
+        return if !crate::playback::browse_playback::autoplay_supported(host) {
             Offer::Hidden
         } else if crate::device::handheld(host.form_factor) {
             Offer::Active
@@ -305,7 +305,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
         };
     }
     if key == keys::SWIPE_TO_ZAP.as_str() {
-        return if crate::touch_zap::swipe_offered() {
+        return if crate::playback::touch_zap::swipe_offered() {
             Offer::Active
         } else {
             Offer::Hidden
@@ -314,7 +314,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
         || (key == keys::LONG_PRESS.as_str() && crate::input::long_press())
-        || (key == keys::PIP_ON_LEAVE.as_str() && crate::pip::offers_on_leave(host))
+        || (key == keys::PIP_ON_LEAVE.as_str() && crate::playback::pip::offers_on_leave(host))
     {
         Offer::Active
     } else {
@@ -388,7 +388,7 @@ mod tests {
         for device in devices() {
             assert_eq!(offer(device, "player.pip_on_leave"), Offer::Hidden);
         }
-        crate::pip::set_supported(true);
+        crate::playback::pip::set_supported(true);
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
@@ -472,7 +472,7 @@ mod tests {
                 "{device:?}"
             );
         }
-        crate::pip::set_supported(false);
+        crate::playback::pip::set_supported(false);
         assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);
     }
 

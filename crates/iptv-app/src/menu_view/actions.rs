@@ -132,7 +132,7 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
             return;
         };
         let schedule = crate::runtime_owner::schedule();
-        if crate::player::guide_offset(&*schedule, origin.channel) != offset
+        if crate::playback::player::guide_offset(&*schedule, origin.channel) != offset
             || origin_program(&*schedule, origin) != program
             || !crate::recordings_view::perform_channel_action(ui, origin, item)
         {
@@ -212,12 +212,12 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
                 crate::desktop::player_windows::open(ui, channel);
             }
         }
-        MenuItem::ManageFavorites => crate::fav_editor::open(ui, &list, channel),
+        MenuItem::ManageFavorites => crate::guide::fav_editor::open(ui, &list, channel),
         MenuItem::Search => crate::search_view::open(ui),
         MenuItem::Settings => crate::settings_view::open(ui),
         MenuItem::ToggleFavorite => {
             if let Some(channel) = channel {
-                crate::favorites::toggle(ui, channel);
+                crate::guide::favorites::toggle(ui, channel);
             }
         }
         MenuItem::HideChannel => hide_channel(ui, channel),
@@ -291,11 +291,17 @@ fn perform_program(ui: Ui, item: MenuItem, origin: Origin, list: ListId, playing
             let program = origin_program(&*schedule, origin);
             if program.start != origin.program_start
                 || !program.can_replay(now, schedule.catchup_days(origin.channel))
-                || !crate::player::allow_guide_channel(origin.channel)
+                || !crate::playback::player::allow_guide_channel(origin.channel)
             {
                 return;
             }
-            crate::archive_playback::select(ui, list, origin.channel, program, playing_context);
+            crate::playback::archive_playback::select(
+                ui,
+                list,
+                origin.channel,
+                program,
+                playing_context,
+            );
         }
         _ => {}
     }
@@ -319,7 +325,7 @@ fn open_child_program(
     };
     let schedule = crate::runtime_owner::schedule();
     if origin_program(&*schedule, origin) != *program
-        || crate::player::guide_offset(&*schedule, origin.channel) != *offset
+        || crate::playback::player::guide_offset(&*schedule, origin.channel) != *offset
     {
         open_channel_at(
             ui,

@@ -153,7 +153,7 @@ impl Overlay {
                 ui.screens.menu.with(Option::is_some) && !crate::menu_view::playlist_popup_open(ui)
             }
             Overlay::Search => crate::search_view::is_open(ui),
-            Overlay::ChannelPicker => crate::multiview_picker::is_open(ui),
+            Overlay::ChannelPicker => crate::playback::multiview_picker::is_open(ui),
             Overlay::ChannelList => crate::channels_view::is_open(ui),
         }
     }

@@ -40,7 +40,7 @@ pub fn bind(ui: Ui) {
         untracked(|| {
             ui.app.theme.set(theme);
             if ui.guide.focus.with_untracked(|f| f.visible) != span {
-                let view = crate::lists::view(ui.guide);
+                let view = crate::guide::lists::view(ui.guide);
                 ui.guide.focus.update(|f| f.set_visible(span, &view));
             }
             if ui.playback.panels.with(|p| p.timeouts) != timeouts {

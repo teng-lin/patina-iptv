@@ -32,13 +32,13 @@ pub fn choice(ui: Ui) -> bool {
 /// Whether `ui`'s own player (the main one, or a window's) is the heard
 /// one, its own Mute aside.
 pub fn heard(ui: Ui) -> bool {
-    crate::multiview::audible(ui, ui.playback.player_surface)
+    crate::playback::multiview::audible(ui, ui.playback.player_surface)
 }
 
 /// Whether `ui`'s own player sounds: heard and not muted by its Mute.
 pub fn sounding(ui: Ui) -> bool {
     match ui.playback.player_surface {
-        0 => heard(ui) && !crate::media::muted(ui.playback),
+        0 => heard(ui) && !crate::playback::media::muted(ui.playback),
         surface => ui.playback.player_windows.with(|w| {
             w.on_surface(surface)
                 .is_some_and(|s| w.audible() == Some(s.id) && !s.volume.muted)
