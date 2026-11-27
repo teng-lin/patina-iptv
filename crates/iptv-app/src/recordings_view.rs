@@ -457,11 +457,11 @@ fn start(ui: Ui, mut request: Request) {
         } else {
             None
         };
-        let error = result
-            .as_ref()
-            .err()
-            .map(|error| error_message(error).unwrap_or("Recording action failed"))
-            .filter(|reason| iptv_presentation::i18n::is_cataloged(reason));
+        let error = result.as_ref().err().map(|error| {
+            error_message(error)
+                .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
+                .unwrap_or("Recording action failed")
+        });
         ui.recordings.update(|s| s.finish_start(jobs, error));
         reload(ui);
     });

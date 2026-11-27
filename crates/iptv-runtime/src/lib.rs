@@ -316,7 +316,9 @@ impl Runtime {
     /// Runs `task` on the host's local executor. The task holds its owner
     /// itself: it names no other one, whichever owner the host polls it under.
     pub(crate) fn spawn(&self, task: impl std::future::Future<Output = ()> + 'static) {
-        let _ = self.tasks.try_spawn(Box::pin(task));
+        if !self.tasks.try_spawn(Box::pin(task)) {
+            log::error!("runtime task rejected because no task host is available");
+        }
     }
 
     pub(crate) fn has_tasks(&self) -> bool {

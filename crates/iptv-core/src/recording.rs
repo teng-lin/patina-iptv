@@ -19,10 +19,6 @@ pub fn estimated_bytes(seconds: i64) -> u64 {
         .min(MAX_BYTES)
 }
 
-/// Checks the storage a capture of `seconds` needs before it starts.
-/// `library`: what the recordings library holds and reserves now (see
-/// [`LIBRARY_BYTES`]); `free`: the free space where it writes, `None` where
-/// the host cannot tell (then only the write itself can fail).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpaceRefusal {
     LibraryFull,
@@ -37,6 +33,10 @@ pub enum RequestRefusal {
     AlreadyEnded,
 }
 
+/// Checks the storage a capture of `seconds` needs before it starts.
+/// `library`: what the recordings library holds and reserves now (see
+/// [`LIBRARY_BYTES`]); `free`: the free space where it writes, `None` where
+/// the host cannot tell (then only the write itself can fail).
 pub fn check_space(seconds: i64, library: u64, free: Option<u64>) -> Result<(), SpaceRefusal> {
     if library.saturating_add(MAX_BYTES) > LIBRARY_BYTES {
         return Err(SpaceRefusal::LibraryFull);

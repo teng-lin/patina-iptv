@@ -147,9 +147,13 @@ pub(super) async fn after_commit(
         verification_pending: true,
         operation: id.clone(),
     };
-    // The durable mutation has already committed. If there is no host
-    // executor, leave the effective publication pending for later recovery.
+    // The durable mutation has already committed. Without an executor it
+    // cannot be actively pending; keep an evictable receipt that callers can
+    // verify when they have a host.
     if !owner.has_tasks() {
+        if let Some(operation) = owner.repairs.borrow_mut().operations.get_mut(&id) {
+            operation.phase = OperationPhase::ReadyToVerify;
+        }
         return outcome;
     }
     let owner = owner.clone();

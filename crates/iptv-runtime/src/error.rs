@@ -214,14 +214,7 @@ impl std::fmt::Display for Error {
         }
     }
 }
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.0 {
-            ErrorKind::Storage(error) => Some(error),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for Error {}
 impl From<iptv_store_sqlite::StoreError> for Error {
     fn from(error: iptv_store_sqlite::StoreError) -> Self {
         let kind = match error {
@@ -263,6 +256,7 @@ mod tests {
         ));
         assert_eq!(error.to_string(), "storage operation failed");
         assert!(!format!("{error:?}").contains("generated-private-detail"));
+        assert!(std::error::Error::source(&error).is_none());
     }
 
     #[test]
