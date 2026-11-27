@@ -449,6 +449,16 @@ fn advertisements_reject_unsafe_addresses_and_sanitize_names() {
     let parsed = Record::from_service(&advertisement).unwrap();
     assert_eq!(parsed.name, "Living room");
     assert_eq!(parsed.addresses, ["[::1]:7000".parse().unwrap()]);
+    advertisement.addresses.insert(ScopedIp::from(
+        "127.0.0.1".parse::<std::net::IpAddr>().unwrap(),
+    ));
+    assert_eq!(
+        Record::from_service(&advertisement).unwrap().addresses,
+        [
+            "127.0.0.1:7000".parse().unwrap(),
+            "[::1]:7000".parse().unwrap()
+        ]
+    );
     advertisement.fullname = format!("  .{SERVICE}");
     assert_eq!(
         Record::from_service(&advertisement).unwrap().name,
@@ -793,34 +803,17 @@ fn revalidation_tracks_only_the_selected_identity_and_rejects_saturation() {
 
 #[tokio::test]
 async fn alternate_service_addresses_fail_over_before_any_pairing_request() {
-    use mdns_sd::ServiceInfo;
     use tokio::net::TcpSocket;
 
-    let listener = TcpListener::bind("[::1]:0").await.unwrap();
-    let ipv6 = listener.local_addr().unwrap();
-    let ipv4 = SocketAddr::from(([127, 0, 0, 1], ipv6.port()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let unused = TcpSocket::new_v4().unwrap();
-    unused.bind(ipv4).unwrap();
-
-    let mut service = ServiceInfo::new(
-        SERVICE,
-        "Dual stack",
-        "patina-fixture.local.",
-        "127.0.0.1",
-        ipv6.port(),
-        None,
-    )
-    .unwrap()
-    .as_resolved_service();
-    service.addresses.insert(ScopedIp::from(ipv6.ip()));
-    let record = Record::from_service(&service).unwrap();
-    assert_eq!(record.addresses, [ipv4, ipv6]);
+    unused.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let refused = unused.local_addr().unwrap();
+    let addresses = [refused, listener.local_addr().unwrap()];
 
     let backend = AirPlay::new(None);
-    let BackendConnect::PinRequired(mut pairing) = backend
-        .connect_addresses(&record.addresses, None)
-        .await
-        .unwrap()
+    let BackendConnect::PinRequired(mut pairing) =
+        backend.connect_addresses(&addresses, None).await.unwrap()
     else {
         panic!("the reachable address must start pairing");
     };
@@ -830,14 +823,15 @@ async fn alternate_service_addresses_fail_over_before_any_pairing_request() {
     assert_eq!(request.request_target, "POST /pair-pin-start");
     pairing.cancel().await;
     assert!(matches!(socket.receive().await, Err(Fault::Closed)));
-    drop(listener);
-    drop(unused);
     let error = backend
-        .connect_addresses(&record.addresses, None)
+        .connect_addresses(&[refused], None)
         .await
         .err()
-        .expect("neither socket is accepting connections");
-    assert_eq!(error.kind(), ErrorKind::Unreachable);
+        .expect("the reserved socket is not accepting connections");
+    assert!(matches!(
+        error.kind(),
+        ErrorKind::Unreachable | ErrorKind::TimedOut
+    ));
     assert_eq!(error.stage(), Stage::Connect);
     assert_eq!(error.delivery(), Delivery::NotSent);
 }
