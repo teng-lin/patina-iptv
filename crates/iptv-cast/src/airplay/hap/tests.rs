@@ -28,6 +28,23 @@ impl Accessory {
         self.listener.local_addr().unwrap()
     }
 
+    pub(in crate::airplay) fn saved_pairing(&self) -> (Vec<u8>, [u8; 32], Vec<u8>) {
+        let seed = [6; 32];
+        let client = key_from_seed(seed[0]);
+        let id = b"synthetic-previous-pairing".to_vec();
+        let keys = StoredKeys {
+            seed: Zeroizing::new(seed),
+            peer_key: self.signing_key.public_key().as_ref().try_into().unwrap(),
+            peer_id: self.peer_id.to_vec(),
+            client_id: id.clone(),
+        };
+        (
+            keys.encode(),
+            client.public_key().as_ref().try_into().unwrap(),
+            id,
+        )
+    }
+
     pub(in crate::airplay) async fn accept(&self) -> Wire {
         let (stream, _) = self.listener.accept().await.unwrap();
         Wire::new(stream)

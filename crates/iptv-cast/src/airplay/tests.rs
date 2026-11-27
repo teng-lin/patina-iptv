@@ -534,8 +534,14 @@ fn pairing_failures_are_typed_without_peer_details() {
 }
 
 #[tokio::test]
-async fn event_transport_loss_preserves_last_observation_but_retires_session() {
-    timeout(Duration::from_secs(10), async {
+async fn transport_loss_preserves_last_observation_and_retires_session() {
+    for lose_control in [false, true] {
+        exercise_transport_loss(lose_control).await;
+    }
+}
+
+async fn exercise_transport_loss(lose_control: bool) {
+    timeout(Duration::from_secs(10), async move {
         let accessory = Accessory::bind().await;
         let address = accessory.address();
         let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -552,7 +558,11 @@ async fn event_transport_loss_preserves_last_observation_but_retires_session() {
                 &shared,
                 upstream,
                 port,
-                ReceiverEnding::LoseEventTransport(gate),
+                if lose_control {
+                    ReceiverEnding::LoseControlTransport(gate)
+                } else {
+                    ReceiverEnding::LoseEventTransport(gate)
+                },
             )
             .await;
         });
@@ -582,4 +592,91 @@ async fn event_transport_loss_preserves_last_observation_but_retires_session() {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn setup_failures_distinguish_rtsp_correlation_and_missing_timing() {
+    use super::video::tests::{BaseSetupFailure, fail_base_setup};
+
+    // The two timeout cases deliberately exercise the actual receiver deadline,
+    // with and without a completed UDP exchange.
+    let mut cases = tokio::task::JoinSet::new();
+    for (failure, expect_kind, expect_timing) in [
+        (BaseSetupFailure::WrongSequence, ErrorKind::Protocol, false),
+        (
+            BaseSetupFailure::Timeout {
+                timing_worked: false,
+            },
+            ErrorKind::TimedOut,
+            true,
+        ),
+        (
+            BaseSetupFailure::Timeout {
+                timing_worked: true,
+            },
+            ErrorKind::TimedOut,
+            false,
+        ),
+    ] {
+        cases.spawn(async move {
+            timeout(Duration::from_secs(15), async move {
+                let accessory = Accessory::bind().await;
+                let address = accessory.address();
+                let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+                let timing = socket.local_addr().unwrap();
+                drop(socket);
+                let (credential, public, id) = accessory.saved_pairing();
+                let server = tokio::spawn(async move {
+                    let (control, _) = accessory.verify(&public, &id).await.unwrap();
+                    fail_base_setup(control, timing.port(), failure).await;
+                });
+                let store = TestStore(Arc::new(Mutex::new(Some(Credential::from_bytes(credential)))));
+                let cast = client(address, timing.port(), store);
+                let route = discovered(&cast).await;
+                let Connect::Ready(connection) = cast.connect(&route).await.unwrap() else { panic!() };
+                let session = connection.load(Media::live("http://127.0.0.1/generated.m3u8").unwrap()).unwrap();
+                let mut updates = session.subscribe();
+                let mut outcome = None;
+                while let Some(snapshot) = updates.next().await {
+                    if let Playback::Failed(error) = snapshot.playback() {
+                        outcome = Some(error.clone());
+                    }
+                }
+                let error = outcome.expect("setup failed before queue dispatch");
+                assert_eq!(error.kind(), expect_kind);
+                assert_eq!(error.stage(), Stage::Load);
+                assert_eq!(error.delivery(), Delivery::NotSent);
+                assert_eq!(
+                    matches!(error.diagnostic(), Some(Diagnostic::TimingListener { local_addr }) if *local_addr == timing),
+                    expect_timing,
+                );
+                assert_eq!(session.stop().await.unwrap(), StopOutcome::CancelledBeforeSend);
+                server.await.unwrap();
+            }).await.unwrap();
+        });
+    }
+    while let Some(case) = cases.join_next().await {
+        case.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn corrupt_saved_credential_does_not_fall_back_to_an_unrequested_pairing() {
+    let accessory = Accessory::bind().await;
+    let address = accessory.address();
+    let storage = Some(Credential::from_bytes(vec![1; 16]));
+    let cast = client(address, 0, TestStore(Arc::new(Mutex::new(storage))));
+    let route = discovered(&cast).await;
+    let error = cast
+        .connect(&route)
+        .await
+        .err()
+        .expect("invalid stored material");
+    assert_eq!(error.kind(), ErrorKind::Storage);
+    assert_eq!(error.delivery(), Delivery::NotSent);
+    assert!(
+        timeout(Duration::from_millis(30), accessory.accept())
+            .await
+            .is_err()
+    );
 }

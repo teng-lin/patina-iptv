@@ -11,6 +11,7 @@ pub(in crate::airplay) enum ReceiverEnding {
     RefuseLoadAfterRequest,
     AwaitTransportClose,
     LoseEventTransport(oneshot::Receiver<()>),
+    LoseControlTransport(oneshot::Receiver<()>),
     PlayToEnd(oneshot::Receiver<()>),
 }
 
@@ -170,6 +171,14 @@ pub(in crate::airplay) async fn serve(
             gate.await.unwrap();
             drop(events);
             assert!(matches!(control.receive().await, Err(Fault::Closed)));
+            return;
+        }
+        ReceiverEnding::LoseControlTransport(gate) => {
+            gate.await.unwrap();
+            let feedback = control.receive().await.unwrap();
+            assert_eq!(feedback.request_target, "POST /feedback");
+            drop(control);
+            assert!(matches!(events.receive().await, Err(Fault::Closed)));
             return;
         }
     }
@@ -334,4 +343,60 @@ fn plist_rejects_expansion_before_materializing_an_aggregate_value() {
     }
     let valid = pack(&Value::Data(vec![7; 32 * 1024])).unwrap();
     assert_eq!(unpack(&valid).unwrap().as_data().unwrap().len(), 32 * 1024);
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::airplay) enum BaseSetupFailure {
+    WrongSequence,
+    Timeout { timing_worked: bool },
+}
+
+pub(in crate::airplay) async fn fail_base_setup(
+    mut control: Wire,
+    expected_timing: u16,
+    failure: BaseSetupFailure,
+) {
+    let mut setup = control.receive().await.unwrap();
+    let address = SocketAddr::from(([127, 0, 0, 1], expected_timing));
+    let payload = unpack(&setup.body).unwrap();
+    assert_eq!(
+        find(&payload, "timingPort").unwrap().as_unsigned_integer(),
+        Some(expected_timing.into()),
+    );
+    match failure {
+        BaseSetupFailure::WrongSequence => {
+            setup.sequence = Some(setup.sequence.unwrap() + 1);
+            control.respond(&setup, 200, &[]).await;
+        }
+        BaseSetupFailure::Timeout {
+            timing_worked: true,
+        } => {
+            let timing = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+            let mut request = [0; 32];
+            request[0] = 0x80;
+            request[1] = 0xd2;
+            timing.send_to(&request, address).await.unwrap();
+            let mut reply = [0; 32];
+            let (_, sender) = timing.recv_from(&mut reply).await.unwrap();
+            assert_eq!(sender, address);
+            assert_eq!(reply[1], 0xd3);
+        }
+        BaseSetupFailure::Timeout {
+            timing_worked: false,
+        } => {}
+    }
+    assert!(matches!(control.receive().await, Err(Fault::Closed)));
+}
+
+#[test]
+fn udp_listener_reuses_tcp_scope_for_link_local_ipv6() {
+    let local = "[fe80::2]:12345".parse().unwrap();
+    let peer = "[fe80::1%9]:7000".parse().unwrap();
+    let timing = timing_address(local, peer, NonZeroU16::new(47475));
+    assert_eq!(timing, "[fe80::2%9]:47475".parse().unwrap());
+    let global = "[2001:db8::1]:12345".parse().unwrap();
+    assert_eq!(
+        timing_address(global, peer, None),
+        "[2001:db8::1]:0".parse().unwrap(),
+    );
 }

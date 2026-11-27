@@ -484,6 +484,28 @@ pub(super) struct Video {
     tasks: Vec<Task>,
 }
 
+fn timing_address(
+    mut local: SocketAddr,
+    remote: SocketAddr,
+    port: Option<NonZeroU16>,
+) -> SocketAddr {
+    // Accepted TCP sockets do not always carry a scope on their local
+    // address, but a link-local UDP bind requires one.
+    if let (SocketAddr::V6(local_v6), SocketAddr::V6(remote_v6)) = (local, remote)
+        && local_v6.ip().is_unicast_link_local()
+        && local_v6.scope_id() == 0
+    {
+        local = SocketAddr::V6(SocketAddrV6::new(
+            *local_v6.ip(),
+            0,
+            0,
+            remote_v6.scope_id(),
+        ));
+    }
+    local.set_port(port.map(NonZeroU16::get).unwrap_or(0));
+    local
+}
+
 impl Video {
     pub(super) fn new(verified: Verified) -> Result<Self> {
         let addresses = verified.wire.addresses()?;
@@ -510,21 +532,8 @@ impl Video {
         timing_port: Option<NonZeroU16>,
         url: &str,
     ) -> Result<Queue> {
-        let (mut local, remote) = self.addresses;
-        // Accepted TCP sockets do not always carry a scope on their local
-        // address, but a link-local UDP bind requires one.
-        if let (SocketAddr::V6(local_v6), SocketAddr::V6(remote_v6)) = (local, remote)
-            && local_v6.ip().is_unicast_link_local()
-            && local_v6.scope_id() == 0
-        {
-            local = SocketAddr::V6(SocketAddrV6::new(
-                *local_v6.ip(),
-                0,
-                0,
-                remote_v6.scope_id(),
-            ));
-        }
-        local.set_port(timing_port.map(NonZeroU16::get).unwrap_or(0));
+        let (local, remote) = self.addresses;
+        let local = timing_address(local, remote, timing_port);
         let socket = UdpSocket::bind(local)
             .await
             .map_err(|_| VideoFault::Timing {
