@@ -2,37 +2,118 @@
 use std::time::Duration;
 
 use iptv_nav::Action;
-use iptv_runtime::app_updates::{
-    github::{CheckError, ReleaseStatus},
-    state::{Frequency, Snapshot, Trigger},
-};
 use nsh_core::prelude::*;
 
 use crate::settings_view::updates as facade;
 use crate::{
     Ui, ViewMode,
+    host::updates::{
+        self as host, CheckError, Frequency, Metadata, ReleaseStatus, Service, Snapshot, Trigger,
+        UpdatePrompts,
+    },
     i18n::{tr, trf},
     scale::Scale,
     ui_kit,
 };
 
-fn now() -> i64 {
-    crate::host::since_epoch().map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64)
+#[derive(Clone, Copy)]
+pub(crate) struct UpdateUi {
+    revision: Signal<u64>,
+    ready: Signal<bool>,
+    install_busy: Signal<bool>,
+    cancel_requested: Signal<bool>,
+    pending_dismissed: Signal<bool>,
+    focus: Signal<usize>,
+    notes_scroll: ui_kit::FocusScroll,
+}
+
+impl UpdateUi {
+    pub(crate) fn new() -> Self {
+        Self {
+            revision: signal(0),
+            ready: signal(false),
+            install_busy: signal(false),
+            cancel_requested: signal(false),
+            pending_dismissed: signal(false),
+            focus: signal(0),
+            notes_scroll: ui_kit::FocusScroll::new(),
+        }
+    }
+}
+
+fn update_ui(ui: Ui) -> UpdateUi {
+    ui.screens.updates.expect("update view requires its host")
+}
+
+fn metadata() -> Metadata {
+    let report = crate::device::reported();
+    Metadata {
+        platform: crate::device::host().platform,
+        direct_apk: report.and_then(|report| report.direct_apk),
+        android_build: report.and_then(|report| report.direct_android_build),
+    }
+}
+
+fn service() -> Service {
+    Service::new(crate::runtime(), metadata())
+}
+
+struct Prompts(Ui);
+
+impl UpdatePrompts for Prompts {
+    fn notify(&self, key: &'static str) {
+        crate::settings_view::notify(tr(key));
+    }
+
+    fn translate(&self, key: &'static str) -> &'static str {
+        tr(key)
+    }
+
+    fn is_open(&self) -> bool {
+        facade::is_open(self.0)
+    }
+
+    fn is_live(&self) -> bool {
+        self.0.owner.is_live()
+    }
+
+    fn cancelled(&self) -> bool {
+        update_ui(self.0).cancel_requested.get_untracked()
+    }
+
+    fn wait_cancelled(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>> {
+        Box::pin(authorization_cancelled(self.0))
+    }
+
+    fn open_url<'a>(
+        &'a self,
+        url: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>> {
+        Box::pin(host::open_download_url(url, self))
+    }
+
+    fn close_after_shutdown(&self) {
+        crate::desktop::close_after_shutdown(self.0);
+    }
+
+    fn flush_bookmarks(&self) {
+        crate::player::watch_time::flush(self.0);
+    }
 }
 
 fn changed(ui: Ui) {
-    ui.screens
-        .update_revision
+    update_ui(ui)
+        .revision
         .update(|revision| *revision = revision.wrapping_add(1));
 }
 
 fn snapshot(ui: Ui) -> Snapshot {
-    ui.screens.update_revision.get();
-    crate::runtime().app_update_snapshot()
+    update_ui(ui).revision.get();
+    service().snapshot()
 }
 
 fn supported() -> bool {
-    !crate::is_tui_mode() && !crate::host::IPAD
+    !crate::host::is_tui_mode() && !crate::host::IPAD
 }
 
 fn scheduled_enabled() -> bool {
@@ -51,13 +132,13 @@ pub(crate) fn bind(ui: Ui) {
     let was_foreground = std::cell::Cell::new(false);
     effect(move || {
         let foreground = lifecycle() != nsh_core::platform::Lifecycle::Background;
-        if !ui.screens.update_ready.get() || !super::metadata_ready() {
+        if !update_ui(ui).ready.get() || !metadata().ready() {
             return;
         }
         let resumed = !was_foreground.replace(foreground) && foreground;
         if resumed {
             let first = !started.replace(true);
-            let trigger = if crate::runtime().app_update_manual_check_pending() {
+            let trigger = if service().manual_check_pending() {
                 Trigger::Manual
             } else if !first {
                 Trigger::Automatic
@@ -67,7 +148,7 @@ pub(crate) fn bind(ui: Ui) {
             if trigger == Trigger::Manual || scheduled_enabled() {
                 check(ui, trigger);
             }
-        } else if foreground && crate::runtime().app_update_manual_check_pending() {
+        } else if foreground && service().manual_check_pending() {
             check(ui, Trigger::Manual);
         }
     });
@@ -81,10 +162,10 @@ pub(crate) fn bind(ui: Ui) {
         }
     });
     crate::tasks::spawn_in_app(async move {
-        if let Err(error) = crate::runtime().restore_app_update_state().await {
+        if let Err(error) = service().restore().await {
             log::warn!("iptv update schedule restore failed: {error}");
         }
-        ui.screens.update_ready.set(true);
+        update_ui(ui).ready.set(true);
         timer(ui);
     });
 }
@@ -102,11 +183,11 @@ pub(crate) fn open(ui: Ui) {
     if !supported() {
         return;
     }
-    ui.screens.update_focus.set(0);
-    ui.screens.update_notes_scroll.reset();
+    update_ui(ui).focus.set(0);
+    update_ui(ui).notes_scroll.reset();
     ui.screens.update_dialog_open.set(true);
-    crate::runtime().queue_manual_app_update_check();
-    if ui.screens.update_ready.get_untracked() {
+    service().queue_manual_check();
+    if update_ui(ui).ready.get_untracked() {
         check(ui, Trigger::Manual);
     }
 }
@@ -115,7 +196,7 @@ pub(crate) fn close(ui: Ui) {
     // A retained package or failed re-check can leave a notice waiting behind
     // this panel. Its first visible action must own remote focus on return.
     batch(move || {
-        ui.screens.update_focus.set(0);
+        update_ui(ui).focus.set(0);
         ui.screens.update_dialog_open.set(false);
     });
 }
@@ -123,30 +204,27 @@ pub(crate) fn close(ui: Ui) {
 fn check(ui: Ui, trigger: Trigger) {
     // A missing Android report is not evidence of a store installation. Do not
     // consume the due check or persist a result for the wrong package channel.
-    if ui.screens.update_install_busy.get_untracked()
-        || !ui.screens.update_ready.get_untracked()
-        || !super::metadata_ready()
+    if update_ui(ui).install_busy.get_untracked()
+        || !update_ui(ui).ready.get_untracked()
+        || !metadata().ready()
     {
         return;
     }
-    let owner = crate::runtime();
+    let service = service();
     let frequency = Frequency::from_setting(crate::settings::choice(
         iptv_settings::keys::APP_UPDATE_FREQUENCY,
     ));
-    let Some(token) = owner.begin_app_update_check(now(), trigger, frequency) else {
+    let Some(check) = service.begin_check(trigger, frequency) else {
         return;
     };
     changed(ui);
     crate::tasks::spawn_in_app(async move {
-        let result = owner
-            .check_github_release(crate::host::updates::installed())
-            .await;
-        owner.finish_app_update_check(token, now(), result);
+        check.await;
         if !ui.screens.update_dialog_open.get_untracked() {
-            ui.screens.update_focus.set(0);
+            update_ui(ui).focus.set(0);
         }
         changed(ui);
-        if let Err(error) = owner.persist_app_update_state().await {
+        if let Err(error) = service.persist().await {
             log::warn!("iptv update schedule save failed: {error}");
             if trigger == Trigger::Manual {
                 crate::settings_view::notify(tr("Could not save update preferences. Try again."));
@@ -158,7 +236,7 @@ fn check(ui: Ui, trigger: Trigger) {
 fn persist(ui: Ui) {
     changed(ui);
     crate::tasks::spawn_in_app(async move {
-        if let Err(error) = crate::runtime().persist_app_update_state().await {
+        if let Err(error) = service().persist().await {
             log::warn!("iptv update preferences save failed: {error}");
             crate::settings_view::notify(tr("Could not save update preferences. Try again."));
         }
@@ -170,22 +248,22 @@ fn skip(ui: Ui) {
         return;
     }
     if let Some(check) = snapshot(ui).cached {
-        crate::runtime().skip_app_update_version(&check.release.version);
+        service().skip(&check.release.version);
         persist(ui);
     }
     facade::close(ui);
 }
 
 fn acknowledge(ui: Ui) {
-    crate::runtime().acknowledge_app_update_notice();
+    service().acknowledge();
     persist(ui);
 }
 
 fn review(ui: Ui) {
     crate::settings_view::settings_guarded(ui, move || {
         acknowledge(ui);
-        ui.screens.update_focus.set(0);
-        ui.screens.update_notes_scroll.reset();
+        update_ui(ui).focus.set(0);
+        update_ui(ui).notes_scroll.reset();
         ui.screens.update_dialog_open.set(true);
     });
 }
@@ -206,7 +284,7 @@ fn newer(ui: Ui) -> bool {
 
 fn manual_download_visible(ui: Ui) -> bool {
     newer(ui)
-        && crate::host::updates::automatic_install_supported()
+        && host::automatic_install_supported(metadata())
         && snapshot(ui)
             .cached
             .is_some_and(|check| check.release.download.is_some())
@@ -217,18 +295,18 @@ fn manual_download(ui: Ui) {
         return;
     }
     if let Some(download) = snapshot(ui).cached.and_then(|check| check.release.download) {
-        crate::tasks::spawn_in_app(async move { super::open_download_url(&download.url).await });
+        crate::tasks::spawn_in_app(async move { Prompts(ui).open_url(&download.url).await });
     }
 }
 
 fn pending_ready(ui: Ui) -> bool {
-    let Some(asset) = crate::runtime().pending_app_update_asset() else {
+    let Some(asset) = service().pending_url() else {
         return false;
     };
     snapshot(ui)
         .cached
         .and_then(|check| check.release.download)
-        .is_some_and(|download| download.url == asset.url())
+        .is_some_and(|download| download.url == asset)
 }
 
 fn error_message(error: &CheckError) -> &'static str {
@@ -245,9 +323,9 @@ fn status(ui: Ui) -> String {
     let state = snapshot(ui);
     status_for(
         &state,
-        ui.screens.update_ready.get() && super::metadata_ready(),
-        ui.screens.update_install_busy.get(),
-        crate::runtime().app_update_download_progress(),
+        update_ui(ui).ready.get() && metadata().ready(),
+        update_ui(ui).install_busy.get(),
+        service().progress(),
         pending_ready(ui),
     )
 }
@@ -351,11 +429,11 @@ impl InstallOperation {
     fn new(ui: Ui) -> Self {
         Self {
             owner: ui.owner,
-            busy: ui.screens.update_install_busy,
+            busy: update_ui(ui).install_busy,
             panel_open: ui.screens.update_dialog_open,
-            focus: ui.screens.update_focus,
-            pending_dismissed: ui.screens.update_pending_dismissed,
-            revision: ui.screens.update_revision,
+            focus: update_ui(ui).focus,
+            pending_dismissed: update_ui(ui).pending_dismissed,
+            revision: update_ui(ui).revision,
         }
     }
 }
@@ -379,7 +457,7 @@ fn progress_timer(ui: Ui) {
     // the accepted root operation, including while Later closes that panel.
     ui.owner.run(move || {
         let _timer = set_timeout(Duration::from_millis(200), move || {
-            if ui.screens.update_install_busy.get_untracked() {
+            if update_ui(ui).install_busy.get_untracked() {
                 changed(ui);
                 progress_timer(ui);
             }
@@ -388,45 +466,26 @@ fn progress_timer(ui: Ui) {
 }
 
 fn cancellation_allowed(ui: Ui) -> bool {
-    ui.screens.update_revision.get();
-    !ui.screens.update_install_busy.get() || super::can_cancel_install()
+    update_ui(ui).revision.get();
+    !update_ui(ui).install_busy.get() || host::can_cancel_install(&crate::runtime())
 }
 
 fn cancel_download(ui: Ui) -> bool {
     // Native extraction can win between rendering an enabled button and the
     // press. Do not claim cancellation or persist Skip after that boundary.
-    if !super::try_cancel_current() {
+    if !host::try_cancel_current(&crate::runtime()) {
         changed(ui);
         return false;
     }
-    ui.screens.update_cancel_requested.set(true);
-    crate::runtime().cancel_app_update_download();
-    crate::runtime().cancel_pending_app_update();
+    update_ui(ui).cancel_requested.set(true);
+    service().cancel_download();
     changed(ui);
     true
 }
 
-async fn until_cancelled<T>(
-    operation: impl std::future::Future<Output = T>,
-    cancellation: impl std::future::Future<Output = ()>,
-    cancelled: impl Fn() -> bool,
-) -> Option<T> {
-    let mut operation = std::pin::pin!(operation);
-    let mut cancellation = std::pin::pin!(cancellation);
-    std::future::poll_fn(move |context| {
-        // Read the flag on every poll: the wakeup future can still be waiting
-        // for its timer when a late authorization result wakes the shell task.
-        if cancelled() || cancellation.as_mut().poll(context).is_ready() {
-            return std::task::Poll::Ready(None);
-        }
-        operation.as_mut().poll(context).map(Some)
-    })
-    .await
-}
-
 async fn authorization_cancelled(ui: Ui) {
     loop {
-        if !ui.owner.is_live() || ui.screens.update_cancel_requested.get_untracked() {
+        if !ui.owner.is_live() || update_ui(ui).cancel_requested.get_untracked() {
             return;
         }
         let (send, reply) = futures_channel::oneshot::channel();
@@ -441,18 +500,8 @@ async fn authorization_cancelled(ui: Ui) {
     }
 }
 
-pub(super) async fn until_update_cancelled<T>(
-    ui: Ui,
-    operation: impl std::future::Future<Output = T>,
-) -> Option<T> {
-    until_cancelled(operation, authorization_cancelled(ui), move || {
-        !ui.owner.is_live() || ui.screens.update_cancel_requested.get_untracked()
-    })
-    .await
-}
-
 fn download_blocked(ui: Ui) -> bool {
-    ui.screens.update_install_busy.get() || snapshot(ui).checking
+    update_ui(ui).install_busy.get() || snapshot(ui).checking
 }
 
 fn download(ui: Ui) {
@@ -461,34 +510,37 @@ fn download(ui: Ui) {
     }
     let Some(check) = snapshot(ui).cached else {
         if releases_fallback(ui) {
-            crate::tasks::spawn_in_app(async { super::open_download_url(super::RELEASES).await });
+            crate::tasks::spawn_in_app(async move { Prompts(ui).open_url(host::RELEASES).await });
         }
         return;
     };
     if !newer(ui) {
         return;
     }
-    ui.screens.update_install_busy.set(true);
-    ui.screens.update_cancel_requested.set(false);
+    update_ui(ui).install_busy.set(true);
+    update_ui(ui).cancel_requested.set(false);
     let operation = InstallOperation::new(ui);
     progress_timer(ui);
     crate::tasks::spawn_in_app(async move {
         let _operation = operation;
+        let prompts = Prompts(ui);
+        let owner = crate::runtime();
         let Some(result) =
-            until_update_cancelled(ui, crate::host::updates::action_for(&check)).await
+            host::until_update_cancelled(&prompts, host::action_for(&owner, metadata(), &check))
+                .await
         else {
             return;
         };
         match result {
             Ok(Some(action)) => {
-                if ui.screens.update_cancel_requested.get_untracked() {
+                if update_ui(ui).cancel_requested.get_untracked() {
                     return;
                 }
-                crate::settings_view::notify(action.label());
-                action.run(ui).await;
+                prompts.notify(action.label());
+                action.run(&owner, &prompts).await;
             }
-            Ok(None) => super::open_download_url(&check.release.url).await,
-            Err(message) => crate::settings_view::notify(message),
+            Ok(None) => prompts.open_url(&check.release.url).await,
+            Err(message) => prompts.notify(message),
         }
     });
 }
@@ -502,7 +554,7 @@ fn activate(ui: Ui, index: usize) {
         1 => download(ui),
         2 if newer(ui) => skip(ui),
         3 => facade::close(ui),
-        4 if ui.screens.update_install_busy.get_untracked() => {
+        4 if update_ui(ui).install_busy.get_untracked() => {
             cancel_download(ui);
         }
         5 if manual_download_visible(ui) => manual_download(ui),
@@ -511,20 +563,18 @@ fn activate(ui: Ui, index: usize) {
 }
 
 pub(crate) fn key(ui: Ui, action: Action) {
-    let at = ui.screens.update_focus.get_untracked();
+    let at = update_ui(ui).focus.get_untracked();
     let controls = current_controls(ui);
     let position = controls.iter().position(|index| *index == at).unwrap_or(0);
     match action {
-        Action::MoveLeft => ui
-            .screens
-            .update_focus
+        Action::MoveLeft => update_ui(ui)
+            .focus
             .set(controls[position.saturating_sub(1)]),
-        Action::MoveRight => ui
-            .screens
-            .update_focus
+        Action::MoveRight => update_ui(ui)
+            .focus
             .set(controls[(position + 1).min(controls.len() - 1)]),
-        Action::MoveUp => ui.screens.update_notes_scroll.scroll_by(-160.0),
-        Action::MoveDown => ui.screens.update_notes_scroll.scroll_by(160.0),
+        Action::MoveUp => update_ui(ui).notes_scroll.scroll_by(-160.0),
+        Action::MoveDown => update_ui(ui).notes_scroll.scroll_by(160.0),
         Action::Select => activate(ui, at),
         _ => {}
     }
@@ -534,7 +584,7 @@ fn current_controls(ui: Ui) -> Vec<usize> {
     panel_controls(
         newer(ui),
         manual_download_visible(ui),
-        ui.screens.update_install_busy.get_untracked(),
+        update_ui(ui).install_busy.get_untracked(),
         snapshot(ui).checking,
         cancellation_allowed(ui),
         releases_fallback(ui),
@@ -584,8 +634,8 @@ pub(crate) fn layer(ui: Ui) -> View {
 fn panel(ui: Ui) -> View {
     let size = Scale::new();
     effect(move || {
-        let focus = ui.screens.update_focus.get();
-        let busy = ui.screens.update_install_busy.get();
+        let focus = update_ui(ui).focus.get();
+        let busy = update_ui(ui).install_busy.get();
         let checking = snapshot(ui).checking;
         let cancelable = cancellation_allowed(ui);
         let controls = panel_controls(
@@ -597,7 +647,7 @@ fn panel(ui: Ui) -> View {
             releases_fallback(ui),
         );
         if !controls.contains(&focus) {
-            ui.screens.update_focus.set(if busy && cancelable {
+            update_ui(ui).focus.set(if busy && cancelable {
                 4
             } else if busy || checking {
                 3
@@ -622,8 +672,8 @@ fn panel(ui: Ui) -> View {
         .child(ui_kit::body(size, move || details(ui)))
         .child(ui_kit::heading(size, move || tr("Release notes")))
         .child(
-            ui.screens
-                .update_notes_scroll
+            update_ui(ui)
+                .notes_scroll
                 .view()
                 .flex_1()
                 .test_id("app-update-notes")
@@ -639,7 +689,7 @@ fn panel(ui: Ui) -> View {
                         ui,
                         size,
                         move || tr("Check for updates"),
-                        move || ui.screens.update_focus.get() == 0,
+                        move || update_ui(ui).focus.get() == 0,
                         move || activate(ui, 0),
                     )
                     .disabled(move || download_blocked(ui))
@@ -665,13 +715,13 @@ fn panel(ui: Ui) -> View {
                                     .is_none_or(|check| check.release.download.is_none())
                                 {
                                     tr("Release notes and downloads")
-                                } else if crate::host::updates::automatic_install_supported() {
+                                } else if host::automatic_install_supported(metadata()) {
                                     tr("Download and update")
                                 } else {
                                     tr("Download package")
                                 }
                             },
-                            move || ui.screens.update_focus.get() == 1,
+                            move || update_ui(ui).focus.get() == 1,
                             move || activate(ui, 1),
                         )
                         .disabled(move || download_blocked(ui))
@@ -694,7 +744,7 @@ fn panel(ui: Ui) -> View {
                             ui,
                             size,
                             move || tr("Download package"),
-                            move || ui.screens.update_focus.get() == 5,
+                            move || update_ui(ui).focus.get() == 5,
                             move || activate(ui, 5),
                         )
                         .disabled(move || download_blocked(ui))
@@ -714,7 +764,7 @@ fn panel(ui: Ui) -> View {
                             ui,
                             size,
                             move || tr("Skip this version"),
-                            move || ui.screens.update_focus.get() == 2,
+                            move || update_ui(ui).focus.get() == 2,
                             move || activate(ui, 2),
                         )
                         .disabled(move || !cancellation_allowed(ui))
@@ -731,17 +781,17 @@ fn panel(ui: Ui) -> View {
                     ui,
                     size,
                     move || tr("Later"),
-                    move || ui.screens.update_focus.get() == 3,
+                    move || update_ui(ui).focus.get() == 3,
                     move || activate(ui, 3),
                 ))
                 .child(when(
-                    move || ui.screens.update_install_busy.get() && cancellation_allowed(ui),
+                    move || update_ui(ui).install_busy.get() && cancellation_allowed(ui),
                     move || {
                         ui_kit::button(
                             ui,
                             size,
                             move || tr("Cancel download"),
-                            move || ui.screens.update_focus.get() == 4,
+                            move || update_ui(ui).focus.get() == 4,
                             move || activate(ui, 4),
                         )
                     },
@@ -753,7 +803,7 @@ pub(crate) fn notice_open(ui: Ui) -> bool {
     if facade::is_open(ui)
         || ui.chrome.mode.get() == ViewMode::Fullscreen
         || (snapshot(ui).notice.is_none()
-            && (!pending_ready(ui) || ui.screens.update_pending_dismissed.get()))
+            && (!pending_ready(ui) || update_ui(ui).pending_dismissed.get()))
     {
         return false;
     }
@@ -764,7 +814,7 @@ pub(crate) fn notice_open(ui: Ui) -> bool {
 }
 
 pub(crate) fn dismiss_notice(ui: Ui) {
-    ui.screens.update_pending_dismissed.set(true);
+    update_ui(ui).pending_dismissed.set(true);
     acknowledge(ui);
 }
 
@@ -786,7 +836,7 @@ fn notice_navigation(focus: Signal<usize>, action: Action) -> Option<NoticeActio
 }
 
 pub(crate) fn notice_key(ui: Ui, action: Action) {
-    match notice_navigation(ui.screens.update_focus, action) {
+    match notice_navigation(update_ui(ui).focus, action) {
         Some(NoticeAction::Review) => review(ui),
         Some(NoticeAction::Dismiss) => dismiss_notice(ui),
         None => {}
@@ -816,14 +866,14 @@ fn notice(ui: Ui) -> View {
                     ui,
                     size,
                     move || tr("View update"),
-                    move || ui.screens.update_focus.get() == 0,
+                    move || update_ui(ui).focus.get() == 0,
                     move || review(ui),
                 ))
                 .child(ui_kit::button(
                     ui,
                     size,
                     move || tr("Later"),
-                    move || ui.screens.update_focus.get() == 1,
+                    move || update_ui(ui).focus.get() == 1,
                     move || dismiss_notice(ui),
                 )),
         )

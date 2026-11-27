@@ -1,6 +1,9 @@
 //! Sparkle owns authenticated replacement and relaunch of signed macOS bundles.
 //! Discovery and scheduling remain runtime-owned; preview builds use the DMG link.
-use crate::{Ui, i18n::tr, settings_view::notify};
+use super::UpdatePrompts;
+use iptv_core::message::key;
+use iptv_runtime::Runtime;
+use std::rc::Rc;
 use std::{ffi::CString, time::Duration};
 
 unsafe extern "C" {
@@ -44,30 +47,31 @@ pub(super) fn try_cancel_current() -> bool {
     unsafe { patina_sparkle_try_cancel() }
 }
 
-pub(super) async fn update(ui: Ui, version: String) {
-    let owner = crate::runtime_owner::runtime();
+pub(super) async fn update(owner: &Rc<Runtime>, prompts: &impl UpdatePrompts, version: String) {
     if owner.recording_background_needed() {
-        return notify(tr("Finish recording before installing the update."));
+        return prompts.notify(key("Finish recording before installing the update."));
     }
     let Ok(version) = CString::new(version) else {
-        return notify(tr("The installer could not be verified or opened."));
+        return prompts.notify(key("The installer could not be verified or opened."));
     };
-    let Ok(failure) = CString::new(tr("The installer could not be verified or opened.")) else {
+    let Ok(failure) =
+        CString::new(prompts.translate(key("The installer could not be verified or opened.")))
+    else {
         return;
     };
     // SAFETY: the bridge copies the version before returning. All following
     // operations use a generation token, never a pointer to Ui or the runtime.
     let token = unsafe { patina_sparkle_start(version.as_ptr(), failure.as_ptr()) };
     if token == 0 {
-        return notify(tr("The installer could not be verified or opened."));
+        return prompts.notify(key("The installer could not be verified or opened."));
     }
     let session = Session(token);
     let mut host_stopped = false;
     let outcome = loop {
-        if !ui.owner.is_live() {
+        if !prompts.is_live() {
             return;
         }
-        if ui.screens.update_cancel_requested.get_untracked() && try_cancel_current() {
+        if prompts.cancelled() && try_cancel_current() {
             break 4;
         }
         // This future belongs to the app root, so owner/Ui access remains on
@@ -82,7 +86,7 @@ pub(super) async fn update(ui: Ui, version: String) {
                     owner.start_recordings();
                 } else {
                     host_stopped = true;
-                    crate::player::watch_time::flush(ui);
+                    prompts.flush_bookmarks();
                     // SAFETY: the native generation fence accepts approval only for this live session.
                     unsafe { patina_sparkle_allow_restart(session.0) };
                 }
@@ -103,9 +107,9 @@ pub(super) async fn update(ui: Ui, version: String) {
         owner.start_recordings();
     }
     if outcome == 5 {
-        notify(tr("The installer could not be verified or opened."));
+        prompts.notify(key("The installer could not be verified or opened."));
     } else if outcome == 8 {
-        notify(tr(
+        prompts.notify(key(
             "The update is prepared. Quit Patina to finish installing it, or check again to retry.",
         ));
     }

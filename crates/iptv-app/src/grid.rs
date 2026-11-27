@@ -236,7 +236,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         .flex_1()
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(ruler::ruler(ui, size, column, pan, now_x, width))
-        .child(if crate::is_tui_mode() {
+        .child(if crate::host::is_tui_mode() {
             // `nsh-platform-tui` does not implement `StickyCells`, which
             // `wheel::trackball` relies on to pin the grid inside its
             // 20,000 pt horizontal scroll buffer.

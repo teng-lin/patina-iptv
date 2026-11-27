@@ -152,6 +152,7 @@ const MESSAGE_FILES: &[&str] = &[
 /// itself are the literals of its `context` and `Err`.
 const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
     ("iptv-app/src/backup.rs", &["context", "Err"]),
+    ("iptv-app/src/host/backup_documents.rs", &["context", "Err"]),
     ("iptv-runtime/src/settings.rs", &["write_str"]),
 ];
 
@@ -162,6 +163,8 @@ const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
 /// `key(…)` constant, a helper's label, a backup error's text, a notice,
 /// a built-in list's name. A new one needs the same before it is listed.
 const CARRIED_MESSAGES: &[(&str, &str)] = &[
+    // Update prompts accept catalog keys marked where the host requests them.
+    ("iptv-app/src/settings_view/updates/view.rs", "key"),
     // App-owned schema summaries are key-marked at their declaration. The
     // footer translates only those fields, never a persisted/user value.
     ("iptv-app/src/settings_view/view.rs", "st"),

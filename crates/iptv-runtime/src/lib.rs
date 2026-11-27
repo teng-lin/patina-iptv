@@ -770,6 +770,28 @@ mod native;
     )
 ))]
 pub use native::app_updates;
+mod update_model;
+#[cfg(not(all(
+    feature = "native",
+    any(
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android"
+    )
+)))]
+/// Portable update status values. This host has no native update installer.
+pub mod app_updates {
+    pub mod github {
+        pub use crate::update_model::{
+            CheckError, DownloadLink, ReleaseCheck, ReleaseInfo, ReleaseStatus,
+        };
+    }
+    pub mod state {
+        pub use crate::update_model::{Frequency, Snapshot, Trigger};
+    }
+}
+
 #[cfg(feature = "native")]
 pub use native::network::adapter_config;
 pub mod network;

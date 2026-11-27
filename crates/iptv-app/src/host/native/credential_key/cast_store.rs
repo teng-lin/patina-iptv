@@ -13,6 +13,7 @@ use zeroize::Zeroizing;
 
 pub(in crate::host::native) struct CastStore {
     directory: PathBuf,
+    label: String,
     lease: tokio::sync::OnceCell<Lease>,
 }
 
@@ -41,9 +42,10 @@ impl Lease {
 }
 
 impl CastStore {
-    pub(in crate::host::native) fn new(directory: &Path) -> Self {
+    pub(in crate::host::native) fn new(directory: &Path, label: String) -> Self {
         Self {
             directory: directory.to_owned(),
+            label,
             lease: tokio::sync::OnceCell::new(),
         }
     }
@@ -65,11 +67,12 @@ impl CastStore {
             .await?;
         let account = format!("{}:{}", lease.namespace, key);
         let lock = lease.lock.clone();
+        let label = self.label.clone();
         tokio::task::spawn_blocking(move || {
             // A cancelled waiter can detach from an OS call. Hold the lease
             // until the blocking operation actually returns.
             let _lease = lock;
-            work(Entry::new("org.iptv-rs.airplay", &account).map_err(StoreError::new)?)
+            work(Entry::new("org.iptv-rs.airplay", &account, label).map_err(StoreError::new)?)
         })
         .await
         .map_err(StoreError::new)?
@@ -133,7 +136,7 @@ pub(super) fn verify_disposable_pairing_store() {
         .unwrap();
     tokio.block_on(async {
         let key = "airplay:stable:generated-receiver";
-        let open = || CastStore::new(profile.path());
+        let open = || CastStore::new(profile.path(), "Generated pairing".to_owned());
         let first = open();
         assert!(first.load_record(key).await.unwrap().is_none());
         let reopened = open();

@@ -1,4 +1,5 @@
 use super::*;
+use host::until_cancelled;
 use nsh_core::element::create_root;
 
 fn operation() -> InstallOperation {
@@ -235,7 +236,7 @@ fn UpdateOverlap() -> impl IntoElement {
     ));
     let ui = crate::runtime_owner::with_runtime(application.clone(), || {
         let ui = Ui::new(crate::SharedUi::new(), crate::player::Player::new());
-        ui.screens.update_ready.set(true);
+        update_ui(ui).ready.set(true);
         let release = |version: &str| ReleaseCheck {
             installed_version: "1.0.0".into(),
             status: ReleaseStatus::UpdateAvailable,
@@ -258,7 +259,7 @@ fn UpdateOverlap() -> impl IntoElement {
 
         // An accepted installation holds its displayed release stable across
         // manual, startup and timer checks until its guard completes.
-        ui.screens.update_install_busy.set(true);
+        update_ui(ui).install_busy.set(true);
         let installation = InstallOperation::new(ui);
         for trigger in [Trigger::Manual, Trigger::Startup, Trigger::Automatic] {
             check(ui, trigger);
@@ -275,11 +276,11 @@ fn UpdateOverlap() -> impl IntoElement {
             .unwrap();
         download(ui);
         manual_download(ui);
-        ui.screens.update_focus.set(1);
+        update_ui(ui).focus.set(1);
         key(ui, Action::Select);
-        ui.screens.update_focus.set(5);
+        update_ui(ui).focus.set(5);
         key(ui, Action::Select);
-        assert!(!ui.screens.update_install_busy.get_untracked());
+        assert!(!update_ui(ui).install_busy.get_untracked());
         assert!(application.app_update_snapshot().checking);
         assert!(application.finish_app_update_check(token, 4, Ok(release("3.0.0"))));
         assert_eq!(

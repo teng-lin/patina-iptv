@@ -6,18 +6,20 @@ pub(super) struct Entry {
     broker: SecretService,
     service: String,
     account: String,
+    label: String,
 }
 fn error(error: dbus_secret_service::Error) -> keyring::Error {
     keyring::Error::PlatformFailure(Box::new(error))
 }
 impl Entry {
-    pub(super) fn new(service: &str, account: &str) -> Result<Self, keyring::Error> {
+    pub(super) fn new(service: &str, account: &str, label: String) -> Result<Self, keyring::Error> {
         let broker = SecretService::connect_with_max_prompt_timeout(EncryptionType::Dh, 30)
             .map_err(error)?;
         Ok(Self {
             broker,
             service: service.to_owned(),
             account: account.to_owned(),
+            label,
         })
     }
     fn attributes(&self) -> HashMap<&str, &str> {
@@ -53,12 +55,8 @@ impl Entry {
         }
         let mut attributes = self.attributes();
         attributes.insert("application", "rust-keyring");
-        let label = match self.service.as_str() {
-            "org.iptv-rs.database" => "Patina catalog key",
-            _ => crate::i18n::tr("Patina AirPlay pairing"),
-        };
         collection
-            .create_item(label, attributes, secret, true, "text/plain")
+            .create_item(&self.label, attributes, secret, true, "text/plain")
             .map_err(error)?;
         Ok(())
     }

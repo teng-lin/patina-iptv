@@ -12,17 +12,7 @@ mod airplay_probe;
 #[cfg(patina_airplay_probe)]
 pub use airplay_probe::AirPlayProbe;
 
-static TUI_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Enables TUI-host layout adjustments (such as bypassing desktop horizontal
-/// `StickyCells` wrappers that `nsh-platform-tui` does not implement).
-pub fn set_tui_mode(enabled: bool) {
-    TUI_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
-}
-
-pub(crate) fn is_tui_mode() -> bool {
-    TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
-}
+pub use host::set_tui_mode;
 
 /// Guide values and navigation used by the shell.
 pub mod guide {
@@ -35,10 +25,7 @@ pub mod guide {
         Focus, Move, PAST, Pane, ProgramSelection, STEP, home_window, moves, page_row, view_range,
     };
 }
-#[cfg(all(
-    feature = "test-support",
-    any(target_os = "linux", target_os = "macos")
-))]
+#[cfg(feature = "test-support")]
 mod guide_window_walkthrough;
 pub mod theme;
 
@@ -389,55 +376,7 @@ pub(crate) struct ScreensUi {
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
     update_dialog_open: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_revision: Signal<u64>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_ready: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_install_busy: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_cancel_requested: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_pending_dismissed: Signal<bool>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_focus: Signal<usize>,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    update_notes_scroll: ui_kit::FocusScroll,
+    updates: Option<settings_view::updates::UpdateUi>,
 }
 
 #[derive(Clone, Copy)]
@@ -561,55 +500,7 @@ impl Ui {
                 parental: signal(None),
                 settings_screen: signal(None),
                 update_dialog_open: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_revision: signal(0),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_ready: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_install_busy: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_cancel_requested: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_pending_dismissed: signal(false),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_focus: signal(0),
-                #[cfg(any(
-                    target_os = "android",
-                    target_os = "linux",
-                    target_os = "windows",
-                    target_os = "macos"
-                ))]
-                update_notes_scroll: ui_kit::FocusScroll::new(),
+                updates: host::updates::AVAILABLE.then(settings_view::updates::UpdateUi::new),
             },
             chrome: ChromeUi {
                 // Until a press reports its pointer: a finger on phones and
@@ -865,10 +756,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     pip::bind(ui);
     desktop::player_windows::bind(ui);
     bind_back(ui);
-    #[cfg(all(
-        feature = "test-support",
-        any(target_os = "linux", target_os = "macos")
-    ))]
+    #[cfg(feature = "test-support")]
     guide_window_walkthrough::bind(ui);
 
     let rows = element_ref();

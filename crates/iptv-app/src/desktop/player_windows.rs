@@ -5,7 +5,7 @@ use iptv_presentation::playback_windows::SessionId;
 use nsh_core::prelude::*;
 
 pub fn mounted(ui: Ui, surface: usize) -> bool {
-    cfg!(any(target_os = "linux", target_os = "macos"))
+    crate::host::PLAYER_POPUPS
         && ui
             .playback
             .player_windows
@@ -14,7 +14,7 @@ pub fn mounted(ui: Ui, surface: usize) -> bool {
 
 pub fn can_open(ui: Ui, channel: usize) -> bool {
     if ui.playback.player_surface != 0
-        || !cfg!(any(target_os = "linux", target_os = "macos"))
+        || !crate::host::PLAYER_POPUPS
         || crate::multiview::session(ui)
     {
         return false;
@@ -219,11 +219,11 @@ fn player_window(ui: Ui, surface: usize, back_action: fn(Ui) -> bool) -> impl In
         .content(move || player_content(ui, surface, id, back_action));
     // A starting position only: resizing/fullscreen/control updates never
     // snap a window back after the viewer moves it.
-    #[cfg(target_os = "macos")]
-    let window = match untracked(|| opening_position(surface)) {
-        Some(position) => window.default_position(position),
-        None => window, // NSH's native cascade remains the fallback.
-    };
+    if crate::host::MACOS
+        && let Some(position) = untracked(|| opening_position(surface))
+    {
+        return window.default_position(position);
+    }
     window
 }
 
@@ -321,14 +321,12 @@ fn bind_pip(
     });
 }
 
-#[cfg(target_os = "macos")]
 fn opening_position(surface: usize) -> Option<nsh_core::desktop::WindowPosition> {
     let state = super::with_window(|main| main.state()).flatten()?;
     let area = nsh_core::element::desktop::display(state.display?)?.visible_bounds;
     Some(cascade_position(surface, area))
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn cascade_position(
     surface: usize,
     area: nsh_core::Bounds<nsh_core::Points>,

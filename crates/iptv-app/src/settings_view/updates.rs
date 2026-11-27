@@ -4,18 +4,25 @@ use nsh_core::prelude::*;
 
 pub(super) use crate::host::updates::RELEASES;
 
-use crate::host::updates::view as native;
+use crate::host::updates::AVAILABLE;
+
+mod view;
+pub(crate) use view::UpdateUi;
 
 pub(super) fn label() -> &'static str {
     tr("Check for updates")
 }
 
 pub(super) fn run(ui: crate::Ui) {
-    native::open(ui);
+    if AVAILABLE {
+        view::open(ui);
+    }
 }
 
 pub(crate) fn bind(ui: crate::Ui) {
-    native::bind(ui);
+    if AVAILABLE {
+        view::bind(ui);
+    }
 }
 
 pub(crate) fn is_open(ui: crate::Ui) -> bool {
@@ -23,25 +30,39 @@ pub(crate) fn is_open(ui: crate::Ui) -> bool {
 }
 
 pub(crate) fn close(ui: crate::Ui) {
-    native::close(ui);
+    if AVAILABLE {
+        view::close(ui);
+    } else {
+        ui.screens.update_dialog_open.set(false);
+    }
 }
 
 pub(crate) fn key(ui: crate::Ui, action: iptv_nav::Action) {
-    native::key(ui, action);
+    if AVAILABLE {
+        view::key(ui, action);
+    }
 }
 
 pub(crate) fn layer(ui: crate::Ui) -> View {
-    native::layer(ui)
+    if AVAILABLE {
+        view::layer(ui)
+    } else {
+        nsh_core::prelude::view()
+    }
 }
 
 pub(crate) fn notice_open(ui: crate::Ui) -> bool {
-    native::notice_open(ui)
+    AVAILABLE && view::notice_open(ui)
 }
 
 pub(crate) fn dismiss_notice(ui: crate::Ui) {
-    native::dismiss_notice(ui);
+    if AVAILABLE {
+        view::dismiss_notice(ui);
+    }
 }
 
 pub(crate) fn notice_key(ui: crate::Ui, action: iptv_nav::Action) {
-    native::notice_key(ui, action);
+    if AVAILABLE {
+        view::notice_key(ui, action);
+    }
 }

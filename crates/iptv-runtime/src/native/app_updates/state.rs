@@ -14,50 +14,10 @@ use chrono::{DateTime, Months, Utc};
 
 use super::github::{CheckError, ReleaseCheck, ReleaseStatus};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Frequency {
-    Never,
-    OnLaunch,
-    Daily,
-    #[default]
-    Weekly,
-    Monthly,
-}
-
-impl Frequency {
-    pub fn from_setting(value: &str) -> Self {
-        match value {
-            "never" => Self::Never,
-            "on_launch" => Self::OnLaunch,
-            "daily" => Self::Daily,
-            "monthly" => Self::Monthly,
-            _ => Self::Weekly,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Trigger {
-    Manual,
-    Startup,
-    /// A foreground timer or resume observation, including a long-running app.
-    Automatic,
-}
+pub use crate::update_model::{Frequency, Snapshot, Trigger};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckToken(u64);
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Snapshot {
-    pub checking: bool,
-    pub cached: Option<ReleaseCheck>,
-    pub error: Option<CheckError>,
-    pub notice: Option<ReleaseCheck>,
-    pub last_success: Option<i64>,
-    pub last_attempt: Option<i64>,
-    pub retry_after: Option<i64>,
-    pub skipped_version: Option<String>,
-}
 
 #[derive(Clone, Debug, Default)]
 struct Durable {

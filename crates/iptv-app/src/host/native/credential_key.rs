@@ -71,8 +71,12 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
         .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
     lock.lock()
         .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
-    let entry = Entry::new("org.iptv-rs.database", "catalog-v1")
-        .map_err(|_| Error::unavailable("platform credential broker could not be opened"))?;
+    let entry = Entry::new(
+        "org.iptv-rs.database",
+        "catalog-v1",
+        "Patina catalog key".to_owned(),
+    )
+    .map_err(|_| Error::unavailable("platform credential broker could not be opened"))?;
     let secret = match entry.get_secret() {
         Ok(secret) => Zeroizing::new(secret),
         Err(keyring::Error::NoEntry) => {
@@ -226,7 +230,12 @@ mod tests {
                 .any(|bytes| bytes == b"synthetic-secret")
         );
 
-        let entry = linux::Entry::new("org.iptv-rs.database", "catalog-v1").unwrap();
+        let entry = linux::Entry::new(
+            "org.iptv-rs.database",
+            "catalog-v1",
+            "Patina catalog key".to_owned(),
+        )
+        .unwrap();
         let original = zeroize::Zeroizing::new(entry.get_secret().unwrap());
         let assert_closed = || {
             let failed = owner();

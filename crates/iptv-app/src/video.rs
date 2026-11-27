@@ -61,20 +61,13 @@ use nsh_core::prelude::*;
 
 use crate::{Ui, ViewMode};
 
-/// The local mock server (`tools/mock-server.py`) as the player reaches it:
-/// through the Android emulator's host alias, or on this machine. Debug
-/// builds only: the synthetic guide's channels have no streams in a release.
-#[cfg(all(debug_assertions, target_os = "android"))]
-const MOCK_SERVER: &str = "http://10.0.2.2:8089";
-#[cfg(all(debug_assertions, not(target_os = "android")))]
-const MOCK_SERVER: &str = "http://127.0.0.1:8089";
-
 /// What a channel of the synthetic guide (shown before any playlist is
 /// imported) plays: in debug builds the mock server's test streams
 /// (`tools/make-hls-fixtures.sh --serve`; three test patterns cycle by
 /// channel, `/archive/*` for catch-up), else nothing.
 #[cfg(debug_assertions)]
 pub fn synthetic_url(channel: usize, playback: crate::Playback) -> Option<String> {
+    use crate::host::MOCK_SERVER;
     Some(match playback {
         crate::Playback::Live => format!("{MOCK_SERVER}/ch{}/index.m3u8", channel % 3),
         crate::Playback::CatchUp { start, offset } => {
@@ -277,8 +270,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         .w(move || px(surface_rect(ui, surface).2))
         .h(move || px(surface_rect(ui, surface).3));
     // Desktop prototype routing metadata; the shared player wire stays unchanged.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
+    if crate::host::PLAYER_POPUPS {
         player = player.prop("popupSurface", move || serde_json::json!(surface));
     }
     // Every prop of the contract, under its one declared name.

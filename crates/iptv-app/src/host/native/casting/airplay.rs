@@ -16,15 +16,17 @@ use tokio::time::{Instant, timeout_at};
 #[cfg(target_os = "linux")]
 pub(super) struct Configuration {
     directory: PathBuf,
+    pairing_label: String,
     timing_port: Option<OsString>,
 }
 
 #[cfg(target_os = "linux")]
 impl Configuration {
-    pub(super) fn from_env(directory: &Path) -> Option<Self> {
+    pub(super) fn from_env(directory: &Path, pairing_label: String) -> Option<Self> {
         (std::env::var_os("PATINA_RUST_AIRPLAY").as_deref() == Some(OsStr::new("1"))).then(|| {
             Self {
                 directory: directory.to_owned(),
+                pairing_label,
                 timing_port: std::env::var_os("PATINA_AIRPLAY_TIMING_PORT"),
             }
         })
@@ -39,11 +41,11 @@ impl Configuration {
         #[cfg(not(feature = "test-support"))]
         {
             use crate::host::native::credential_key::CastStore;
-            builder.credential_store(CastStore::new(&self.directory))
+            builder.credential_store(CastStore::new(&self.directory, self.pairing_label.clone()))
         }
         #[cfg(feature = "test-support")]
         {
-            let _ = &self.directory;
+            let _ = (&self.directory, &self.pairing_label);
             builder
         }
     }

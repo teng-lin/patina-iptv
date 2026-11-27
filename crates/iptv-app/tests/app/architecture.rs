@@ -46,12 +46,12 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/casting/android.rs", "LEASES"),
     ("host/native/casting/android.rs", "NEXT_LEASE"),
     ("host/native/android_transport.rs", "RELAYS"), // JNI playback relay handles.
-    ("backup.rs", "REQUEST"),                       // Android document picker signal.
-    ("backup.rs", "ANSWER"),                        // Android document picker callback.
+    ("host/backup_documents.rs", "REQUEST"),        // Android document picker signal.
+    ("host/backup_documents.rs", "ANSWER"),         // Android document picker callback.
     ("capture_limits.rs", "REPORTED"),              // The host's report of what can stop a capture.
     ("host/native/keep_awake.rs", "HELD"),          // The OS idle-sleep hold while a capture runs.
     ("host/native/keep_awake.rs", "FAILED"),        // That hold failed, for the start notice.
-    ("backup.rs", "PROBE"),                         // Android document picker probe request.
+    ("host/backup_documents.rs", "PROBE"),          // Android document picker probe request.
     ("backup.rs", "PICKERS"),                       // The document pickers the host reported.
     ("backup.rs", "PICKERS_FOR_TEST"),              // Synthetic picker injection (headless tests).
     ("content_image.rs", "CACHE"),                  // Artwork cache.
@@ -82,8 +82,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("input.rs", "REPEATS"),        // test-support-only keyboard repeat mirror.
     ("runtime_owner.rs", "RUNTIME"), // The shell's single application handle.
     ("runtime_owner.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
-    ("lib.rs", "TUI_MODE"), // Host flag: TUI backend bypasses StickyCells trackball wrapper.
-    ("lib.rs", "LEAVE"),    // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
+    ("host.rs", "TUI_MODE"), // Host flag: TUI backend bypasses StickyCells trackball wrapper.
+    ("lib.rs", "LEAVE"),     // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
     ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
@@ -112,13 +112,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
 /// Platform `cfg` outside `src/host/`, the host glue: what is still to
 /// move there. It may only shrink; a screen that needs a platform fact asks
 /// `crate::host`.
-const PLATFORM_CFG_OUTSIDE_HOST: &[&str] = &[
-    "backup.rs",                 // Android's document picker beside the desktop file dialog.
-    "desktop/player_windows.rs", // macOS window ordering of the desktop player windows.
-    "lib.rs",                    // The desktop-only guide walkthrough of the headless tests.
-    "main.rs",                   // The desktop binaries' entry points.
-    "video.rs",                  // The emulator's mock-server alias; desktop popup routing.
-];
+const PLATFORM_CFG_OUTSIDE_HOST: &[&str] = &["main.rs"];
 
 /// Whether `code` names a platform in a `cfg`.
 fn platform_cfg(code: &str) -> bool {

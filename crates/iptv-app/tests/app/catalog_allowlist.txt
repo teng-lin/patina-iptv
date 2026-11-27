@@ -210,7 +210,7 @@ iptv-app/src/host/native/credential_key.rs	platform database key has an invalid 
 iptv-app/src/host/native/credential_key.rs	secure random generator failed
 iptv-app/src/host/native/credential_key.rs	synthetic database key was not installed
 iptv-app/src/host/native/credential_key/android.rs	Android Keystore is unavailable
-iptv-app/src/host/native/credential_key/linux.rs	Patina catalog key
+iptv-app/src/host/native/credential_key.rs	Patina catalog key
 iptv-app/src/host/web.rs	this device has no key store
 # Data directory initialization logs the cause and shows a generic storage notice.
 iptv-app/src/host/native/platform_data.rs	Android host has not initialized private storage
@@ -293,7 +293,7 @@ iptv-core/src/add_playlist.rs	address uses an unsupported scheme
 # The debug overlay (IPTV_DEBUG).
 iptv-app/src/header.rs	keys {} · {} µs (max {})
 # The product's name and its files.
-iptv-app/src/backup.rs	Patina.patinabackup
+iptv-app/src/host/backup_documents.rs	Patina.patinabackup
 iptv-app/src/desktop.rs	Patina
 iptv-app/src/main.rs	Patina
 iptv-app/src/startup_view.rs	Patina

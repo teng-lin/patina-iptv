@@ -3,7 +3,8 @@ use crate::Ui;
 use nsh_core::prelude::*;
 use std::time::Duration;
 pub fn bind(ui: Ui) {
-    if std::env::var_os("PATINA_GUIDE_WINDOW_WALKTHROUGH").is_none() {
+    if !crate::host::PLAYER_POPUPS || std::env::var_os("PATINA_GUIDE_WINDOW_WALKTHROUGH").is_none()
+    {
         return;
     }
     let _guide = set_timeout(Duration::from_secs(2), move || {

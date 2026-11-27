@@ -118,7 +118,7 @@ impl Sender {
         }
     }
 
-    pub(super) fn new(directory: &Path) -> Self {
+    pub(super) fn new(directory: &Path, _pairing_label: String) -> Self {
         #[cfg(not(target_os = "linux"))]
         let _ = directory;
         Self {
@@ -127,7 +127,7 @@ impl Sender {
             #[cfg(feature = "test-support")]
             loopback: None,
             #[cfg(target_os = "linux")]
-            airplay: airplay::Configuration::from_env(directory),
+            airplay: airplay::Configuration::from_env(directory, _pairing_label),
         }
     }
 

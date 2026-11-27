@@ -60,7 +60,7 @@ const DIRECTORY: &str = "/patina";
 
 /// The runtime's ports on a browser TV. The runtime reads the host's
 /// clocks too: the Worker has no other.
-pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
+pub(crate) fn ports(directory: PathBuf, _pairing_label: String) -> crate::runtime::Ports {
     crate::runtime::time::install(crate::runtime::time::Clock {
         monotonic: iptv_web::adapters::monotonic,
         wall: iptv_web::adapters::wall,

@@ -72,7 +72,10 @@ pub(crate) fn with_runtime<R>(owner: Rc<Runtime>, run: impl FnOnce() -> R) -> R 
 }
 
 pub(crate) fn new_runtime(directory: std::path::PathBuf) -> Runtime {
-    let mut ports = host::ports(directory);
+    let mut ports = host::ports(
+        directory,
+        crate::i18n::tr("Patina AirPlay pairing").to_owned(),
+    );
     ports.startup_mark = crate::startup::mark_with;
     Runtime::new(ports)
 }

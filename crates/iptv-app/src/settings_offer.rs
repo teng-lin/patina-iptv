@@ -216,7 +216,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if matches!(
         key,
         "general.check_updates" | "general.app_update_frequency"
-    ) && (crate::is_tui_mode()
+    ) && (crate::host::is_tui_mode()
         || matches!(
             host.platform,
             iptv_core::capabilities::Platform::Ipad | iptv_core::capabilities::Platform::Unknown
