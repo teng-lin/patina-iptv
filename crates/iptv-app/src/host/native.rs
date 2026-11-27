@@ -77,7 +77,7 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
-        ports.cast = Some(std::sync::Arc::new(casting::Sender));
+        ports.cast = Some(std::sync::Arc::new(casting::Sender::default()));
     }
     #[cfg(feature = "test-support")]
     if let Some(port) = TEST_CAST.get() {

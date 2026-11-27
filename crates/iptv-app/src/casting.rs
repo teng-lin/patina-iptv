@@ -39,7 +39,7 @@ pub(super) fn discover(ui: Ui) {
         return;
     }
     chooser::show_receivers(ui, Vec::new());
-    if !runtime().chromecast_available() {
+    if !runtime().network_cast_available() {
         return;
     }
     ui.cast_discovering.set(true);
@@ -63,7 +63,7 @@ pub(super) fn discover(ui: Ui) {
 pub(super) fn destination_selected(value: &str) -> bool {
     match runtime().cast_target() {
         None => value == "local",
-        Some((Target::Chromecast(receiver), _)) => value == receiver.address.to_string(),
+        Some((Target::Network(receiver), _)) => value == receiver.id,
         Some((Target::AirPlay, _)) => false, // Selection is shown by Apple's named-device picker.
     }
 }
@@ -86,15 +86,14 @@ pub(super) fn play_here(ui: Ui) {
     }
 }
 pub(super) fn select(ui: Ui, receiver: Receiver) {
-    if runtime()
-        .cast_target()
-        .is_some_and(|(target, _)| matches!(target, Target::Chromecast(current) if current.address == receiver.address))
-    {
+    if runtime().cast_target().is_some_and(
+        |(target, _)| matches!(target, Target::Network(current) if current.id == receiver.id),
+    ) {
         play_here(ui);
         return;
     }
     if let Some(channel) = ui.playing.get_untracked() {
-        start(ui, channel, Target::Chromecast(receiver));
+        start(ui, channel, Target::Network(receiver));
     }
 }
 pub(super) fn select_airplay(ui: Ui) {
@@ -220,7 +219,10 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 {
                     owner.replace_native_cast().await?;
                 } else {
-                    owner.cast_command(Command::Stop).await?;
+                    match owner.cast_command(Command::Stop).await {
+                        Err(Error::StopUnconfirmed) => report(Error::StopUnconfirmed),
+                        result => result?,
+                    }
                 }
                 retired = true;
                 ui.cast_remote.set(false);
@@ -376,7 +378,10 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
         let result = runtime().cast_command(command).await;
         ui.cast_busy.set(false);
         match result {
-            Ok(()) if command == Command::Stop => {
+            Ok(()) | Err(Error::StopUnconfirmed) if command == Command::Stop => {
+                if let Err(error) = result {
+                    report(error);
+                }
                 ui.cast_remote.set(false);
                 ui.playing.set(None);
                 if resume_local
@@ -441,5 +446,6 @@ fn report(error: Error) {
         Error::Busy => notify(tr("No provider connection is available.")),
         Error::Denied => notify(tr("Playback is no longer authorized.")),
         Error::Unsupported => notify(tr("This channel cannot be cast.")),
+        Error::StopUnconfirmed => notify(tr("Could not confirm that the TV stopped playback.")),
     }
 }

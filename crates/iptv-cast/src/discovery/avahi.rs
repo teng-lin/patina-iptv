@@ -14,19 +14,25 @@ const RESOLVER: &str = "org.freedesktop.Avahi.ServiceResolver";
 const SERVICE: &str = "_googlecast._tcp";
 const IPV4: i32 = 0;
 
-pub(super) fn discover() -> Result<Vec<Receiver>, dbus::Error> {
-    browse(&Connection::new_system()?)
+pub(super) fn discover(deadline: Instant) -> Result<Vec<Receiver>, dbus::Error> {
+    browse(&Connection::new_system()?, deadline)
 }
 
-fn browse(bus: &Connection) -> Result<Vec<Receiver>, dbus::Error> {
+fn browse(bus: &Connection, deadline: Instant) -> Result<Vec<Receiver>, dbus::Error> {
     bus.add_match_no_cb("type='signal',sender='org.freedesktop.Avahi',interface='org.freedesktop.Avahi.ServiceBrowser'")?;
-    let server = bus.with_proxy(AVAHI, "/", Duration::from_secs(1));
+    let server = bus.with_proxy(
+        AVAHI,
+        "/",
+        deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_secs(1)),
+    );
     let (browser,): (Path<'static>,) = server.method_call(
         SERVER,
         "ServiceBrowserNew",
         (-1_i32, IPV4, SERVICE, "local", 0_u32),
     )?;
-    let until = Instant::now() + Duration::from_secs(2);
+    let until = (Instant::now() + Duration::from_secs(2)).min(deadline);
     let mut services = BTreeSet::new();
     while let Some(remaining) = until.checked_duration_since(Instant::now()) {
         let Some(message) = bus.channel().blocking_pop_message(remaining)? else {
@@ -62,15 +68,16 @@ fn browse(bus: &Connection) -> Result<Vec<Receiver>, dbus::Error> {
             _ => {}
         }
     }
-    resolve(bus, services)
+    resolve(bus, services, deadline)
 }
 
 fn resolve(
     bus: &Connection,
     services: BTreeSet<(i32, String)>,
+    deadline: Instant,
 ) -> Result<Vec<Receiver>, dbus::Error> {
     bus.add_match_no_cb("type='signal',sender='org.freedesktop.Avahi',interface='org.freedesktop.Avahi.ServiceResolver'")?;
-    let until = Instant::now() + Duration::from_secs(2);
+    let until = (Instant::now() + Duration::from_secs(2)).min(deadline);
     let mut pending = BTreeSet::new();
     // Start every lookup before waiting on a TV that may have left the LAN.
     for (interface, name) in services {
@@ -123,7 +130,9 @@ fn resolve(
                     .find_map(|value| value.strip_prefix(key))
             };
             let address = SocketAddr::from((ip, port));
-            if let Some(receiver) = Receiver::from_record(address, field("fn="), field("ca=")) {
+            if let Some(receiver) =
+                Receiver::from_record(address, field("fn="), field("ca="), field("id="))
+            {
                 found.entry(name).or_insert(receiver);
             }
         }

@@ -169,8 +169,8 @@ pub(crate) struct Features([Availability; 9]);
 
 impl Features {
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with(mut self, feature: Feature, availability: Availability) -> Self {
         self.0[feature as usize] = availability;
@@ -360,16 +360,16 @@ impl Media {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn url(&self) -> &str {
         self.url.as_str()
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn content_type(&self) -> Option<&str> {
         self.content_type.as_ref().map(AsRef::as_ref)
@@ -528,8 +528,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_link(mut self, link: Link, error: Option<Error>) -> Self {
         self.link = Some((link, error));
@@ -537,8 +537,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_position(mut self, position: Option<Duration>) -> Self {
         self.position = Some(position);
@@ -546,8 +546,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_duration(mut self, duration: Option<Duration>) -> Self {
         self.duration = Some(duration);
@@ -555,8 +555,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_features(mut self, features: Features) -> Self {
         self.features = Some(features);
@@ -564,8 +564,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_output(
         mut self,

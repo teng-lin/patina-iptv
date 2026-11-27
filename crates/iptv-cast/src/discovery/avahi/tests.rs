@@ -39,7 +39,13 @@ fn private_bus() -> (Bus, String) {
 #[test]
 fn an_unavailable_avahi_service_returns_an_error() {
     let (_bus, address) = private_bus();
-    assert!(browse(&connection(&address)).is_err());
+    assert!(
+        browse(
+            &connection(&address),
+            Instant::now() + Duration::from_secs(2)
+        )
+        .is_err()
+    );
 }
 
 #[test]

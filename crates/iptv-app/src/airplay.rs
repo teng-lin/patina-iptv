@@ -5,7 +5,7 @@ use nsh_core::prelude::*;
 use serde_json::json;
 
 pub(crate) fn direct() -> bool {
-    runtime().native_cast_view().is_some() && !runtime().chromecast_available()
+    runtime().native_cast_view().is_some() && !runtime().network_cast_available()
 }
 
 pub(crate) fn button(ui: Ui, size: f32, id: &'static str) -> View {

@@ -645,7 +645,7 @@ fn off_runtime_build_and_shutdown_are_reported() {
     let fixture = Arc::new(Fixture::default());
     let (cast, route, connection) = runtime.block_on(async {
         assert_error(
-            Cast::builder().build().err().unwrap(),
+            Cast::builder().build_with(Vec::new()).err().unwrap(),
             ErrorKind::Unavailable,
             Stage::Configuration,
             Delivery::NotSent,

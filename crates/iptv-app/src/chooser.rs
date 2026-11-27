@@ -55,6 +55,7 @@ pub struct Open {
     values: Vec<String>,
     /// Snapshot behind both the translated labels and their opaque pick values.
     tracks: Option<iptv_core::tracks::Tracks>,
+    receivers: Vec<iptv_core::cast::Receiver>,
     // Preserve action identity for a press and keep the originating desktop window.
     more: Option<More>,
     pub list: Chooser,
@@ -80,6 +81,7 @@ pub(super) fn open_more(
         labels: Vec::new(),
         values: Vec::new(),
         tracks: None,
+        receivers: Vec::new(),
         more: Some(More { controls, window }),
     }));
 }
@@ -87,30 +89,37 @@ pub(super) fn open_more(
 pub(crate) fn show_receivers(ui: Ui, mut receivers: Vec<iptv_core::cast::Receiver>) {
     use iptv_core::cast::Target;
     let owner = crate::runtime_owner::runtime();
-    if let Some((Target::Chromecast(current), _)) = owner.cast_target()
-        && !receivers
-            .iter()
-            .any(|receiver| receiver.address == current.address)
+    if let Some((Target::Network(current), _)) = owner.cast_target()
+        && !receivers.iter().any(|receiver| receiver.id == current.id)
     {
         receivers.push(current);
     }
     let mut labels = vec![tr("This device").to_owned()];
     let mut values = vec!["local".to_owned()];
     labels.extend(receivers.iter().map(|r| r.name.clone()));
-    values.extend(receivers.iter().map(|r| r.address.to_string()));
+    values.extend(receivers.iter().map(|r| r.id.clone()));
     // Production Apple hosts provide the real named-device control. The
     // fallback supports native ports without a mounted platform view.
     if owner.native_cast_available() && owner.native_cast_view().is_none() {
         labels.push(tr("Choose a device").to_owned());
         values.push("native".into());
     }
-    let len = labels.len();
+    let list = ui.chooser.with_untracked(|open| {
+        if let Some(open) = open.as_ref().filter(|open| open.kind == Kind::Cast) {
+            let mut list = open.list.clone();
+            list.replace_actions(&open.values, &values);
+            list
+        } else {
+            Chooser::new(labels.len(), 0)
+        }
+    });
     ui.chooser.set(Some(Open {
         kind: Kind::Cast,
-        list: Chooser::new(len, 0),
+        list,
         labels,
         values,
         tracks: None,
+        receivers,
         more: None,
     }));
 }
@@ -290,6 +299,7 @@ impl Open {
             labels,
             values,
             tracks: Some(tracks),
+            receivers: Vec::new(),
             more: None,
         }
     }
@@ -321,6 +331,7 @@ pub fn open(ui: Ui, kind: Kind) {
         labels,
         values,
         tracks: None,
+        receivers: Vec::new(),
         more: None,
     }));
 }
@@ -411,14 +422,12 @@ pub fn pick(ui: Ui, index: usize) {
                 crate::casting::select_airplay(ui);
                 return;
             }
-            if let (Some(name), Ok(address)) = (open.labels.get(index), value.parse()) {
-                crate::casting::select(
-                    ui,
-                    iptv_core::cast::Receiver {
-                        name: name.clone(),
-                        address,
-                    },
-                );
+            if let Some(receiver) = open
+                .receivers
+                .into_iter()
+                .find(|receiver| receiver.id == value)
+            {
+                crate::casting::select(ui, receiver);
             }
         }
         Kind::AirPlay => {

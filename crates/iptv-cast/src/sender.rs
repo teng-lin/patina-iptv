@@ -58,12 +58,16 @@ pub(crate) trait Backend: Send + Sync {
     ) -> BoxFuture<'a, Result<BackendConnect, Error>>;
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "backend integration follows this contract")
-)]
 pub(crate) enum BackendConnect {
+    #[cfg_attr(
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
+    )]
     Ready(Box<dyn Driver>),
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "requires an interactive pairing backend")
+    )]
     PinRequired(Box<dyn PairDriver>),
 }
 

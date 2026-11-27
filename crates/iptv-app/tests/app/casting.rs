@@ -21,6 +21,7 @@ struct FakeCast {
     load_error: Option<Error>,
     allow_error: Option<Error>,
     initially_paused: bool,
+    stop_unconfirmed: bool,
     discovered_name: Arc<Mutex<Option<String>>>,
 }
 
@@ -42,7 +43,8 @@ impl Port for FakeCast {
                     .unwrap()
                     .clone()
                     .unwrap_or_else(|| "Generated TV".into()),
-                address: ([127, 0, 0, 1], 8009).into(),
+                id: "googlecast:generated".into(),
+                protocol: iptv_core::cast::NetworkProtocol::GoogleCast,
             }])
         })
     }
@@ -90,6 +92,15 @@ impl Remote for FakeCast {
             } else {
                 Ok(())
             }
+        })
+    }
+    fn stop_checked(&self) -> Task<'_, ()> {
+        Box::pin(async move {
+            self.stop().await;
+            if self.stop_unconfirmed {
+                return Err(Error::StopUnconfirmed);
+            }
+            Ok(())
         })
     }
     fn state(&self) -> Task<'_, RemoteState> {
@@ -188,6 +199,29 @@ fn remote_controls_and_play_here_recover_one_connection_after_disconnect() {
             "retire",
             "disconnected at stop"
         ]
+    );
+}
+
+#[test]
+fn play_here_restores_local_playback_and_reports_unconfirmed_stop() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        stop_unconfirmed: true,
+        ..Default::default()
+    };
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    open_cast(app);
+    step(app.press("id:chooser-items >> text:This device"));
+    step(app.wait_for("text:Could not confirm that the TV stopped playback."));
+    step(
+        app.wait_until("local playback resumes", Duration::from_secs(10), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "retire", "disconnected at stop"]
     );
 }
 

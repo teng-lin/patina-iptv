@@ -26,8 +26,8 @@ pub struct ProtocolId(&'static str);
 
 impl ProtocolId {
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn new(value: &'static str) -> Self {
         Self(value)
@@ -86,8 +86,8 @@ impl Route {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn payload<T: Any>(&self) -> Option<&T> {
         self.candidate.payload.downcast_ref::<T>()
@@ -111,8 +111,8 @@ pub(crate) struct Candidate {
 
 impl Candidate {
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn new(
         name: String,
@@ -156,8 +156,8 @@ impl ScanSink {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn push(&self, candidate: Candidate) {
         let mut guard = self.0.lock().unwrap();
@@ -250,7 +250,11 @@ impl CastBuilder {
     /// time enabled. Until a production backend is registered, this returns
     /// an unavailable configuration error.
     pub fn build(self) -> Result<Cast, Error> {
-        self.build_with(Vec::new())
+        let backends: Vec<Arc<dyn Backend>> = vec![
+            #[cfg(feature = "googlecast")]
+            Arc::new(crate::googlecast::adapter::GoogleCast),
+        ];
+        self.build_with(backends)
     }
 
     pub(crate) fn build_with(self, backends: Vec<Arc<dyn Backend>>) -> Result<Cast, Error> {

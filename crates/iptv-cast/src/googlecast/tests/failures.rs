@@ -68,9 +68,12 @@ async fn a_peer_that_stops_reading_cannot_hold_the_socket_open() {
     let (client, _peer) = tokio::io::duplex(1);
     let (_session, requests) = session_channel();
     let started = Instant::now();
-    timeout(DEADLINE + Duration::from_secs(1), drive(client, requests))
-        .await
-        .expect("the blocked write should time out");
+    timeout(
+        DEADLINE + Duration::from_secs(1),
+        drive(client, requests, "sender-0".into()),
+    )
+    .await
+    .expect("the blocked write should time out");
     assert_eq!(started.elapsed(), DEADLINE);
 }
 

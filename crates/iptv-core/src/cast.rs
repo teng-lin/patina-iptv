@@ -1,17 +1,22 @@
 //! Identities and state visible to a sender's picker and remote.
-use std::net::SocketAddr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receiver {
-    pub address: SocketAddr,
+    pub id: String,
+    pub protocol: NetworkProtocol,
     pub name: String,
 }
 
-/// Apple owns AirPlay discovery and route selection through its native picker.
-/// Unlike a Chromecast, that destination has no app-visible network address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetworkProtocol {
+    GoogleCast,
+}
+
+/// The native AirPlay destination is selected by Apple's system picker.
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Chromecast(Receiver),
+    Network(Receiver),
     AirPlay,
 }
 
@@ -32,6 +37,7 @@ pub enum Error {
     Refused,
     Unknown,
     NoRequest { relay_port: u16 },
+    StopUnconfirmed,
     Busy,
     Denied,
     Unsupported,
