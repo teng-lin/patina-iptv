@@ -345,6 +345,12 @@ pub fn save_collapsed(
         .set_collapsed_playlists(collapsed)
 }
 
+pub(crate) struct RefreshSource {
+    pub(crate) id: SourceId,
+    pub(crate) last_attempt_at: Option<i64>,
+    pub(crate) policy: SourcePolicy,
+}
+
 /// Refresh policy belongs to the application; the host supplies timers and
 /// foreground notifications. No device wakeups are requested in the background.
 pub fn start_scheduler(owner: &Rc<super::Runtime>) {
@@ -356,16 +362,18 @@ pub fn start_scheduler(owner: &Rc<super::Runtime>) {
         let mut startup = true;
         loop {
             if runtime.lifecycle.foreground().get() {
-                if let Ok(sources) = super::commands::source_policies(&runtime).await {
-                    for (source, policy) in sources {
+                if let Ok(sources) = runtime.services().catalog().refresh_sources().await {
+                    for source in sources {
                         let attempted = runtime
                             .imports
                             .attempts
                             .borrow()
                             .get(&source.id)
                             .copied()
-                            .or(source.import.last_attempt_at);
-                        if policy.due(crate::time::now_unix(), attempted, startup)
+                            .or(source.last_attempt_at);
+                        if source
+                            .policy
+                            .due(crate::time::now_unix(), attempted, startup)
                             && !running(&runtime, source.id)
                         {
                             crate::data::refresh(&runtime, source.id);

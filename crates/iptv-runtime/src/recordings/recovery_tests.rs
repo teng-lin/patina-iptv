@@ -72,7 +72,7 @@ async fn park(owner: &Runtime, request: Request) -> JobId {
 async fn ready(owner: &Runtime) {
     owner.start_recordings();
     let until = std::time::Instant::now() + Duration::from_secs(5);
-    while !owner.recordings.lock().ready {
+    while !owner.recordings.shared().lock().ready {
         assert!(std::time::Instant::now() < until, "recorder did not start");
         tokio::time::sleep(Duration::from_millis(5)).await;
     }

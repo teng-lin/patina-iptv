@@ -457,7 +457,7 @@ impl Runtime {
     }
     pub fn owns_viewing_source(&self, surface: usize, source: &PlaySource) -> bool {
         self.recordings
-            .shared
+            .shared()
             .lock()
             .viewers
             .get(&surface)
@@ -509,7 +509,7 @@ impl Runtime {
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
         let attempt = log::log_enabled!(target: PREPARATION_LOG, log::Level::Debug).then(|| {
             self.recordings
-                .shared
+                .shared()
                 .next_preparation
                 .fetch_add(1, Ordering::Relaxed)
         });
