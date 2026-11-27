@@ -569,9 +569,11 @@ fn start_update(
                 job.until_finished().await;
             }
             let guides = stored::configured_guides(&owner, source).await;
-            let (accepted, mut rx) = stored::download(&owner, source, guides, cancel, || {
-                source_is_visible(&owner, source)
-            });
+            let current = crate::library::import_is_current(&owner, source, &completion);
+            let (accepted, mut rx) =
+                stored::download(&owner, source, guides, cancel, current, || {
+                    source_is_visible(&owner, source)
+                });
             // Whether this update set the next check, or settled that the
             // policy asks for none.
             let mut answered = false;

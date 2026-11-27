@@ -127,21 +127,27 @@ pub(super) async fn configured_guides(
 }
 
 /// Dispatch a prepared guide download and return its result stream.
+/// Revoked work still drains its policy response, but its admission notices
+/// must not replace the result of the guide action that revoked it.
 pub(super) fn download(
     owner: &Runtime,
     source: SourceId,
     guides: Result<Vec<EpgSourceConfig>, Error>,
     cancel: CancelToken,
+    current: bool,
     visible: impl FnOnce() -> bool,
 ) -> (bool, UnboundedReceiver<Msg>) {
     let (tx, rx) = unbounded_channel();
+    let notify = |message| {
+        if current {
+            owner.emit(crate::RuntimeEvent::Notify(message));
+        }
+    };
     // Without a download (nothing to download, the store unreadable,
     // the workers busy) the update ends as soon as it began.
     let accepted = match guides {
         Ok(guides) if guides.is_empty() => {
-            owner.emit(crate::RuntimeEvent::Notify(
-                "No guide sources are configured",
-            ));
+            notify("No guide sources are configured");
             // No worker holds the sender: the wait below ends at once.
             drop(tx);
             false
@@ -150,9 +156,7 @@ pub(super) fn download(
             // Downloads run on blocking workers, which this host has
             // none of (the shell hides the command there); a caller
             // that asks anyway hears why nothing happens.
-            owner.emit(crate::RuntimeEvent::Notify(
-                "This device cannot download guides yet.",
-            ));
+            notify("This device cannot download guides yet.");
             drop(tx);
             false
         }
@@ -163,9 +167,7 @@ pub(super) fn download(
                 download_now(&worker, source, guides, &tx, &cancel).await;
             });
             if !accepted {
-                owner.emit(crate::RuntimeEvent::Notify(
-                    "Too many playlists are updating. Try again shortly.",
-                ));
+                notify("Too many playlists are updating. Try again shortly.");
             }
             accepted
         }
