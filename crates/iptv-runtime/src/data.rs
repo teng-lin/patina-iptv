@@ -501,7 +501,8 @@ pub fn update_guide_now(owner: &Rc<crate::Runtime>, done: impl FnOnce() + 'stati
 /// Downloads `source`'s guide now (every guide source switched on, with
 /// the storage settings and guide choices of now); the guide on screen
 /// changes when it is `source`'s. `done` runs on the UI thread when it
-/// finished. False when there is no guide to download.
+/// finished, with true only if the worker accepted it and it still owns
+/// the source's guide. False when there is no guide to download.
 ///
 /// A request joins an update that runs already, unless a guide action
 /// superseded that one: it then downloads nothing any more, and this
@@ -568,9 +569,11 @@ fn start_update(
                 job.until_finished().await;
             }
             let guides = stored::configured_guides(&owner, source).await;
-            let (accepted, mut rx) = stored::download(&owner, source, guides, cancel, || {
-                source_is_visible(&owner, source)
-            });
+            let current = crate::library::import_is_current(&owner, source, &completion);
+            let (accepted, mut rx) =
+                stored::download(&owner, source, guides, cancel, current, || {
+                    source_is_visible(&owner, source)
+                });
             // Whether this update set the next check, or settled that the
             // policy asks for none.
             let mut answered = false;
@@ -613,7 +616,9 @@ fn start_update(
                 keep_guide_check(&owner, source, generation, unscheduled);
             }
             owner.emit(crate::RuntimeEvent::LibraryChanged);
-            done(accepted);
+            // A guide action can finish before the canceled worker unwinds.
+            // Its old completion must not report an update over that result.
+            done(accepted && crate::library::import_is_current(&owner, source, &completion));
         }
     });
     true
