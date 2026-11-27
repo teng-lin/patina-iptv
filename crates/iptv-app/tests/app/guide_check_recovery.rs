@@ -269,6 +269,7 @@ impl Scenario {
         step(self.app.press("text:Delete stored guide data"));
         step(self.app.wait_for("text:/^Delete guide data for /"));
         step(self.app.press("text:Delete"));
+        step(self.app.wait_for_within("text:Guide data deleted", IMPORT));
         until(
             &mut self.app,
             "the stored guide was deleted",
@@ -428,6 +429,18 @@ fn a_failed_refresh_over_a_canceled_guide_download_keeps_the_guide_timer() {
 fn a_guide_check_due_during_a_refresh_waits_for_it() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, true, true);
+    let notices = Arc::new(Mutex::new(Vec::new()));
+    let observed = notices.clone();
+    s.app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::Text { text, .. } = item {
+                let text = text.text.to_string();
+                if matches!(text.as_str(), "Guide data deleted" | "Guide updated") {
+                    observed.lock().unwrap().push(text);
+                }
+            }
+        }
+    });
     // The refresh waits for its playlist.
     let playlist = s.playlist.clone().expect("a linked playlist");
     playlist.hold();
@@ -461,6 +474,14 @@ fn a_guide_check_due_during_a_refresh_waits_for_it() {
         "the generated programs are stored before deletion"
     );
     s.confirm_guide_deletion();
+    // As in the back-off scenario, wait for the final action: the revoked
+    // update has unwound and cannot overwrite the deletion confirmation.
+    step(s.app.wait_for_within(
+        "id:guide-sources-screen >> text:Update the guide now",
+        IMPORT,
+    ));
+    assert!(s.shows("id:app-notice >> text:Guide data deleted"));
+    assert_eq!(notices.lock().unwrap().as_slice(), ["Guide data deleted"]);
     s.until_pending("the revoked update kept a guide check");
     // Registration is visible before the engine polls the task that arms its
     // timer. Let it set the deadline on the current clock before jumping ahead.

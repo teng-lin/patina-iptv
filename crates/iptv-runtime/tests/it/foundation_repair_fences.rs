@@ -391,6 +391,53 @@ fn import_fixture(host: &Host, server: &Server, now: i64) -> (Source, ChannelRef
 }
 
 #[test]
+fn a_canceled_guide_update_cannot_report_success_after_guide_deletion() {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let server = Server::new(now);
+    let host = Host::new();
+    let owner = &host.owner;
+    let (_, channel) = import_fixture(&host, &server, now);
+    let source = channel.source;
+    data::refresh_guide_status(owner);
+    host.until(|| !owner.source_lines(source).is_empty());
+
+    let (entered, _release) = server.hold_next_guide();
+    let result = Rc::new(Cell::new(None));
+    let completed = result.clone();
+    assert!(data::update_source_guide(owner, source, move |success| {
+        completed.set(Some(success));
+    }));
+    // Poll the update separately so its completion can arrive after Clear's.
+    let mut update = host.tasks.borrow_mut().pop_back().unwrap();
+    host.drive(poll_fn(|cx| {
+        assert!(update.as_mut().poll(cx).is_pending());
+        if entered.load(Ordering::SeqCst) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }));
+    let deleted = Rc::new(Cell::new(None));
+    let cleared = deleted.clone();
+    assert!(data::clear_source_guide(owner, source, move |success| {
+        cleared.set(Some(success));
+    }));
+    host.until(|| deleted.get().is_some());
+    assert_eq!(deleted.get(), Some(true));
+    assert_eq!(result.get(), None, "the canceled update is still unwinding");
+
+    host.drive(update);
+    assert_eq!(
+        result.get(),
+        Some(false),
+        "a revoked update must not replace the deletion confirmation with success"
+    );
+}
+
+#[test]
 fn an_unbound_runtime_updates_its_catalog_organization_and_favorites() {
     use iptv_core::organization::GroupPreference;
     use iptv_guide::combined::{epg_channel, qualified_key};
