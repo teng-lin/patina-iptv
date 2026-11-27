@@ -1,7 +1,7 @@
 //! A loopback receiver that checks the Cast wire protocol independently of the sender.
 use prost::Message;
 use serde_json::{Value, json};
-use std::{net::SocketAddr, sync::Arc};
+use std::{io::ErrorKind, net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -152,6 +152,7 @@ pub(super) async fn start(
             if let Some(id) = body.get("requestId") {
                 reply["requestId"] = id.clone();
             }
+            let heartbeat = request.namespace == HEARTBEAT;
             let frame = Envelope {
                 version: 0,
                 source: request.destination,
@@ -161,8 +162,25 @@ pub(super) async fn start(
                 message: Some(reply.to_string()),
             }
             .encode_to_vec();
-            socket.write_u32(frame.len() as u32).await.unwrap();
-            socket.write_all(&frame).await.unwrap();
+            let sent = async {
+                socket.write_u32(frame.len() as u32).await?;
+                socket.write_all(&frame).await
+            }
+            .await;
+            // A PONG may race the client's close after it consumes a status reply.
+            if heartbeat
+                && sent.as_ref().is_err_and(|error| {
+                    matches!(
+                        error.kind(),
+                        ErrorKind::ConnectionAborted
+                            | ErrorKind::ConnectionReset
+                            | ErrorKind::BrokenPipe
+                    )
+                })
+            {
+                break;
+            }
+            sent.unwrap();
         }
     });
     (address, task)
