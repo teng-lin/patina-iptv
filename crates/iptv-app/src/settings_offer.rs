@@ -21,6 +21,7 @@ pub const WIRED: &[&str] = &[
     "channels.show_recent",
     "channels.show_all_channels",
     "general.clock",
+    "general.app_update_frequency",
     "guide.autoplay",
     "guide.switch_delay",
     "guide.fullscreen_timeout",
@@ -212,13 +213,14 @@ pub fn offer(device: Device, key: &str) -> Offer {
         return Offer::Hidden;
     }
     let host = device.host;
-    if key == "general.check_updates"
-        && (crate::is_tui_mode()
-            || matches!(
-                host.platform,
-                iptv_core::capabilities::Platform::Ipad
-                    | iptv_core::capabilities::Platform::Unknown
-            ))
+    if matches!(
+        key,
+        "general.check_updates" | "general.app_update_frequency"
+    ) && (crate::is_tui_mode()
+        || matches!(
+            host.platform,
+            iptv_core::capabilities::Platform::Ipad | iptv_core::capabilities::Platform::Unknown
+        ))
     {
         return Offer::Hidden;
     }

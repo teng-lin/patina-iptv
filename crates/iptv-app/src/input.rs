@@ -928,6 +928,14 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
         crate::playlists_view::key(ui, action);
         return;
     }
+    if top == Some(Overlay::AppUpdateNotice) {
+        crate::settings_view::updates::notice_key(ui, action);
+        return;
+    }
+    if top == Some(Overlay::AppUpdate) {
+        crate::settings_view::updates::key(ui, action);
+        return;
+    }
     if top == Some(Overlay::Settings) {
         crate::settings_view::key(ui, action);
         return;

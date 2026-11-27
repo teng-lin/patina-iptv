@@ -15,6 +15,33 @@ const GL: Scope = Scope::Global;
 const PL: Scope = Scope::Playlist;
 const GR: Scope = Scope::Group;
 
+#[test]
+fn app_update_frequency_defaults_weekly_and_round_trips_without_changing_legacy_install_consent() {
+    let mut settings = Settings::new();
+    assert_eq!(
+        settings.choice(iptv_settings::keys::APP_UPDATE_FREQUENCY, &Target::Global),
+        "weekly"
+    );
+    settings
+        .set("general.auto_update", Value::Bool(true))
+        .unwrap();
+    for frequency in c::APP_UPDATE_FREQUENCY.variants {
+        settings
+            .set("general.app_update_frequency", Value::choice(frequency))
+            .unwrap();
+        let (restored, report) = Settings::from_json(&settings.to_json_string()).unwrap();
+        assert!(report.is_clean());
+        assert_eq!(
+            restored.choice(iptv_settings::keys::APP_UPDATE_FREQUENCY, &Target::Global),
+            *frequency
+        );
+        assert_eq!(
+            restored.get("general.auto_update"),
+            settings.get("general.auto_update")
+        );
+    }
+}
+
 /// `(key, type with default and range, scope, flags)` in catalog order;
 /// flags: `a` advanced, `r` requires a restart. Built at run time with the
 /// schema's constructors, so their unit conversions are checked as well.
@@ -40,6 +67,12 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("general.keyboard", choice(&c::KEYBOARD, "system"), GL, ""),
         ("general.udp_proxy", text(HostPort, 261, ""), GL, "a"),
         ("general.usage_statistics", boolean(false), GL, ""),
+        (
+            "general.app_update_frequency",
+            choice(&c::APP_UPDATE_FREQUENCY, "weekly"),
+            GL,
+            "",
+        ),
         ("general.auto_update", boolean(false), GL, ""),
         ("general.beta_updates", boolean(false), GL, "a"),
         // Playlists.

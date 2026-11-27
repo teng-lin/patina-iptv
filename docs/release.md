@@ -723,9 +723,13 @@ For a rehearsal build, set `PATINA_UPDATE_FEED` to the HTTPS directory serving
 the staging repository and `PATINA_UPDATE_ROOT` to its out-of-band public TUF
 root file before compiling Patina. The feed serves `metadata/` and `targets/`.
 Disclose the selected host in the privacy notice before distributing a
-configured build. A build without that pair opens the manual release page from
-Settings → About. Existing installations need one manual upgrade to acquire
-the checker.
+configured build. GitHub discovery, inline release notes and manual package
+links work without that pair. The feed authorizes installation inside Patina;
+verification errors leave the explicit manual package link available and never
+authorize an installer. Settings → About also offers Never, On launch, Daily,
+Weekly (default) and Monthly checks. See [app updates](app-updates.md) for the
+viewer behavior and platform limits. Existing installations need one manual
+upgrade to acquire the checker.
 
 To rehearse direct APK installation, compile the staging build with
 `PATINA_APK_HANDOFF=1` and the staging feed and root above. Gradle's

@@ -25,6 +25,13 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=AVFoundation");
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
             println!("cargo:rustc-link-lib=framework=SystemConfiguration");
+            let source = "src/host/updates/macos_sparkle.m";
+            println!("cargo:rerun-if-changed={source}");
+            cc::Build::new()
+                .file(source)
+                .flag("-fobjc-arc")
+                .compile("patina_sparkle");
+            println!("cargo:rustc-link-lib=framework=Security");
         }
     }
     println!("cargo:rerun-if-env-changed=PATINA_UPDATE_ROOT");

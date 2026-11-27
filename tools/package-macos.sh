@@ -39,6 +39,7 @@ bash "$root/tools/ci/notices.sh"
 cp "$root/LICENSE" "$out/Patina.app/Contents/Resources/LICENSE"
 cp "$root/crates/iptv-app/fonts/OFL.txt" "$out/Patina.app/Contents/Resources/OFL.txt"
 cp -R "$root/target/notices" "$out/Patina.app/Contents/Resources/notices"
+python3 "$root/tools/ci/macos-sparkle.py" "$out/Patina.app"
 python3 -I "$root/tools/bundle-macos.py" --runtime "$runtime" "$out/Patina.app"
 python3 "$root/tools/ci/check-notices.py" "$out/Patina.app" mpv-runtime/components.json
 # Homebrew libraries, if the executable still links any, keep their notices

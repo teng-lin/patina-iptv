@@ -143,6 +143,7 @@ pub fn label(key: &str) -> &'static str {
         "general.user_agent" => tr("Default User-Agent"),
         "general.udp_proxy" => tr("UDP relay"),
         "general.usage_statistics" => tr("Share anonymous usage counts"),
+        "general.app_update_frequency" => tr("Automatically check for app updates"),
         "general.auto_update" => tr("Update by itself"),
         "general.beta_updates" => tr("Offer test versions"),
         "general.backup" => tr("Back up"),
@@ -337,6 +338,11 @@ pub fn choice(family: &str, variant: &str) -> String {
         return crate::i18n::language_name(variant).to_owned();
     }
     let name = match (family, variant) {
+        ("app_update_frequency", "never") => tr("Never"),
+        ("app_update_frequency", "on_launch") => tr("On launch"),
+        ("app_update_frequency", "daily") => tr("Daily"),
+        ("app_update_frequency", "weekly") => tr("Weekly"),
+        ("app_update_frequency", "monthly") => tr("Monthly"),
         ("sort", "manual") => tr("Custom order"),
         ("sort", "name") => tr("By name"),
         ("sort", "added") => tr("By date added"),

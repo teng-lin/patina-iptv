@@ -24,6 +24,8 @@ pub(crate) enum Overlay {
     Parental,
     CastPairing,
     RestoreReview,
+    AppUpdate,
+    AppUpdateNotice,
     Wizard,
     Recordings,
     Vod,
@@ -61,6 +63,8 @@ impl Overlay {
             Self::QuitConfirm => Context::Menu,
             Self::StoreStartupFailure
             | Self::RestoreReview
+            | Self::AppUpdate
+            | Self::AppUpdateNotice
             | Self::CastPairing
             | Self::Wizard
             | Self::Vod
@@ -87,12 +91,14 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 26] = [
+    pub(crate) const ALL: [Overlay; 28] = [
         Overlay::QuitConfirm,
         Overlay::Leave,
         Overlay::StoreStartupFailure,
         Overlay::Parental,
         Overlay::CastPairing,
+        Overlay::AppUpdate,
+        Overlay::AppUpdateNotice,
         Overlay::RestoreReview,
         Overlay::Wizard,
         Overlay::Recordings,
@@ -136,6 +142,8 @@ impl Overlay {
             Overlay::RemoteEditor => crate::remote_editor::is_open(ui),
             Overlay::Playlists => crate::playlists_view::is_open(ui),
             Overlay::GuideAssign => crate::guide_assign_view::is_open(ui),
+            Overlay::AppUpdateNotice => crate::settings_view::updates::notice_open(ui),
+            Overlay::AppUpdate => crate::settings_view::updates::is_open(ui),
             Overlay::Settings => crate::settings_view::is_open(ui),
             Overlay::FavoritesEditor => ui.editor.with(Option::is_some),
             Overlay::Chooser => crate::chooser::is_open(ui, false),
@@ -176,6 +184,7 @@ impl Overlay {
             | Overlay::Parental
             | Overlay::CastPairing
             | Overlay::RestoreReview
+            | Overlay::AppUpdate
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -191,6 +200,7 @@ impl Overlay {
             | Overlay::FavoritesEditor
             | Overlay::Search => true,
             Overlay::Leave
+            | Overlay::AppUpdateNotice
             | Overlay::Chooser
             | Overlay::Description
             | Overlay::PlaylistMenu
@@ -215,6 +225,8 @@ impl Overlay {
             | Overlay::Parental
             | Overlay::CastPairing
             | Overlay::RestoreReview
+            | Overlay::AppUpdate
+            | Overlay::AppUpdateNotice
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -300,6 +312,8 @@ mod tests {
             | Overlay::Parental
             | Overlay::CastPairing
             | Overlay::RestoreReview
+            | Overlay::AppUpdate
+            | Overlay::AppUpdateNotice
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -322,7 +336,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 26);
+        assert_eq!(Overlay::ALL.len(), 28);
     }
 
     #[test]
@@ -331,6 +345,7 @@ mod tests {
         // the screens that cover it do not.
         let over_the_picture = [
             Overlay::Leave,
+            Overlay::AppUpdateNotice,
             Overlay::Chooser,
             Overlay::Description,
             Overlay::PlaylistMenu,

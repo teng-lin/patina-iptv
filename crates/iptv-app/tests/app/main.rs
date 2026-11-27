@@ -24,6 +24,7 @@ mod personalization;
 mod support;
 
 mod accessibility_visibility;
+mod app_updates;
 mod architecture;
 mod archive_external;
 mod backup_restore;

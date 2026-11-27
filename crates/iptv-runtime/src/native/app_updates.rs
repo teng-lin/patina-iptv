@@ -3,8 +3,13 @@
 #[cfg(target_os = "linux")]
 pub mod appimage;
 mod download;
+pub mod github;
+pub(crate) mod pending;
 mod selection;
+pub mod state;
 mod trust;
+#[cfg(any(windows, all(test, any(target_os = "linux", target_os = "macos"))))]
+mod verifier;
 #[cfg(windows)]
 mod windows;
 pub use selection::{InstalledPackage, ReleaseAsset, UpdateResult};
@@ -81,6 +86,9 @@ impl crate::Runtime {
         root: &'static [u8],
         installed: InstalledPackage,
     ) -> UpdateResult {
+        // The UI may cancel while metadata is still being authorized. Dropping
+        // its waiter must also drop the worker's request and repository future.
+        let (_cancel_on_drop, cancel) = tokio::sync::oneshot::channel::<()>();
         // Catalog restores swap the profile directory. Trust state must survive that swap.
         use sha2::{Digest, Sha256};
         let state = crate::backup::sibling(self.data_dir(), "app-update")
@@ -110,10 +118,21 @@ impl crate::Runtime {
                     .ok()?;
                     verified_index(&state, root, &base, FeedTransport(client), installed).await
                 };
-                check.await.unwrap_or(UpdateResult::Unavailable)
+                authorize_until_cancelled(check, cancel).await
             })
             .await
             .unwrap_or(UpdateResult::Unavailable)
+    }
+}
+
+async fn authorize_until_cancelled(
+    check: impl std::future::Future<Output = Option<UpdateResult>>,
+    cancel: tokio::sync::oneshot::Receiver<()>,
+) -> UpdateResult {
+    tokio::select! {
+        biased;
+        _ = cancel => UpdateResult::Unavailable,
+        result = check => result.unwrap_or(UpdateResult::Unavailable),
     }
 }
 
