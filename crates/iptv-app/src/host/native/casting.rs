@@ -171,6 +171,35 @@ struct Pending {
 }
 
 impl Pending {
+    async fn submit(
+        connection: Connection,
+        relay: PlaybackRelay,
+        gate: ExternalAdmission,
+        media: Result<Media, iptv_cast::Error>,
+    ) -> Result<Self, Error> {
+        let media = match media {
+            Ok(media) => media,
+            Err(error) => {
+                drop(gate);
+                relay.shutdown().await;
+                connection.close().await;
+                return Err(map_error(&error));
+            }
+        };
+        match connection.load(media) {
+            Ok(session) => Ok(Self {
+                session,
+                relay,
+                gate,
+            }),
+            Err(error) => {
+                drop(gate);
+                relay.shutdown().await;
+                Err(map_error(&error))
+            }
+        }
+    }
+
     async fn rollback(self) {
         let Pending {
             session,
@@ -245,15 +274,10 @@ impl Prepared for Handoff {
                 return Err(Error::Denied);
             }
             let media = Media::live(relay.url())
-                .and_then(|media| media.with_content_type("application/x-mpegURL"))
-                .map_err(|error| map_error(&error))?;
-            let session = connection.load(media).map_err(|error| map_error(&error))?;
-            let mut updates = session.subscribe();
-            let pending = self.pending.insert(Pending {
-                session,
-                relay,
-                gate,
-            });
+                .and_then(|media| media.with_content_type("application/x-mpegURL"));
+            let pending = Pending::submit(connection, relay, gate, media).await?;
+            let mut updates = pending.session.subscribe();
+            let pending = self.pending.insert(pending);
             let result = wait_for_request(
                 &mut pending.gate,
                 &mut updates,
