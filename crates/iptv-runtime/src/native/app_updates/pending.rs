@@ -24,6 +24,16 @@ pub(crate) struct Active {
     _cancel: tokio::sync::oneshot::Sender<()>,
 }
 
+#[cfg(any(target_os = "linux", test))]
+struct FileCommitGuard<'a>(&'a std::cell::Cell<usize>);
+
+#[cfg(any(target_os = "linux", test))]
+impl Drop for FileCommitGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
+}
+
 /// Clears only its own operation, even if an older request finishes after its
 /// replacement. Dropping a caller also cancels its worker and partial file.
 pub(super) struct DownloadGuard<'a> {
@@ -83,6 +93,20 @@ impl Pending {
 }
 
 impl crate::Runtime {
+    /// Enter before submitting an irreversible AppImage file operation. The
+    /// caller keeps this borrowed guard until the worker's result is handled.
+    #[cfg(any(target_os = "linux", test))]
+    pub fn begin_app_update_file_commit(&self) -> impl Drop + '_ {
+        self.app_update_file_commits
+            .set(self.app_update_file_commits.get() + 1);
+        FileCommitGuard(&self.app_update_file_commits)
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    pub fn app_update_file_commit_active(&self) -> bool {
+        self.app_update_file_commits.get() != 0
+    }
+
     pub fn app_update_download_progress(&self) -> Option<(u64, u64)> {
         self.app_update_download.borrow().as_ref().map(|active| {
             (

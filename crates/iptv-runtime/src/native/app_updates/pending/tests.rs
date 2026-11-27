@@ -2,6 +2,56 @@ use super::*;
 use crate::app_updates::{InstalledPackage, UpdateResult};
 use serde_json::json;
 
+#[test]
+fn file_commit_admission_tracks_pending_workers_and_is_owned_by_each_runtime() {
+    use std::{
+        cell::Cell,
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+
+    let owner = crate::Runtime::default();
+    let other = crate::Runtime::default();
+    assert!(!owner.app_update_file_commit_active());
+    for outcome in [false, true] {
+        let result = Cell::new(None);
+        let mut worker = Box::pin(async {
+            let _commit = owner.begin_app_update_file_commit();
+            std::future::poll_fn(|_| result.get().map_or(Poll::Pending, Poll::Ready)).await
+        });
+        let mut context = Context::from_waker(Waker::noop());
+        assert_eq!(worker.as_mut().poll(&mut context), Poll::Pending);
+        assert!(owner.app_update_file_commit_active());
+        assert!(!other.app_update_file_commit_active());
+        // A separate shell's operation must neither share nor clear admission.
+        let separate = other.begin_app_update_file_commit();
+        let nested = owner.begin_app_update_file_commit();
+        drop(nested);
+        assert!(owner.app_update_file_commit_active());
+        result.set(Some(outcome));
+        assert_eq!(worker.as_mut().poll(&mut context), Poll::Ready(outcome));
+        assert!(!owner.app_update_file_commit_active());
+        assert!(other.app_update_file_commit_active());
+        drop(separate);
+        assert!(!other.app_update_file_commit_active());
+    }
+
+    let mut worker = Box::pin(async {
+        let _commit = owner.begin_app_update_file_commit();
+        std::future::pending::<()>().await;
+    });
+    assert_eq!(
+        worker
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Pending
+    );
+    assert!(owner.app_update_file_commit_active());
+    drop(worker); // Disposing the shell task releases its borrowed admission.
+    assert!(!owner.app_update_file_commit_active());
+    assert!(!other.app_update_file_commit_active());
+}
+
 fn asset() -> ReleaseAsset {
     let installed = InstalledPackage {
         platform: "android",

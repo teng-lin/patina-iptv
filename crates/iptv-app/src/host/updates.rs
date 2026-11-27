@@ -506,42 +506,6 @@ pub(crate) async fn open_download_url(url: &str) {
     }
 }
 
-// The owning UI thread enters this phase before submitting an AppImage file
-// commit. That worker no longer owns a cancelable download or retained stage.
-#[cfg(any(
-    target_os = "linux",
-    all(
-        test,
-        any(target_os = "android", target_os = "windows", target_os = "macos")
-    )
-))]
-mod file_commit {
-    use std::{cell::Cell, marker::PhantomData, rc::Rc};
-
-    thread_local! {
-        static ACTIVE: Cell<usize> = const { Cell::new(0) };
-    }
-
-    pub(super) struct Phase(PhantomData<Rc<()>>);
-
-    impl Phase {
-        pub(super) fn begin() -> Self {
-            ACTIVE.with(|active| active.set(active.get() + 1));
-            Self(PhantomData)
-        }
-    }
-
-    impl Drop for Phase {
-        fn drop(&mut self) {
-            ACTIVE.with(|active| active.set(active.get() - 1));
-        }
-    }
-
-    pub(super) fn cancelable() -> bool {
-        ACTIVE.with(|active| active.get() == 0)
-    }
-}
-
 /// Whether the active native installer still offers genuine cancellation.
 #[cfg(any(
     target_os = "android",
@@ -553,7 +517,7 @@ pub(crate) fn can_cancel_install() -> bool {
     #[cfg(target_os = "macos")]
     return macos::cancelable();
     #[cfg(target_os = "linux")]
-    return file_commit::cancelable();
+    return !crate::runtime().app_update_file_commit_active();
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     true
 }
@@ -569,7 +533,7 @@ pub(crate) fn try_cancel_current() -> bool {
     #[cfg(target_os = "macos")]
     return macos::try_cancel_current();
     #[cfg(target_os = "linux")]
-    return file_commit::cancelable();
+    return !crate::runtime().app_update_file_commit_active();
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     true
 }
@@ -586,43 +550,6 @@ pub(crate) fn try_cancel_current() -> bool {
 mod tests {
     use super::*;
     use iptv_core::capabilities::Platform;
-
-    #[test]
-    fn appimage_file_commit_rejects_cancel_until_the_worker_result_arrives() {
-        use std::{
-            cell::Cell,
-            future::Future,
-            task::{Context, Poll, Waker},
-        };
-
-        assert!(file_commit::cancelable()); // Download and confirmation.
-        for outcome in [false, true] {
-            let result = Cell::new(None);
-            let mut worker = Box::pin(async {
-                let _commit = file_commit::Phase::begin();
-                std::future::poll_fn(|_| result.get().map_or(Poll::Pending, Poll::Ready)).await
-            });
-            let mut context = Context::from_waker(Waker::noop());
-            assert_eq!(worker.as_mut().poll(&mut context), Poll::Pending);
-            assert!(!file_commit::cancelable()); // Blocking commit is in flight.
-            result.set(Some(outcome));
-            assert_eq!(worker.as_mut().poll(&mut context), Poll::Ready(outcome));
-            assert!(file_commit::cancelable()); // Success and failure both finish.
-        }
-        let mut worker = Box::pin(async {
-            let _commit = file_commit::Phase::begin();
-            std::future::pending::<()>().await;
-        });
-        assert_eq!(
-            worker
-                .as_mut()
-                .poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Pending
-        );
-        assert!(!file_commit::cancelable()); // Blocking commit is in flight.
-        drop(worker); // Root disposal releases this shell's admission state.
-        assert!(file_commit::cancelable());
-    }
 
     #[test]
     fn android_discovery_waits_for_the_channel_and_direct_package_identity() {

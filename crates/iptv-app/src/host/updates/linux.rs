@@ -63,7 +63,7 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         let Some(file) = file else {
             return notify(tr("Update download failed. Try again."));
         };
-        let commit = super::file_commit::Phase::begin();
+        let commit = owner.begin_app_update_file_commit();
         let saved = owner.save_appimage(destination, file).await;
         drop(commit);
         if saved {
@@ -133,7 +133,7 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         owner.retain_appimage(asset, file);
         return notify(tr("Finish recording before installing the update."));
     }
-    let commit = super::file_commit::Phase::begin();
+    let commit = owner.begin_app_update_file_commit();
     let previous = owner.replace_appimage(image, file).await;
     drop(commit);
     let Some(previous) = previous else {

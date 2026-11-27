@@ -112,6 +112,17 @@ pub struct Runtime {
         feature = "native",
         any(
             target_os = "linux",
+            all(
+                test,
+                any(target_os = "windows", target_os = "macos", target_os = "android")
+            )
+        )
+    ))]
+    app_update_file_commits: Cell<usize>,
+    #[cfg(all(
+        feature = "native",
+        any(
+            target_os = "linux",
             target_os = "windows",
             target_os = "macos",
             target_os = "android"
@@ -214,6 +225,17 @@ impl Runtime {
         let guide_checks = guide_checks::GuideChecks::default();
         let schedule = Rc::new(SyntheticSchedule);
         Self {
+            #[cfg(all(
+                feature = "native",
+                any(
+                    target_os = "linux",
+                    all(
+                        test,
+                        any(target_os = "windows", target_os = "macos", target_os = "android")
+                    )
+                )
+            ))]
+            app_update_file_commits: Cell::new(0),
             #[cfg(all(
                 feature = "native",
                 any(
