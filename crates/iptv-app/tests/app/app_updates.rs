@@ -116,6 +116,10 @@ pub(super) fn release(version: &str, assets: bool) -> String {
     } else {
         "linux-x86_64.AppImage"
     };
+    release_for_suffix(version, assets, suffix)
+}
+
+fn release_for_suffix(version: &str, assets: bool, suffix: &str) -> String {
     let name = format!("Patina-{version}-{suffix}");
     serde_json::json!([{"tag_name":format!("v{version}"),"draft":false,"prerelease":false,
         "html_url":format!("https://github.com/teng-lin/patina-iptv/releases/tag/v{version}"),
@@ -134,6 +138,106 @@ fn about(app: &mut super::Headless) {
 }
 fn refresh(app: &mut super::Headless) {
     step(app.press("id:app-update-panel >> text:Check for updates"));
+}
+
+fn android_distribution(app: &mut super::Headless, data: serde_json::Value) {
+    app.engine().control().dispatch_event(
+        super::device_signals::node(app, "device-signals"),
+        nsh_core::EventKind::NativeEvent,
+        nsh_core::EventPayload::Native {
+            name: "device".into(),
+            data,
+        },
+    );
+    app.settle();
+    step(app.wait(Duration::ZERO));
+}
+
+#[test]
+fn delayed_android_distribution_does_not_cache_the_wrong_package_channel() {
+    fn here() {}
+    let Some(home) = super::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "android"),
+        ],
+    ) else {
+        return;
+    };
+    let api = Api::start();
+    api.serve(
+        200,
+        release_for_suffix("9.8.7", true, "android-tablet-tv.apk"),
+    );
+    let mut settings = Settings::new();
+    settings
+        .set("general.app_update_frequency", Value::choice("never"))
+        .unwrap();
+    let mut fixture = personalization::launch(home, settings, false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    super::device_signals::report(app, "tv", false, true);
+    about(app);
+    step(app.wait_for("id:app-update-panel >> text:Checking…"));
+    step(app.wait(Duration::from_millis(250)));
+    assert_eq!(api.requests(), 0, "unknown is not a store distribution");
+    android_distribution(app, serde_json::json!({"directApk":true}));
+    step(app.wait(Duration::from_millis(250)));
+    assert_eq!(
+        api.requests(),
+        0,
+        "direct package identity is still incomplete"
+    );
+    android_distribution(
+        app,
+        serde_json::json!({"directApk":true,"versionCode":42,"androidApi":36}),
+    );
+    step(app.wait_for("id:app-update-panel >> text:Update available"));
+    assert_eq!(
+        api.requests(),
+        1,
+        "the waiting manual request resumes even with Never selected"
+    );
+    step(app.wait_for("id:app-update-panel >> text:Download package"));
+    assert!(!app.screen().matches("text:Patina is up to date.").unwrap());
+}
+
+#[test]
+fn android_store_report_releases_startup_check_without_offering_a_direct_apk() {
+    fn here() {}
+    let Some(home) = super::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "android"),
+        ],
+    ) else {
+        return;
+    };
+    let api = Api::start();
+    api.serve(
+        200,
+        release_for_suffix("9.8.7", true, "android-tablet-tv.apk"),
+    );
+    let mut fixture = personalization::launch(home, Settings::new(), false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    super::device_signals::report(app, "tv", false, true);
+    step(app.wait(Duration::from_millis(250)));
+    assert_eq!(
+        api.requests(),
+        0,
+        "startup waits for an explicit channel report"
+    );
+    android_distribution(app, serde_json::json!({"directApk":false}));
+    step(app.wait_for("id:app-update-notice"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:app-update-panel >> text:A newer version is available, but there is no compatible package for this installation."));
+    assert_eq!(api.requests(), 1);
+    assert!(
+        !app.screen()
+            .matches("id:app-update-panel >> text:Download package")
+            .unwrap()
+    );
 }
 
 #[test]
@@ -230,7 +334,26 @@ fn default_weekly_notice_is_remote_actionable_and_monthly_choice_is_saved() {
     let mut fixture = personalization::launch(home, Settings::new(), false, |_| {}, |_| {});
     let app = &mut fixture.app;
     step(app.wait_for("id:app-update-notice"));
-    // Review is the initial remote focus; no touch or browser is required.
+    // Physical left/right must route through the notice's input context, not
+    // merely work when its action handler is called directly.
+    step(app.press_key("right"));
+    assert_eq!(
+        app.screen()
+            .span_style("id:app-update-notice >> text:Later")
+            .unwrap()
+            .color,
+        nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff),
+        "Right reaches the visible Later action"
+    );
+    step(app.press_key("left"));
+    assert_eq!(
+        app.screen()
+            .span_style("id:app-update-notice >> text:View update")
+            .unwrap()
+            .color,
+        nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff),
+        "Left returns to Review"
+    );
     step(app.press_key("enter"));
     step(app.wait_for("id:app-update-panel"));
     step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
@@ -251,5 +374,150 @@ fn default_weekly_notice_is_remote_actionable_and_monthly_choice_is_saved() {
                 &iptv_settings::Target::Global,
             ) == "monthly"
         },
+    );
+}
+
+#[test]
+fn default_weekly_notice_physical_right_selects_later_without_opening_or_downloading() {
+    let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    api.serve(200, release("9.8.7", true));
+    let mut fixture = personalization::launch(home, Settings::new(), false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    step(app.wait_for("id:app-update-notice"));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:app-update-notice", Duration::from_secs(5)));
+    assert!(
+        !app.screen().matches("id:app-update-panel").unwrap(),
+        "Later dismisses rather than reviewing the update"
+    );
+    assert!(
+        app.screen().opened_urls().is_empty(),
+        "Later never opens a browser or starts a download"
+    );
+}
+
+#[test]
+fn compact_large_text_update_panel_keeps_actions_reachable_and_notes_scrollable() {
+    use nsh_core::{ApproxTextEngine, Size, TextEngine, platform::Idiom, prelude::px};
+    let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    let mut published: serde_json::Value = serde_json::from_str(&release("9.8.7", true)).unwrap();
+    published[0]["body"] = serde_json::json!(format!(
+        "Beginning of generated release notes.\n{}\nComplete ending of generated release notes.",
+        (0..40)
+            .map(|line| format!(
+                "Generated change {line}: preserve playback and existing library data.\n"
+            ))
+            .collect::<String>()
+    ));
+    api.serve(200, published.to_string());
+    let mut settings = Settings::new();
+    settings
+        .set("general.app_update_frequency", Value::choice("never"))
+        .unwrap();
+    settings
+        .set("appearance.font_size", Value::choice("extra_large"))
+        .unwrap();
+    let mut fixture = personalization::launch(home, settings, false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    about(app);
+    step(app.wait_for("text:/Latest version: 9.8.7/"));
+    step(app.wait_for("id:app-update-notes >> text:/Beginning of generated release notes/"));
+    for (width, height, idiom) in [(960.0, 540.0, Idiom::Tv), (915.0, 412.0, Idiom::Phone)] {
+        step(app.set_environment("large system text", move |env| {
+            env.idiom = idiom;
+            env.font_scale = 1.3;
+        }));
+        step(app.set_viewport(Size::new(px(width), px(height))));
+        app.idle(Duration::from_millis(100)).unwrap();
+        let nodes = app.screen().layout_nodes();
+        let bounds = |selector: &str| {
+            let id = app.screen().id(selector).unwrap();
+            nodes.iter().find(|node| node.id == id).unwrap().bounds
+        };
+        let notes = bounds("id:app-update-notes");
+        let text = nodes
+            .iter()
+            .find_map(|node| {
+                node.text.as_ref().filter(|text| {
+                    text.text
+                        .text
+                        .starts_with("Beginning of generated release notes")
+                })
+            })
+            .unwrap();
+        let mut one_line = (*text.text).clone();
+        one_line.text = "Generated change".into();
+        one_line.spans.truncate(1);
+        one_line.spans[0].end = one_line.text.len() as u32;
+        let engine = ApproxTextEngine;
+        let line_height = engine.measure(&engine.prepare(&one_line), None).height.0;
+        let mut actions = vec!["Close", "Check for updates", "Skip this version", "Later"];
+        for offered in [
+            "Download package",
+            "Download and update",
+            "Release notes and downloads",
+        ] {
+            if app
+                .screen()
+                .matches(&format!("id:app-update-panel >> role:button[{offered}]"))
+                .unwrap()
+            {
+                actions.push(offered);
+            }
+        }
+        for action in actions {
+            let control = bounds(&format!("id:app-update-panel >> role:button[{action}]"));
+            assert!(
+                control.origin.x.0 >= 0.0
+                    && control.origin.y.0 >= 0.0
+                    && control.origin.x.0 + control.size.width.0 <= width + 1.0
+                    && control.origin.y.0 + control.size.height.0 <= height + 1.0,
+                "{width}x{height} large text: {action} must remain inside the viewport; control={control:?}, notes={notes:?}"
+            );
+        }
+        assert!(
+            notes.size.height.0 >= line_height,
+            "{width}x{height} large text: release notes need at least one readable line; notes={notes:?}, line_height={line_height}"
+        );
+        let start = text.content.origin.y.0;
+        step(app.press_key("down"));
+        step(app.wait_until(
+            "remote scroll moves release notes",
+            Duration::from_secs(5),
+            |screen| {
+                screen
+                    .layout_nodes()
+                    .iter()
+                    .filter_map(|node| node.text.as_ref())
+                    .find(|text| {
+                        text.text
+                            .text
+                            .starts_with("Beginning of generated release notes")
+                    })
+                    .is_some_and(|text| text.content.origin.y.0 < start)
+            },
+        ));
+    }
+    // Up/down scroll the notes without moving the action focus; Right selects
+    // the offered update, Skip, then Later. Select must dismiss this panel.
+    let has_manual = app
+        .screen()
+        .matches("id:app-update-panel >> text:Download package")
+        .unwrap()
+        && app
+            .screen()
+            .matches("id:app-update-panel >> text:Download and update")
+            .unwrap();
+    for _ in 0..if has_manual { 4 } else { 3 } {
+        step(app.press_key("right"));
+    }
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:app-update-panel", Duration::from_secs(5)));
+    assert!(
+        app.screen().opened_urls().is_empty(),
+        "remote dismissal does not activate a download"
     );
 }

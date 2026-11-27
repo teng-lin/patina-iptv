@@ -58,8 +58,9 @@ synthetic TUF repository, streamed download and byte/digest verification,
 truncated/corrupt/oversized refusal, progress, cancellation, retained stages and
 cleanup. Schedule tests cover frequency boundaries, persistence, skipped and
 unseen versions, retry backoff and clock rollback. App journeys exercise About,
-inline notes, close/reopen, failed-check recovery, remote notice review and
-saving Monthly. Native macOS fixture tests exercise the AppKit bridge's
+inline notes, close/reopen, failed-check recovery, delayed Android channel
+reports, physical remote notice navigation, compact large-text layout and saving
+Monthly. Native macOS fixture tests exercise the AppKit bridge's
 generation fencing, restart approval and cancellation.
 
 ```sh

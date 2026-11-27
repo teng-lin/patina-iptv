@@ -50,17 +50,21 @@ pub(crate) fn bind(ui: Ui) {
     let was_foreground = std::cell::Cell::new(false);
     effect(move || {
         let foreground = lifecycle() != nsh_core::platform::Lifecycle::Background;
-        if !ui.update_ready.get() {
+        if !ui.update_ready.get() || !super::metadata_ready() {
             return;
         }
         let resumed = !was_foreground.replace(foreground) && foreground;
-        if resumed && scheduled_enabled() {
+        if resumed {
             let trigger = if started.replace(true) {
                 Trigger::Automatic
             } else {
                 Trigger::Startup
             };
-            check(ui, trigger);
+            if ui.update_dialog_open.get_untracked() {
+                check(ui, Trigger::Manual);
+            } else if scheduled_enabled() {
+                check(ui, trigger);
+            }
         }
     });
     crate::tasks::spawn_in_app(async move {
@@ -68,9 +72,6 @@ pub(crate) fn bind(ui: Ui) {
             log::warn!("iptv update schedule restore failed: {error}");
         }
         ui.update_ready.set(true);
-        if ui.update_dialog_open.get_untracked() {
-            check(ui, Trigger::Manual);
-        }
         timer(ui);
     });
 }
@@ -97,6 +98,11 @@ pub(crate) fn open(ui: Ui) {
 }
 
 fn check(ui: Ui, trigger: Trigger) {
+    // A missing Android report is not evidence of a store installation. Do not
+    // consume the due check or persist a result for the wrong package channel.
+    if !ui.update_ready.get_untracked() || !super::metadata_ready() {
+        return;
+    }
     let owner = crate::runtime();
     let frequency = Frequency::from_setting(crate::settings::choice(
         iptv_settings::keys::APP_UPDATE_FREQUENCY,
@@ -201,7 +207,7 @@ fn status(ui: Ui) -> String {
     let state = snapshot(ui);
     status_for(
         &state,
-        ui.update_ready.get(),
+        ui.update_ready.get() && super::metadata_ready(),
         ui.update_install_busy.get(),
         crate::runtime().app_update_download_progress(),
         pending_ready(ui),

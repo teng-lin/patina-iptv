@@ -46,6 +46,8 @@ pub(crate) struct Report {
     form_factor: Option<FormFactor>,
     input: Option<Input>,
     decoders: Option<usize>,
+    /// `None` until Android explicitly identifies its distribution channel.
+    pub(crate) direct_apk: Option<bool>,
     pub(crate) direct_android_build: Option<(u64, u64)>,
 }
 
@@ -223,10 +225,12 @@ fn parse(data: &nsh_core::JsonValue, before: Report) -> Report {
         form_factor,
         input,
         decoders,
+        direct_apk: data["directApk"].as_bool().or(before.direct_apk),
         direct_android_build: match data["directApk"].as_bool() {
             Some(true) => data["versionCode"]
                 .as_u64()
-                .zip(data["androidApi"].as_u64()),
+                .zip(data["androidApi"].as_u64())
+                .or(before.direct_android_build),
             Some(false) => None,
             None => before.direct_android_build,
         },
@@ -353,6 +357,37 @@ mod tests {
         assert_eq!(third.form_factor, second.form_factor);
         assert_eq!(parse(&json(r#"{"form":"tv"}"#), third).decoders, Some(3));
         assert_eq!(parse(&json(r#"{"decoders":-1}"#), third).decoders, Some(3));
+    }
+
+    #[test]
+    fn android_distribution_is_unknown_until_explicitly_reported() {
+        let unknown = parse(&json(r#"{"form":"tv"}"#), Report::default());
+        assert_eq!(unknown.direct_apk, None);
+        assert_eq!(unknown.direct_android_build, None);
+        let incomplete = parse(&json(r#"{"directApk":true}"#), unknown);
+        assert_eq!(incomplete.direct_apk, Some(true));
+        assert_eq!(incomplete.direct_android_build, None);
+        let direct = parse(
+            &json(r#"{"directApk":true,"versionCode":42,"androidApi":36}"#),
+            incomplete,
+        );
+        assert_eq!(direct.direct_android_build, Some((42, 36)));
+        assert_eq!(
+            parse(&json(r#"{"form":"tablet"}"#), direct).direct_apk,
+            Some(true)
+        );
+        assert_eq!(
+            parse(&json(r#"{"directApk":true,"versionCode":42}"#), direct).direct_android_build,
+            Some((42, 36)),
+            "a partial repeated report preserves the installed build"
+        );
+        let store = parse(&json(r#"{"directApk":false}"#), direct);
+        assert_eq!(store.direct_apk, Some(false));
+        assert_eq!(store.direct_android_build, None);
+        assert_eq!(
+            parse(&json(r#"{"decoders":2}"#), store).direct_apk,
+            Some(false)
+        );
     }
 
     #[test]

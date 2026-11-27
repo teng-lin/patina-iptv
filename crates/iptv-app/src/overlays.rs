@@ -64,6 +64,7 @@ impl Overlay {
             Self::StoreStartupFailure
             | Self::RestoreReview
             | Self::AppUpdate
+            | Self::AppUpdateNotice
             | Self::CastPairing
             | Self::Wizard
             | Self::Vod
@@ -77,7 +78,6 @@ impl Overlay {
             | Self::Settings
             | Self::FavoritesEditor => Context::Editor,
             Self::Leave
-            | Self::AppUpdateNotice
             | Self::Parental
             | Self::Playlists
             | Self::GuideAssign
