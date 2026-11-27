@@ -123,56 +123,58 @@ async fn paired_connection(cast: &Cast, route: &Route) -> crate::Connection {
 
 #[tokio::test]
 async fn guest_playback_encrypts_control_and_events_without_saving_a_pairing() {
-    timeout(Duration::from_secs(10), async {
-        let accessory = Accessory::bind().await;
-        let address = accessory.address();
-        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let upstream = origin.local_addr().unwrap();
-        let (finish, gate) = oneshot::channel();
-        let server = tokio::spawn(async move {
-            let (control, shared) = accessory.transient(ProofReply::Valid).await;
-            serve(
-                control,
-                &shared,
-                upstream,
-                0,
-                ReceiverEnding::PlayToEnd(gate),
-            )
-            .await;
-        });
+    for pin_hint in [PinHint::Unspecified, PinHint::Suppressed] {
+        timeout(Duration::from_secs(10), async {
+            let accessory = Accessory::bind().await;
+            let address = accessory.address();
+            let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let upstream = origin.local_addr().unwrap();
+            let (finish, gate) = oneshot::channel();
+            let server = tokio::spawn(async move {
+                let (control, shared) = accessory.transient(ProofReply::Valid).await;
+                serve(
+                    control,
+                    &shared,
+                    upstream,
+                    0,
+                    ReceiverEnding::PlayToEnd(gate),
+                )
+                .await;
+            });
 
-        let store = TestStore::default();
-        let cast = client_with_hint(address, 0, store.clone(), PinHint::Suppressed);
-        let route = discovered(&cast).await;
-        let Connect::Ready(connection) = cast.connect(&route).await.unwrap() else {
-            panic!("open receiver must accept guest playback without a PIN");
-        };
-        assert_eq!(connection.peer_trust(), PeerTrust::TransientPairing);
-        let session = connection
-            .load(Media::on_demand(&format!("http://{upstream}/generated.m3u8")).unwrap())
-            .unwrap();
-        let (mut request, _) = origin.accept().await.unwrap();
-        let mut verb = [0; 23];
-        request.read_exact(&mut verb).await.unwrap();
-        assert_eq!(&verb, b"GET /generated.m3u8 HTT");
+            let store = TestStore::default();
+            let cast = client_with_hint(address, 0, store.clone(), pin_hint);
+            let route = discovered(&cast).await;
+            let Connect::Ready(connection) = cast.connect(&route).await.unwrap() else {
+                panic!("open receiver must accept guest playback without a PIN");
+            };
+            assert_eq!(connection.peer_trust(), PeerTrust::TransientPairing);
+            let session = connection
+                .load(Media::on_demand(&format!("http://{upstream}/generated.m3u8")).unwrap())
+                .unwrap();
+            let (mut request, _) = origin.accept().await.unwrap();
+            let mut verb = [0; 23];
+            request.read_exact(&mut verb).await.unwrap();
+            assert_eq!(&verb, b"GET /generated.m3u8 HTT");
 
-        let mut updates = session.subscribe();
-        loop {
-            let snapshot = updates.next().await.unwrap();
-            if matches!(snapshot.playback(), Playback::Playing) {
-                assert_eq!(snapshot.duration(), Some(Duration::from_secs(21)));
-                break;
+            let mut updates = session.subscribe();
+            loop {
+                let snapshot = updates.next().await.unwrap();
+                if matches!(snapshot.playback(), Playback::Playing) {
+                    assert_eq!(snapshot.duration(), Some(Duration::from_secs(21)));
+                    break;
+                }
             }
-        }
-        finish.send(()).unwrap();
-        let terminal = updates.next().await.unwrap();
-        assert!(matches!(terminal.playback(), Playback::NoLongerPresent));
-        assert_eq!(session.stop().await.unwrap(), StopOutcome::AlreadyEnded);
-        server.await.unwrap();
-        assert!(store.0.lock().unwrap().is_none());
-    })
-    .await
-    .unwrap();
+            finish.send(()).unwrap();
+            let terminal = updates.next().await.unwrap();
+            assert!(matches!(terminal.playback(), Playback::NoLongerPresent));
+            assert_eq!(session.stop().await.unwrap(), StopOutcome::AlreadyEnded);
+            server.await.unwrap();
+            assert!(store.0.lock().unwrap().is_none());
+        })
+        .await
+        .unwrap();
+    }
 }
 
 #[tokio::test]
