@@ -1,7 +1,6 @@
 //! Authoritative parental access and credential operations. PIN hashing and
 //! durable retry accounting run only on the store worker, never the UI thread.
 use crate::Runtime;
-use crate::store_service::ParentalRepo;
 use iptv_core::parental::{Access, ContentKind, Pin, Policy, Target, UnlockWindow};
 use iptv_library::SourceId;
 use std::{
@@ -150,34 +149,19 @@ impl Runtime {
     /// Refresh public policy metadata without returning any credential verifier.
     pub async fn parental_refresh(&self) -> Result<(), Error> {
         let services = self.services();
-        let (has_pin, blocked, ancestry, names) = services
-            .read(|store| {
-                store.read_snapshot(|store| {
-                    let blocked = store.parental_blocks()?;
-                    let mut names = std::collections::BTreeMap::new();
-                    for target in &blocked {
-                        if let Some(name) = store.parental_name(target)? {
-                            names.insert(target.clone(), name);
-                        }
-                    }
-                    Ok((
-                        store.parental_credential()?.is_some(),
-                        blocked,
-                        store.parental_memberships()?,
-                        names,
-                    ))
-                })
-            })
+        let snapshot = services
+            .parental()
+            .catalog()
             .await
             .map_err(|_| Error::Storage)?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
         let mut state = self.parental.borrow_mut();
-        state.has_pin = has_pin;
+        state.has_pin = snapshot.has_pin;
         state.ready = true;
-        let blocked: BTreeSet<_> = blocked.into_iter().collect();
-        let mut ancestry = ancestry;
+        let blocked: BTreeSet<_> = snapshot.blocked.into_iter().collect();
+        let mut ancestry = snapshot.ancestry;
         for parents in ancestry.values_mut() {
             parents.sort_unstable();
             parents.dedup();
@@ -203,7 +187,7 @@ impl Runtime {
         state.complete = true;
         state.blocked = blocked;
         state.ancestry = ancestry;
-        state.names = names;
+        state.names = snapshot.names;
         apply_policy(&mut state, policy(self));
         Ok(())
     }
@@ -220,44 +204,21 @@ impl Runtime {
     ) -> Result<bool, Error> {
         let services = self.services();
         let result = services
-            .read(move |store| {
-                store.read_snapshot(|store| {
-                    let mut entries = Vec::new();
-                    for target in targets {
-                        let mut parents = store.parental_ancestors(&target)?;
-                        parents.sort_unstable();
-                        parents.dedup();
-                        let blocked = std::iter::once(&target)
-                            .chain(parents.iter())
-                            .map(|candidate| {
-                                Ok((candidate.clone(), store.parental_target_blocked(candidate)?))
-                            })
-                            .collect::<Result<Vec<_>, crate::error::AdapterError>>()?;
-                        entries.push((target, parents, blocked));
-                    }
-                    let guide_blocked = match guide_channel {
-                        Some(channel) => {
-                            store.guide_channel_blocked(SourceId(channel.source), &channel.id)?
-                        }
-                        None => false,
-                    };
-                    Ok((
-                        store.parental_credential()?.is_some(),
-                        entries,
-                        guide_blocked,
-                    ))
-                })
-            })
+            .parental()
+            .targets(targets, guide_channel)
             .await
             .map_err(|_| Error::Storage)?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
         let mut state = self.parental.borrow_mut();
-        state.has_pin = result.0;
+        state.has_pin = result.has_pin;
         state.ready = true;
         let mut changed = false;
-        for (target, parents, blocked) in result.1 {
+        for entry in result.entries {
+            let target = entry.target;
+            let parents = entry.parents;
+            let blocked = entry.blocked;
             let known_target = state.complete || state.ancestry.contains_key(&target);
             changed |= state
                 .ancestry
@@ -288,7 +249,7 @@ impl Runtime {
             state.policy_revision.fetch_add(1, Ordering::SeqCst);
         }
         apply_policy(&mut state, policy(self));
-        Ok(result.2)
+        Ok(result.guide_blocked)
     }
     pub(crate) fn parental_policy_changed(&self) {
         apply_policy(&mut self.parental.borrow_mut(), policy(self));
@@ -352,20 +313,10 @@ impl Runtime {
         let now = (now_ms() / 1000) as i64;
         let epoch = self.parental.borrow().epoch.clone();
         let expected = epoch.load(Ordering::SeqCst);
-        let verification_epoch = epoch.clone();
         services
-            .call(move |store| {
-                if verification_epoch.load(Ordering::SeqCst) != expected {
-                    return Ok(Err(Error::Locked));
-                }
-                let verified = ParentalRepo::verify(store, pin.bytes(), false, now);
-                if verification_epoch.load(Ordering::SeqCst) != expected {
-                    return Ok(Err(Error::Locked));
-                }
-                Ok(verified)
-            })
-            .await
-            .map_err(|_| Error::Storage)??;
+            .parental()
+            .verify_pin(pin, epoch.clone(), expected, now)
+            .await?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
@@ -385,33 +336,9 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
-        let entropy = services.ports().entropy;
         let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
-        let result = services
-            .call(move |store| {
-                let result = (|| {
-                    if store
-                        .parental_credential()
-                        .map_err(|_| Error::Storage)?
-                        .is_some()
-                    {
-                        ParentalRepo::verify(
-                            store,
-                            old.as_ref().ok_or(Error::Locked)?.bytes(),
-                            false,
-                            now,
-                        )?;
-                    }
-                    ParentalRepo::replace_pin(store, &new, entropy)
-                })();
-                if result.is_ok() {
-                    epoch.fetch_add(1, Ordering::SeqCst);
-                }
-                Ok(result)
-            })
-            .await
-            .map_err(|_| Error::Storage)??;
+        let result = services.parental().change_pin(old, new, epoch, now).await?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
@@ -431,20 +358,12 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
-        let entropy = services.ports().entropy;
         let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
         let result = services
-            .call(move |store| {
-                let result = ParentalRepo::verify(store, recovery.trim().as_bytes(), true, now)
-                    .and_then(|()| ParentalRepo::replace_pin(store, &new, entropy));
-                if result.is_ok() {
-                    epoch.fetch_add(1, Ordering::SeqCst);
-                }
-                Ok(result)
-            })
-            .await
-            .map_err(|_| Error::Storage)??;
+            .parental()
+            .recover_pin(recovery, new, epoch, now)
+            .await?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
@@ -552,10 +471,8 @@ impl Runtime {
         let access = self.parental_snapshot();
         access.policy_revision.fetch_add(1, Ordering::SeqCst);
         self.services()
-            .call(move |store| {
-                ParentalRepo::require_admin(store, &access)?;
-                store.set_parental_blocked(&target, blocked)
-            })
+            .parental()
+            .set_blocked(target, blocked, access)
             .await
             .map_err(|_| Error::Storage)?;
         self.parental_refresh().await
@@ -630,6 +547,7 @@ pub(crate) const SETTINGS_LOCKED_REASON: &str = "Unlock parental controls before
 mod tests {
     use super::*;
     use crate::error::AdapterError as StoreError;
+    use crate::store_service::ParentalRepo;
     use iptv_store_sqlite::Store;
 
     fn native_allowed(

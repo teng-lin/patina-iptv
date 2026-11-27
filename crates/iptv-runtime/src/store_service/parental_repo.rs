@@ -3,13 +3,37 @@
 use super::{Services, Store, StoreError};
 use crate::parental::{Error, Snapshot, now_ms, policy_settings};
 use iptv_core::parental::{ContentKind, Pin, Target};
+use iptv_library::SourceId;
 use iptv_store_sqlite::parental::ParentalCredential;
-use std::sync::atomic::Ordering;
+use std::collections::BTreeMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 pub(crate) struct ParentalRepo {
     pub(super) services: Services,
+}
+
+pub(crate) struct CatalogAccess {
+    pub has_pin: bool,
+    pub blocked: Vec<Target>,
+    pub ancestry: BTreeMap<Target, Vec<Target>>,
+    pub names: BTreeMap<Target, String>,
+}
+
+pub(crate) struct TargetAccess {
+    pub target: Target,
+    pub parents: Vec<Target>,
+    pub blocked: Vec<(Target, bool)>,
+}
+
+pub(crate) struct TargetAccessSnapshot {
+    pub has_pin: bool,
+    pub entries: Vec<TargetAccess>,
+    pub guide_blocked: bool,
 }
 
 fn hash(secret: &[u8], salt: &[u8]) -> [u8; 32] {
@@ -85,6 +109,160 @@ fn replace_pin(
 }
 
 impl ParentalRepo {
+    pub(crate) async fn catalog(&self) -> Result<CatalogAccess, StoreError> {
+        self.services
+            .read(|store| {
+                store.read_snapshot(|store| {
+                    let blocked = store.parental_blocks()?;
+                    let mut names = BTreeMap::new();
+                    for target in &blocked {
+                        if let Some(name) = store.parental_name(target)? {
+                            names.insert(target.clone(), name);
+                        }
+                    }
+                    Ok(CatalogAccess {
+                        has_pin: store.parental_credential()?.is_some(),
+                        blocked,
+                        ancestry: store.parental_memberships()?,
+                        names,
+                    })
+                })
+            })
+            .await
+    }
+
+    pub(crate) async fn targets(
+        self,
+        targets: Vec<Target>,
+        guide_channel: Option<Target>,
+    ) -> Result<TargetAccessSnapshot, StoreError> {
+        self.services
+            .read(move |store| {
+                store.read_snapshot(|store| {
+                    let mut entries = Vec::new();
+                    for target in targets {
+                        let mut parents = store.parental_ancestors(&target)?;
+                        parents.sort_unstable();
+                        parents.dedup();
+                        let blocked = std::iter::once(&target)
+                            .chain(parents.iter())
+                            .map(|candidate| {
+                                Ok((candidate.clone(), store.parental_target_blocked(candidate)?))
+                            })
+                            .collect::<Result<_, StoreError>>()?;
+                        entries.push(TargetAccess {
+                            target,
+                            parents,
+                            blocked,
+                        });
+                    }
+                    let guide_blocked = match guide_channel {
+                        Some(channel) => {
+                            store.guide_channel_blocked(SourceId(channel.source), &channel.id)?
+                        }
+                        None => false,
+                    };
+                    Ok(TargetAccessSnapshot {
+                        has_pin: store.parental_credential()?.is_some(),
+                        entries,
+                        guide_blocked,
+                    })
+                })
+            })
+            .await
+    }
+
+    pub(crate) async fn verify_pin(
+        self,
+        pin: Pin,
+        epoch: Arc<AtomicU64>,
+        expected: u64,
+        now: i64,
+    ) -> Result<(), Error> {
+        self.services
+            .call(move |store| {
+                if epoch.load(Ordering::SeqCst) != expected {
+                    return Ok(Err(Error::Locked));
+                }
+                let verified = verify(store, pin.bytes(), false, now);
+                if epoch.load(Ordering::SeqCst) != expected {
+                    return Ok(Err(Error::Locked));
+                }
+                Ok(verified)
+            })
+            .await
+            .map_err(|_| Error::Storage)?
+    }
+
+    pub(crate) async fn change_pin(
+        self,
+        old: Option<Pin>,
+        new: Pin,
+        epoch: Arc<AtomicU64>,
+        now: i64,
+    ) -> Result<Zeroizing<String>, Error> {
+        let entropy = self.services.ports().entropy;
+        self.services
+            .call(move |store| {
+                let result = (|| {
+                    if store
+                        .parental_credential()
+                        .map_err(|_| Error::Storage)?
+                        .is_some()
+                    {
+                        verify(
+                            store,
+                            old.as_ref().ok_or(Error::Locked)?.bytes(),
+                            false,
+                            now,
+                        )?;
+                    }
+                    replace_pin(store, &new, entropy)
+                })();
+                if result.is_ok() {
+                    epoch.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(result)
+            })
+            .await
+            .map_err(|_| Error::Storage)?
+    }
+
+    pub(crate) async fn recover_pin(
+        self,
+        recovery: Zeroizing<String>,
+        new: Pin,
+        epoch: Arc<AtomicU64>,
+        now: i64,
+    ) -> Result<Zeroizing<String>, Error> {
+        let entropy = self.services.ports().entropy;
+        self.services
+            .call(move |store| {
+                let result = verify(store, recovery.trim().as_bytes(), true, now)
+                    .and_then(|()| replace_pin(store, &new, entropy));
+                if result.is_ok() {
+                    epoch.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(result)
+            })
+            .await
+            .map_err(|_| Error::Storage)?
+    }
+
+    pub(crate) async fn set_blocked(
+        self,
+        target: Target,
+        blocked: bool,
+        access: Snapshot,
+    ) -> Result<(), StoreError> {
+        self.services
+            .call(move |store| {
+                Self::require_admin(store, &access)?;
+                store.set_parental_blocked(&target, blocked)
+            })
+            .await
+    }
+
     pub(crate) fn require_settings_write(
         store: &Store,
         snapshot: &Snapshot,
@@ -100,6 +278,7 @@ impl ParentalRepo {
         Self::require_admin(store, snapshot)
     }
 
+    #[cfg(all(test, feature = "native"))]
     pub(crate) fn verify(
         store: &mut Store,
         secret: &[u8],
@@ -109,6 +288,7 @@ impl ParentalRepo {
         verify(store, secret, recovery, now)
     }
 
+    #[cfg(all(test, feature = "native"))]
     pub(crate) fn replace_pin(
         store: &mut Store,
         new: &Pin,
