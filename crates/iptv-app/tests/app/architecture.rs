@@ -733,7 +733,7 @@ fn ui_parameter_functions(source: &str) -> usize {
             while i < tokens.len() {
                 match tokens[i] {
                     "<" => angle += 1,
-                    ">" => {
+                    ">" if tokens.get(i.saturating_sub(1)) != Some(&"-") => {
                         angle -= 1;
                         if angle == 0 {
                             i += 1;
@@ -771,8 +771,13 @@ fn ui_parameter_functions(source: &str) -> usize {
                         if tokens.get(j) == Some(&"'") {
                             j += 2;
                         }
+                        if tokens.get(j) == Some(&"mut") {
+                            j += 1;
+                        }
                     }
-                    if tokens.get(j) == Some(&"crate") && tokens.get(j + 1) == Some(&"::") {
+                    while matches!(tokens.get(j), Some(&"crate" | &"super"))
+                        && tokens.get(j + 1) == Some(&"::")
+                    {
                         j += 2;
                     }
                     if tokens.get(j) == Some(&"Ui")
