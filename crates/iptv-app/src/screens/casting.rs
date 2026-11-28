@@ -74,8 +74,9 @@ pub(super) fn discover(ui: Ui) {
         return;
     }
     let mut cached = ui.cast.cached_receivers.with(|cached| cached.clone());
-    #[cfg(any(target_os = "linux", windows))]
-    if !crate::wiring::settings::flag(iptv_settings::keys::AIRPLAY_CASTING) {
+    if (crate::host::LINUX || crate::host::WINDOWS)
+        && !crate::wiring::settings::flag(iptv_settings::keys::AIRPLAY_CASTING)
+    {
         cached.retain(|receiver| receiver.protocol != iptv_core::cast::NetworkProtocol::AirPlay);
     }
     chooser::show_receivers(ui, cached);

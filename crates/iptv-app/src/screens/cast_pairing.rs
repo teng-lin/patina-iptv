@@ -37,7 +37,7 @@ pub(crate) fn offer_forget(ui: Ui, ticket: u64, receiver: Receiver, reason: Erro
 pub(crate) fn show_linux_airplay_setup(ui: Ui) {
     let tcp_port = configured_port("PATINA_CAST_RELAY_PORT", 49152);
     let udp_port = configured_port("PATINA_AIRPLAY_TIMING_PORT", 49153);
-    let subnet = local_ipv4_subnet().unwrap_or_else(|| "192.168.1.0/24".into());
+    let subnet = crate::host::local_ipv4_subnet().unwrap_or_else(|| "192.168.1.0/24".into());
     ui.cast.pairing.replace(None);
     ui.cast.state.update(|state| {
         state.open_firewall_help(FirewallHelp {
@@ -75,39 +75,27 @@ fn configured_port(env_var: &str, default: u16) -> u16 {
         .map_or(default, std::num::NonZeroU16::get)
 }
 
-fn local_ipv4_subnet() -> Option<String> {
-    #[cfg(not(target_family = "wasm"))]
-    {
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-        socket.connect("192.0.2.1:80").ok()?;
-        let std::net::SocketAddr::V4(addr) = socket.local_addr().ok()? else {
-            return None;
-        };
-        let [a, b, c, _] = addr.ip().octets();
-        Some(format!("{a}.{b}.{c}.0/24"))
-    }
-    #[cfg(target_family = "wasm")]
-    {
-        None
-    }
+fn firewall_commands(help: &FirewallHelp) -> String {
+    firewall_commands_for(help, crate::host::detect_linux_firewall())
 }
 
-fn firewall_commands(help: &FirewallHelp) -> String {
+fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewall) -> String {
     let source = help
         .peer_ip
         .as_deref()
         .or(help.subnet.as_deref())
         .unwrap_or("192.168.1.0/24");
     let mut lines = Vec::new();
-    if let Some(port) = help.tcp_port {
-        lines.push(format!(
-            "sudo ufw allow from {source} to any port {port} proto tcp"
-        ));
-    }
-    if let Some(port) = help.udp_port {
-        lines.push(format!(
-            "sudo ufw allow from {source} to any port {port} proto udp"
-        ));
+    for (port, proto) in [(help.tcp_port, "tcp"), (help.udp_port, "udp")] {
+        let Some(port) = port else { continue };
+        match firewall {
+            crate::host::LinuxFirewall::Ufw => lines.push(format!(
+                "sudo ufw allow from {source} to any port {port} proto {proto}"
+            )),
+            crate::host::LinuxFirewall::Firewalld => lines.push(format!(
+                "sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"{source}\" port port=\"{port}\" protocol=\"{proto}\" accept'"
+            )),
+        }
     }
     lines.join("\n")
 }
@@ -389,6 +377,8 @@ mod tests {
 
     #[test]
     fn firewall_commands_format_subnet_and_exact_peer_rules() {
+        use crate::host::LinuxFirewall;
+
         let setup = FirewallHelp {
             peer_ip: None,
             tcp_port: Some(49152),
@@ -397,9 +387,14 @@ mod tests {
             copy_selected: true,
         };
         assert_eq!(
-            firewall_commands(&setup),
+            firewall_commands_for(&setup, LinuxFirewall::Ufw),
             "sudo ufw allow from 192.0.2.0/24 to any port 49152 proto tcp\n\
              sudo ufw allow from 192.0.2.0/24 to any port 49153 proto udp"
+        );
+        assert_eq!(
+            firewall_commands_for(&setup, LinuxFirewall::Firewalld),
+            "sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49152\" protocol=\"tcp\" accept'\n\
+             sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49153\" protocol=\"udp\" accept'"
         );
 
         let blocked = FirewallHelp {
@@ -410,7 +405,7 @@ mod tests {
             copy_selected: true,
         };
         assert_eq!(
-            firewall_commands(&blocked),
+            firewall_commands_for(&blocked, LinuxFirewall::Ufw),
             "sudo ufw allow from 192.0.2.10 to any port 49153 proto udp"
         );
     }
