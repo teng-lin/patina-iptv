@@ -400,7 +400,8 @@ an enabled screen-reader run.
 Use `uiautomator dump --compressed` when checking modal exposure: the default
 uncompressed dump intentionally includes nodes marked unimportant for accessibility.
 For a reproducible native focus/activation check while TalkBack remains enabled,
-build the [shell probe](../tools/ci/android/AccessibilityActionProbe.java):
+build the [shell probe](../tools/ci/android/AccessibilityActionProbe.java). Set
+`serial` to the serial of the emulator under test:
 
 ```sh
 IPTV_A11Y_OUT=/var/tmp/patina-accessibility
@@ -409,8 +410,8 @@ javac --release 11 -cp "$ANDROID_HOME/platforms/android-36/android.jar" \
   -d "$IPTV_A11Y_OUT" tools/ci/android/AccessibilityActionProbe.java
 "$ANDROID_HOME/build-tools/35.0.1/d8" --output "$IPTV_A11Y_OUT" \
   "$IPTV_A11Y_OUT/AccessibilityActionProbe.class"
-adb -s emulator-5554 push "$IPTV_A11Y_OUT/classes.dex" /data/local/tmp/patina-accessibility.dex
-adb -s emulator-5554 shell \
+adb -s "${serial:?}" push "$IPTV_A11Y_OUT/classes.dex" /data/local/tmp/patina-accessibility.dex
+adb -s "${serial:?}" shell \
   "CLASSPATH=/data/local/tmp/patina-accessibility.dex app_process /system/bin AccessibilityActionProbe 'Add playlist'"
 ```
 
