@@ -112,11 +112,11 @@ class StaticBootstrapContractTests(unittest.TestCase):
         self.assertIn("`iptv-app`", removed_row)
         self.assertNotIn("crates/iptv-app", read_readme_development_paths(removed_row))
 
-        index_text = (ROOT / "docs/index.md").read_text(encoding="utf-8")
+        index_text = (ROOT / "docs/README.md").read_text(encoding="utf-8")
         index_links = read_markdown_link_targets(index_text)
         for doc in sorted((ROOT / "docs").glob("*.md")):
-            if doc.name != "index.md":
-                self.assertIn(doc.name, index_links, f"docs/index.md is missing a navigable link to {doc.name}")
+            if doc.name != "README.md":
+                self.assertIn(doc.name, index_links, f"docs/README.md is missing a navigable link to {doc.name}")
         unlinked = index_text.replace("[Architecture](architecture.md)", "architecture.md", 1)
         self.assertIn("architecture.md", unlinked)
         self.assertNotIn("architecture.md", read_markdown_link_targets(unlinked))

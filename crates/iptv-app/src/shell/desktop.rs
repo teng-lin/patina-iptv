@@ -66,7 +66,7 @@ pub fn bind(ui: Ui) {
         if recording && !close_keeps_recording() {
             quit_confirm::open(ui.chrome);
         } else if recording {
-            // One contract with or without recordings (`docs/desktop.md`,
+            // One contract with or without recordings (`docs/interaction.md`,
             // "Closing"): closing the main window ends every viewing
             // window's playback, as quitting does. Only the recorder runs on.
             // The viewer's Stop, not only the stream's: nothing counts as

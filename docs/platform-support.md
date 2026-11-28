@@ -1,5 +1,9 @@
 # Feature availability
 
+A host offers an operation only where it can complete it reliably. What it
+cannot offer is left out rather than drawn as a placeholder, and withdrawing an
+operation keeps the viewer's recorded media and stored settings reachable.
+
 The portable [capability model](../crates/iptv-core/src/capabilities.rs) separates
 host facilities from live player reports. The
 [presentation capability rules](../crates/iptv-presentation/src/capabilities.rs)
@@ -19,16 +23,38 @@ native services report what the operating system actually accepted.
 ## Sending video
 
 The main player's **Cast to TV** control offers Chromecast on desktop hosts and
-handheld Android (phones and tablets), **AirPlay** on macOS, iPad and handheld
-Android, and experimental AirPlay on Linux when started with
-`PATINA_RUST_AIRPLAY=1` (Android TV does not register a cast sender; see
-[casting](casting.md)). On macOS and iPad, AirPlay opens Apple's native video
-picker inside Patina; on iPad the play bar's Cast button opens the named-device
+handheld Android (phones and tablets), and **AirPlay** on macOS, iPad and
+handheld Android (Android TV does not register a cast sender). On Linux and
+Windows, enable **AirPlay casting** in **Settings → General** (off by default) to
+show AirPlay receivers alongside Chromecast; they carry an AirPlay label. On macOS and iPad, AirPlay opens
+Apple's native video picker inside Patina; on iPad the play bar's Cast button opens the named-device
 picker directly. On desktop and handheld Android the destination sheet lists
 discovered receivers (and includes the system device picker on Apple hosts).
 The play bar controls pause, resume and channel changes.
 Choose this device in the picker to return playback locally. A channel change retires the previous stream while retaining
 the selected native route. Hiding the play bar does not stop playback.
+
+Patina creates a session URL for the selected receiver and keeps the upstream
+credentials and request headers on the sending device, so keep Patina running
+and connected while the receiver plays. On Android, Linux and Windows, Patina
+connects without a code when an AirPlay receiver accepts a temporary session. If the
+receiver requires a PIN, approve pairing on the receiver and enter the
+four-digit code it shows. Verified pairings are stored in Android Keystore, the
+Linux user's Secret Service or Windows Credential Manager. If a paired receiver's identity changes,
+Patina asks before forgetting the stored pairing.
+
+An AirPlay receiver may accept the request before it starts playing. Patina
+publishes the handoff after it sees owned playback, and controls appear when
+the session reports them available. When a receiver supports only closing the
+session's transport, Patina reports that remote stop could not be confirmed and
+retires the relay before reopening local playback.
+
+For the network sender (desktop and handheld Android),
+`PATINA_CAST_RELAY_PORT` sets the TCP listener (default 49152; see the
+[firewall instructions](interaction.md#cast-live-tv)). AirPlay on Linux and
+Windows also has a UDP timing listener. It uses port 49153, or another free port
+if that one is busy; `PATINA_AIRPLAY_TIMING_PORT` requires a specific port. Use the port in a failure message when checking receiver
+reachability.
 
 Casting requires a live HLS channel, a free provider viewing claim, and the main
 player outside PiP and multiview. AirPlay requires a private IPv4 LAN interface
@@ -59,7 +85,7 @@ signals. Focus stays with its action as rows change and moves to a nearby
 available action when the focused row leaves. An active recording keeps its
 Stop action. The Keyboard or Remote
 settings, and guide autoplay with its delay, follow the form factor and the
-connected input ([TV controls](tv-controls.md)); a settings page without rows
+connected input ([remote keys](interaction.md#remote-keys)); a settings page without rows
 leaves the list while the screen stays open, and the page shown, or the one in
 its place, keeps the focus. Multiview follows the form factor and the window
 (below). The host profiles above still follow the platform alone.
@@ -128,7 +154,7 @@ way through the play bar, the control strip and the info card's action card:
 
 | Host | Multiview |
 | --- | --- |
-| Android phone | Two tiles, under the play bar's More only, with the phone on its side (its window wider than tall). Left out upright and at the account's connection limit. No "Sound follows the selected tile" setting. |
+| Android phone | Two tiles, under the play bar's More only, with the phone on its side (its window wider than tall). Left out upright, at the account's connection limit and on a reported metered network. No "Sound follows the selected tile" setting. |
 | Android tablet | Two tiles in an expanded window; left out in a medium or compact one (split screen). |
 | Android TV | Two tiles. At the account's connection limit it is shown disabled, and choosing it says why. |
 | iPad | Left out until measured on a device (iPad draws every mpv frame on the main thread), so never in Slide Over or a compact window. |
@@ -137,8 +163,8 @@ way through the play bar, the control strip and the info card's action card:
 
 The account's connection limit is reached when it allows one stream, the one
 already playing full screen; elsewhere adding a stream past the limit asks
-first. Using the metered-network signal to gate phone multiview remains a
-follow-up. When the window or the device stops offering multiview during a
+first. A phone's network change applies at once, and an unknown network report
+leaves the other limits in effect. When the window or the device stops offering multiview during a
 session (a tablet's window going to split screen, a phone turned upright), the
 session collapses to the tile being heard, which plays on full screen. When that
 tile plays on the full-screen player (surface 0) it keeps its stream; a tile heard
@@ -152,6 +178,15 @@ and parental authorization remain separate checks at native admission; a
 feature being available grants no permission to play content.
 
 ## Record now and the Recordings library
+
+Scheduled and repeating recording is retired on every host: reliability varies
+with device and power settings, and a failure is discovered only after the
+program has ended. Patina registers no wakes, login items or alarms for it,
+removes the registrations earlier versions made, and keeps recorded media.
+Scheduling may return only as an explicit recorder mode on a mains-powered
+desktop or Android TV box that passes runtime checks (exact alarms, no Low
+Power Standby restriction, unrestricted battery use), holds a sleep assertion,
+shows that it is running and reports every job's result.
 
 Record now is offered only where the viewer stays with the capture and the
 host can keep it running (#275;
@@ -210,9 +245,9 @@ the background, so none is armed there. Nothing restarts a capture after a
 reboot or a force stop.
 
 The recorder tells the host whether a capture is running or due
-(`Ports::recording_schedule`). A desktop capture can continue after the
-window closes while the host process and computer stay running. Patina
-registers no wakes, login items or alarms for scheduled recordings. See
+(`Ports::recording_schedule`). On macOS a capture continues after the main
+window closes while the process and computer stay running; Windows and Linux
+ask before closing ([desktop closing](interaction.md#closing)). See
 [architecture](architecture.md) and
 [platform installation details](../README.md) for the supported distributions.
 

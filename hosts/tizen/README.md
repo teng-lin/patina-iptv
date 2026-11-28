@@ -56,12 +56,10 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   Yes, Up and Down to the other answer, OK chooses, Back closes the
   question. Only Yes leaves. The focused answer has the page's focus, so
   Voice Guide reads it. The remote's Exit key is the system's; the page does not
-  register it. Its HTML question is not a system popup: app termination over
-  it is expected from that implementation, but remains unverified on TV.
-  CO-US-04 does not exclude app popups from its popup-closing rule, so clarification
-  from the owner and Samsung is pending. Test the TV's own IME separately. The question is in the
-  TV's language. See the [acceptance ledger](../../docs/platform-back-validation.md)
-  for the Return policy decision and pending physical-TV checks.
+  register it. The question is in the TV's language. The
+  [exit policy](../../docs/interaction.md#samsung-tizen-exit-policy) records the
+  Return policy decision, the open certification questions and the
+  [pending TV checks](../../docs/interaction.md#pending-device-checks).
 - The guide screen: the preview of the playing channel at the top left
   ("Nothing playing" until one plays), the focused program beside it
   (title, ★ for a favorite, times, progress, minutes left or until it
@@ -134,7 +132,7 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   includes channels played from their archive.
 - Page Up and Down fit the time to the destination row's listings. Back
   on the rail asks before leaving (Samsung's exit confirmation; Android
-  TV leaves at once).
+  TV leaves at once unless **Press Back twice to leave** is on).
 
 ## Input and view protocol
 
@@ -186,33 +184,15 @@ Only channels in the playlist are kept, without descriptions, and programs
 that ended more than a day ago are dropped. Replacing the playlist removes
 the previous one's data.
 
-## Measured on a 2020 UN55TU7000 (Tizen 5.5, Chromium 69)
-
-With a provider account of about 7,300 live channels and a 68 MB XMLTV
-guide:
-
-- First launch: channels show about 3 s after launch; the guide is
-  imported and matched (6,022 channels bound) about 18 s after launch, in
-  the background.
-- Later launches (stored guide, normal launch without a debugger): the
-  guide screen shows about 5 s after the page starts.
-- Channel change, input to moving video: about 1.6 s (raw TS on AVPlay).
-- Remote input to the rendered guide screen (stored guide, idle, with a
-  debugger attached): median about 10 ms, worst about 40 ms, over
-  28 keys in the grid, the groups column and the rail. On the build used
-  for this measurement, a single OK opened the stream and switched to full
-  screen in about 0.2 s.
-- Search and moving favorites are not yet measured on the TV. On a
-  desktop browser with a synthetic account of the same size
-  (7,300 channels, 242,000 programs): search answer to rendered results
-  12 to 19 ms; the program index takes 143 ms to build and 3.4 MB, and
-  the core's memory grows from 25.4 MB to 28.4 MB with it.
+## Performance instrumentation
 
 The page records its timings in local storage (`patina.metrics`, the last
 five launches): `keys` (full screen), `guideKeys` (the guide screen) and
-`searchKeys` (remote key to rendered page), `search` (query to rendered
-results), `searchIndex` (its build) and, on request (`send({cmd: 'memory'})` in
-DevTools), `memory`.
+`searchKeys` (remote key to rendered page), `zaps`, `search` (query to
+rendered results), `searchIndex` (its build) and, on request
+(`send({cmd: 'memory'})` in DevTools), `memory`. Measure changes to input, rendering or module size on a
+supported TV. Past results from a 2020 set are in the
+[history](https://github.com/teng-lin/patina-iptv/blob/5db8843cd3b4f82a4b7821e7ef2b52a74c73c3d4/hosts/tizen/README.md#measured-on-a-2020-un55tu7000-tizen-55-chromium-69).
 
 ## Known limits
 

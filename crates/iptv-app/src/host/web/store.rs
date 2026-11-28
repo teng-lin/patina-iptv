@@ -1,7 +1,6 @@
 //! The browser store: SQLite on `iptv-store-sqlite`'s memory files,
 //! restored from IndexedDB at launch and saved there in 64 KiB chunks after
-//! every commit (`docs/plans/2026-11-21-browser-tv-architecture.md`,
-//! decision 2). The host page loads the stored chunks before the module
+//! every commit. The host page loads the stored chunks before the module
 //! starts (`hosts/tizen-nsh`), so the open, which cannot wait, reads them
 //! synchronously.
 //!

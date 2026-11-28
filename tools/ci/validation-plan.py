@@ -72,10 +72,10 @@ STRESS_CRATES = ("iptv-store-sqlite", "iptv-sqlcipher-init", "iptv-import", "ipt
                  "iptv-providers", "iptv-guide", "iptv-core", "iptv-library", "iptv-settings")
 STRESS = (*BUILD, *(f"crates/{crate}/**" for crate in STRESS_CRATES), "tools/ci/import-stress.sh")
 COVERAGE = ("tools/ci/coverage.sh", "tools/ci/*coverage*.py")
-HOST_INPUTS = ("docs/capabilities.md", "tools/ci/lint.sh", "tools/ci/check-line-length.sh")
+HOST_INPUTS = ("docs/platform-support.md", "tools/ci/lint.sh", "tools/ci/check-line-length.sh")
 OTHER_HOSTS = ("hosts/android/**", "hosts/ios/**", "hosts/linux/**", "hosts/windows/**",
                "hosts/tizen/**", "hosts/tizen-nsh/**", "tools/bootstrap.ps1")
-HELPER_INPUTS = ("docs/contributing.md", "README.md")
+HELPER_INPUTS = ("docs/development.md", "README.md")
 IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
        "tools/check-ios-simulator-entitlements.sh", "tools/apple-airplay-probe/**",
        "crates/iptv-app/src/host/native/apple_airplay.m",

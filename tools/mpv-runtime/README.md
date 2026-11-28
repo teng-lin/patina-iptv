@@ -86,10 +86,12 @@ The smoke test generates its own video/audio, serves MPEG-TS and HLS on loopback
 and checks advancing playback, decoded audio/video tracks and distinct nonblack
 software-rendered frames. It reads no user profile or real provider media.
 
-Dispatch **Build retained Windows libmpv dependency** (`mpv-runtime.yml`) to run
-the full pipeline. The workflow publishes only after its Windows smoke job
-succeeds. Its tag is `mpv-runtime-<digest>`; the digest covers the source lock,
-Dockerfile and build/helper scripts. Existing releases are never overwritten.
+Dispatch **Build retained libmpv dependencies** (`mpv-runtime.yml`) with platform
+`windows` to run the full pipeline. The workflow publishes only from master, with
+`publish` enabled, after its Windows smoke job (playback and the
+[relay guard](patches/README.md)) succeeds. Its tag is `mpv-runtime-<digest>`; the
+digest covers the source lock, Dockerfile, patches and build/helper scripts.
+Existing releases are never overwritten.
 The retained release contains:
 
 - `mpv-runtime-windows-x86_64.zip`

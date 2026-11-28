@@ -121,9 +121,9 @@ class Selection(unittest.TestCase):
         self.assertFalse(any(plan[lane] for lane in v.LANES))
 
     def test_consumed_docs_select_their_actual_consumers(self):
-        self.assertTrue(v.select(["docs/capabilities.md"])["host"])
-        self.assertTrue(v.select(["docs/contributing.md"])["helpers_full"])
-        self.assertFalse(v.select(["docs/contributing.md"])["host"])
+        self.assertTrue(v.select(["docs/platform-support.md"])["host"])
+        self.assertTrue(v.select(["docs/development.md"])["helpers_full"])
+        self.assertFalse(v.select(["docs/development.md"])["host"])
         self.assertFalse(v.select(["docs/release.md"])["helpers_full"])
 
     def test_changed_lint_wrappers_execute_as_well_as_receive_syntax_checks(self):
@@ -172,7 +172,7 @@ class Selection(unittest.TestCase):
         for path in ("vendor/nsh-tv/README.md", "vendor/synthetic/README.md", ".gitattributes", "unknown.input"):
             self.assertTrue(v.select([path])["host"], path)
         # The explicit embedded-doc exception survives removal of the asset.
-        self.assertTrue(v.select(["docs/capabilities.md"])["host"])
+        self.assertTrue(v.select(["docs/platform-support.md"])["host"])
 
     def test_unrelated_workflows_select_helpers_and_actionlint_only(self):
         for name in ("prune-caches", "privacy-policy", "nsh-cli-releases", "release", "promote-native",
@@ -243,7 +243,7 @@ class Selection(unittest.TestCase):
         return found
 
     def test_rust_embedded_markdown_never_routes_as_documentation(self):
-        self.assertIn("docs/capabilities.md", self.assert_embedded_markdown_classified(v.ROOT))
+        self.assertIn("docs/platform-support.md", self.assert_embedded_markdown_classified(v.ROOT))
 
     def test_fuzz_and_vendor_markdown_consumers_cannot_bypass_the_guard(self):
         for tree in ("fuzz", "vendor"):

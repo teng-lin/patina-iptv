@@ -8,13 +8,9 @@ Setup, contribution policy and physical-device validation requirements remain
 in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Validation scheduling and required-check behavior are documented in [CI tiers](ci.md).
-Open pull requests as drafts while pushing fixups (`gh pr create --draft`).
-Once the change is complete, mark it ready (`gh pr ready`) to start the complete
-validation run. A draft run always fails its gate on purpose and lists the
-heavy lanes it deferred.
 
-The [documentation map](index.md), [NSH pin](nsh.md),
-[disposable emulator runbook](android-validation.md) and
+The [documentation map](README.md), [NSH pin](#nsh-pin),
+[disposable emulator runbook](testing.md#disposable-android-validation) and
 [release recovery procedure](release.md#release-contract-and-recovery) cover
 operational handoff. Keep one Cargo target directory per worktree; record both
 application and pinned framework SHAs with validation evidence.
@@ -33,10 +29,11 @@ application and pinned framework SHAs with validation evidence.
 | Recording lifecycle | [portable model](../crates/iptv-core/src/recording.rs), [runtime](../crates/iptv-runtime/src/recordings.rs), [native ownership](../crates/iptv-runtime/src/recordings/host.rs) | [recording host adapter](../crates/iptv-app/src/host/native/recording_host.rs), [Android host](../hosts/android) | [runtime recording recovery](../crates/iptv-runtime/src/recordings/recovery_tests.rs) and app recorder-startup/transport scenarios; device background/resume checks |
 | Playback and native controls | [core playback](../crates/iptv-core/src/playback.rs), [runtime playback](../crates/iptv-runtime/src/playback.rs), [opening](../crates/iptv-runtime/src/opening.rs) | [player adapter](../crates/iptv-player-mpv/src/lib.rs), [persistent surface](../crates/iptv-app/src/playback/video.rs), [Android host](../hosts/android) | `cargo test -p iptv-player-mpv`; app playback/PiP/multiview scenarios; native playback on each changed host |
 | Samsung Tizen host (Live TV) | [web application](../crates/iptv-web/src/lib.rs), [guide snapshot](../crates/iptv-epg/src/snapshot.rs) | [Tizen host](../hosts/tizen/README.md) | `cargo test -p iptv-web -p iptv-epg`; `hosts/tizen/build.sh`, then launch, list, zap and relaunch on a Tizen 5.5 TV |
+| Samsung Tizen NSH host (opt-in) | [web host](../crates/iptv-app/src/host/web.rs), [browser store](../crates/iptv-app/src/host/web/store.rs) | [Tizen NSH host](../hosts/tizen-nsh/README.md) | the wasm32 lints in [the check plan](../tools/ci/check-plan.py); `hosts/tizen-nsh/build.sh --stage`, then a TV run |
 | Localization/accessibility | [portable messages](../crates/iptv-presentation/src/i18n.rs), [contrast policy](../crates/iptv-app/src/theme.rs) | [message adapter](../crates/iptv-app/src/kit/i18n.rs), [assistive-technology checklist](../CONTRIBUTING.md#screen-readers-and-large-text) | presentation catalog tests, app catalog/interface-language/accessibility scenarios; actual assistive-technology checks for host changes |
 | Release and packaging | [release contract](release.md), [workflow](../.github/workflows/release.yml) | [CI tools](../tools/ci), [Android hosts](../hosts/android) | affected Python/shell/host tests, package smoke and workflow gates from the release contract |
 
-Runtime services have [a declared compatibility boundary](runtime-api-v1.md).
+Runtime services have [a declared compatibility boundary](architecture.md#internal-application-service-contract-v1).
 Read it before changing public APIs: other public helpers may be experimental.
 Transport, credentials and backups follow the [security contract](security.md).
 Messages and language fallbacks follow the [localization contract](localization.md).
@@ -57,6 +54,14 @@ cargo test -p iptv-runtime --test it data_startup::
 cargo test -p iptv-runtime --test it parental_access::
 cargo test -p iptv-runtime --test it vod_library::
 cargo test -p iptv-runtime --lib vod::
+cargo test -p iptv-runtime --features test-support --lib imports::recovery_tests
+cargo test -p iptv-runtime --features test-support --lib recordings::
+cargo test -p iptv-runtime --features test-support --test it lifecycle_recovery::
+cargo test -p iptv-runtime --features test-support --test it native_backup::
+cargo test -p iptv-runtime --features test-support --test it command_journeys::
+cargo test -p iptv-runtime --features test-support --test it library_journeys::
+cargo test -p iptv-runtime --features test-support --test it guide_journeys::
+cargo test -p iptv-runtime --features test-support --test it parental_recovery::
 cargo test -p iptv-runtime --features test-support --test it vod_import_pipeline::
 cargo test -p iptv-store-sqlite --lib vod::
 cargo test -p iptv-store-sqlite --lib -- --ignored --nocapture discovery_latency
@@ -78,7 +83,14 @@ python3 tools/ci/test-rehearsal.py
 ```
 
 Headless scenarios prove model, layout and native-prop behavior, not actual
-decoding or screen-reader usability.
+decoding or screen-reader usability. Runtime scenarios use real temporary
+SQLCipher stores at persistence boundaries, with generated network responses,
+media, credentials and identifiers. A worker gate signals actual entry, so its
+timeout detects a missing acknowledgement rather than establishing readiness,
+and dropping a test gate releases its worker during assertion unwinding.
+Assert what a failure must not change, not only that the branch ran. Native mpv
+tests exercise an actual decoder; emulator smoke is separate from physical
+TV or tablet evidence.
 
 Examples of impact assessment:
 
@@ -146,7 +158,7 @@ journeys remain Linux lanes. This consolidation adds no Windows decoder/GUI test
 Packaging/release changes additionally follow the release contract; targeted
 commands do not replace those gates.
 The [validation tiers](ci.md) describe when CI runs additional Android and Windows
-builds, coverage, parser fuzzing, [Android emulator smoke](android-validation.md)
+builds, coverage, parser fuzzing, [Android emulator smoke](testing.md#disposable-android-validation)
 and package checks. Provider/parser changes need their selected fuzz lane as well
 as ordinary tests.
 
@@ -189,3 +201,54 @@ and [shell boundary tests](../crates/iptv-app/tests/app/architecture.rs) to guar
 concrete ownership decisions. Change an allowlist only with an explanation of
 why that dependency belongs there. Extract coordination incrementally when a
 feature needs it; this map does not prescribe a wholesale rewrite.
+
+## NSH pin
+
+Patina uses the `patina` branch of the `teng-lin/nsh` fork. The exact commit in
+[`nsh.rev`](../nsh.rev) pins the framework crates, CLI and Android Java runtime.
+
+`tools/bootstrap.sh` (or `./tools/bootstrap.ps1` on Windows) handles both
+first-time setup and `nsh.rev` updates automatically, refusing to touch a dirty
+checkout unless `IPTV_ALLOW_NSH_DRIFT=1`. With `IPTV_ALLOW_NSH_DRIFT=1`,
+bootstrap leaves a dirty or drifted checkout at its current revision and builds
+`nsh-cli` from that revision without syncing `nsh.rev`; unset the override
+before re-running bootstrap to sync the pin.
+
+To set up the sibling checkout and build the CLI manually from the Patina
+repository root (a manual `cargo build` does not write bootstrap's
+`.patina-nsh-cli.rev` verification stamp; run `tools/bootstrap.sh` or
+`./tools/bootstrap.ps1` normally before relying on `--check-only` or
+`-CheckOnly`):
+
+```sh
+git clone --branch patina https://github.com/teng-lin/nsh.git ../nsh-patina
+git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
+cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
+```
+
+When the pin changes, re-run `tools/bootstrap.sh` (or fetch the new commit and
+rebuild the CLI manually):
+
+```sh
+git -C ../nsh-patina fetch origin "$(cat nsh.rev)"
+git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
+cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
+```
+
+NSH is a path dependency, so CI and `tools/check.sh` use `nsh.rev` to check the
+checkout. `tools/check.sh` requires a clean checkout at that commit. Set
+`IPTV_ALLOW_NSH_DRIFT=1` only while developing the framework locally.
+
+The [vendored TV input adapter](../vendor/nsh-tv/README.md) consumes NSH's raw
+key events and translates the Android TV scan codes that need transport.
+[Raw key names for Android OK](https://github.com/longbridge/nsh/pull/2382),
+[root dispatch](https://github.com/longbridge/nsh/pull/2414) and
+[Android Back release](https://github.com/longbridge/nsh/pull/2344) support
+Patina's TV input on upstream NSH. The Patina Android host owns the persistent
+Media3 surface. When the software keyboard closes, Patina restores focus to
+its remote listener. `iptv-nav` owns the app's navigation and press rules.
+
+For dependency changes, follow the [runner lock update](release.md#locked-package-builds)
+procedure and verify the Android TV input on a native host. Record both Patina
+and NSH commit IDs in release candidate evidence. When reverting a pin, revert
+its dependent application and runner changes together.

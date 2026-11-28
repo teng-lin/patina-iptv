@@ -17,7 +17,7 @@ export IPTV_RS_MPVKIT="$PWD/target/mpvkit"
 cargo check --locked -p iptv-app --lib --target aarch64-apple-ios
 # Build the simulator slice: its Keychain needs the entitlements iptv-app
 # links itself (#136), so check its objects carry them. This links no app;
-# docs/ios-validation.md checks the packaged one by hand.
+# docs/testing.md checks the packaged one by hand.
 cargo build --locked -p iptv-app --lib --target aarch64-apple-ios-sim
 bash tools/check-ios-simulator-entitlements.sh target/aarch64-apple-ios-sim/debug/libiptv_app.rlib
 

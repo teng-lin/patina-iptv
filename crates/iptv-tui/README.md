@@ -6,6 +6,7 @@ Built and linted in CI as a workspace member, but not packaged or distributed in
 ## Prerequisites
 
 - Sibling `../nsh-patina` checkout pinned to `nsh.rev`
+- Patina's guarded `libmpv` on Linux and macOS ([setup](../../README.md#setup))
 - `ffmpeg` on `PATH` for `--video=kitty` and `--video=inline` (video-only; no audio playback)
 - `mpv` on `PATH` for `--video=popup` (audio + hardware-accelerated video in a separate desktop window)
 
@@ -23,8 +24,8 @@ cargo build --release -p iptv-tui
 cargo run --release -p iptv-tui -- [--video=kitty|inline|popup|none] [--headless] [--demo]
 ```
 
-- `--video=kitty`: Fullscreen video via the Kitty Graphics Protocol (auto-selected on Ghostty, Kitty, and WezTerm; video-only). Uses a private `0700` `/dev/shm` directory locally (`1280x720@30`) and falls back to zlib-compressed inline chunked streaming over SSH (`1280x720@20`) or non-Linux systems.
-- `--video=inline`: Fullscreen true-color half-block (`▀`) rendering inside any 24-bit terminal (video-only).
+- `--video=kitty`: Fullscreen video via the Kitty Graphics Protocol (the default on Ghostty, Kitty, and WezTerm; video-only). Renders at 1280x720, 30 fps locally and 20 fps over SSH. Local sessions use a private `0700` directory in `/dev/shm`; over SSH, or without `/dev/shm`, frames are sent inline as zlib-compressed chunks.
+- `--video=inline`: Fullscreen true-color half-block (`▀`) rendering inside any 24-bit terminal (video-only; the default elsewhere).
 - `--video=popup`: Pops up a separate native `mpv` window on the local display (stays alive when switching back to the guide).
 - `--video=none`: Headless guide and DVR browsing with no video output.
 - `--headless`: Renders a 120×40 synthetic snapshot to stdout and exits (always implies `--demo`).

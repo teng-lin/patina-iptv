@@ -5,7 +5,7 @@
 # Usage: tools/make-hls-fixtures.sh [--serve | --android-smoke]
 # Each channel is a VOD playlist that ends. For runs longer than its media,
 # serve them as endless live streams: tools/mock-server.py --loop (see
-# docs/android-validation.md, "Fixture streams").
+# docs/testing.md, "Fixture streams").
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 dir="$root/fixtures/hls"

@@ -1,4 +1,4 @@
-//! The desktop's everyday viewing workflows (#89, `docs/desktop.md`):
+//! The desktop's everyday viewing workflows (#89, `docs/interaction.md`):
 //! the wheel and right-click over the guide, the channel list, the poster
 //! grid and recordings; context menus for guide actions and visible ⋯ controls in lists; keyboard
 //! shortcuts that never reach into a text field or another window's
@@ -371,10 +371,9 @@ fn the_wheel_right_click_and_hover_never_tune_and_context_menus_target_their_row
 
     // Either wheel over the guide tunes nothing. What each moves (the
     // channels; the time, as `guide_nav` checks with listings) is checked
-    // in a real window too: the headless screen does not model the rows'
+    // in a real window: the headless screen does not model the rows'
     // `sticky` place inside the timeline's sideways scroll view, and this
-    // playlist has no listings to pan through (see
-    // docs/validation/issue-89-desktop-journey.md).
+    // playlist has no listings to pan through.
     for delta in [(0.0, 600.0), (-900.0, 0.0), (900.0, 0.0), (0.0, -600.0)] {
         step(app.wheel("id:guide-timeline", Point::new(px(delta.0), px(delta.1))));
     }

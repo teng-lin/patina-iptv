@@ -17,9 +17,9 @@ reconnect before opening a transport. Guarded local HTTP bypasses inherited
 proxies without changing the process environment.
 
 Desktop builds explicitly disable mpv's libcurl backend and validate that
-configuration: guarded IO must use this patched Lavf implementation. iOS must
-also be validated with its rebuilt, pinned native library before enabling the
-guard there.
+configuration: guarded IO must use this patched Lavf implementation. The iOS
+build (`../../mpv-runtime-ios/build.py`) applies the same patches to its
+Libavformat and runs the guard check on the arm64 simulator.
 
 `relay_guard.py` serves only generated loopback fixtures and passes raw HLS to
 the native player, deliberately bypassing the rewriter. It checks ordinary and

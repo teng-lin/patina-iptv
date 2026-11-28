@@ -99,7 +99,7 @@ class Parity(unittest.TestCase):
         self.assertIn("--ignored --exact native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss", script)
 
     def test_contributor_map_lists_the_portable_builds(self):
-        text = (ROOT / "docs/contributing.md").read_text(encoding="utf-8")
+        text = (ROOT / "docs/development.md").read_text(encoding="utf-8")
         block = re.search(
             r"<!-- portable-crates:start -->(.*?)<!-- portable-crates:end -->",
             text,
@@ -109,7 +109,7 @@ class Parity(unittest.TestCase):
         self.assertEqual(set(re.findall(r"`(iptv-[a-z-]+)`", block[1])), self.wasm)
 
     def test_contributor_map_local_links_exist(self):
-        page = ROOT / "docs/contributing.md"
+        page = ROOT / "docs/development.md"
         targets = local_targets(page.read_text(encoding="utf-8"))
         self.assertTrue(targets, "the ownership map must link to implementation/tests")
         for target in sorted(targets):
@@ -117,8 +117,9 @@ class Parity(unittest.TestCase):
                 self.assertTrue((page.parent / target).exists(), f"broken map link: {target}")
 
     def test_documented_packages_and_scenario_modules_exist(self):
-        text = (ROOT / "docs/contributing.md").read_text(encoding="utf-8")
-        self.assertLessEqual(set(PACKAGE.findall(text)), self.members)
+        text = (ROOT / "docs/development.md").read_text(encoding="utf-8")
+        # nsh-cli builds from the sibling NSH checkout, outside this workspace.
+        self.assertLessEqual(set(PACKAGE.findall(text)) - {"nsh-cli"}, self.members)
         modules = re.findall(r"--test app ([a-z_]+)", text)
         self.assertTrue(modules)
         for module in modules:

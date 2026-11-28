@@ -34,11 +34,6 @@ test streams.</sub>
 Patina provides no channels or content. You add the playlist or account
 your IPTV provider gave you.
 
-The [internal runtime API contract](docs/runtime-api-v1.md) documents source-scoped
-inspection, guide repair, verification and undo for native application clients.
-The [feature availability matrix](docs/capabilities.md) explains host limits,
-player reports and background recording requirements.
-
 ### Why "Patina"
 
 A patina is the finish that metal earns with age and handling, like the
@@ -101,10 +96,9 @@ The AppImage bundles them: GTK and GStreamer from Ubuntu 24.04, and Patina's
 own libmpv, built with an LGPL-only FFmpeg from pinned sources. The macOS
 disk image and the Windows installer bundle the same build of libmpv.
 
-Release artifacts carry `SHA256SUMS`. The automated pipeline also produces build
-provenance; historical exceptions below must not be treated as verified builds.
-With the [GitHub CLI](https://cli.github.com/) you can check that a download
-was built by this repository's release workflow:
+Release artifacts carry `SHA256SUMS`. With the
+[GitHub CLI](https://cli.github.com/) you can check that a download was built
+by this repository's release workflow:
 
 ```sh
 gh attestation verify Patina-<version>-linux-x86_64.AppImage --repo teng-lin/patina-iptv
@@ -112,10 +106,8 @@ gh attestation verify Patina-<version>-linux-x86_64.AppImage --repo teng-lin/pat
 
 [The release guide](docs/release.md#checksums-provenance-and-sbom) has the
 stricter form, checksum verification and the SBOM. Releases up to v0.1.1
-predate the attestations. **v0.1.4 is also an exception:** its assets have release
-membership attestations, but no release-workflow build provenance was found in the
-November 17, 2026 audit. That verification command therefore cannot establish its
-build origin. The separate `macos-v0.1.4` download is part of this exception.
+predate build provenance. v0.1.4, including the separate `macos-v0.1.4`
+download, is also an exception: this command cannot establish its build origin.
 
 ### Opening the macOS and Windows builds
 
@@ -123,8 +115,7 @@ The macOS and Windows packages are **previews** until platform signing is
 configured: they are not signed with an Apple Developer ID or a Windows
 code-signing certificate, and the macOS image is not notarized, so the
 system warns before the first launch. Each release's notes say whether its
-packages are signed. Check hashes and, where available, build provenance first;
-the v0.1.4 exception above remains unverified by the build-provenance command.
+packages are signed. Check hashes and, where available, build provenance first.
 
 - **macOS (Gatekeeper):** drag Patina to Applications and open it once; macOS
   refuses. Then open System Settings, Privacy & Security, scroll to the
@@ -160,7 +151,7 @@ On Windows (PowerShell):
 - **Rust:** checks or installs the release pinned in `rust-toolchain.toml` with
   `clippy`, `rustfmt` and the `wasm32-unknown-unknown` target (for Android add
   `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`).
-- **NSH:** clones or updates the sibling [Patina NSH fork](docs/nsh.md) at
+- **NSH:** clones or updates the sibling [Patina NSH fork](docs/development.md#nsh-pin) at
   `../nsh-patina` to `nsh.rev` and builds `nsh-cli` (`--skip-nsh` skips this).
 - **Linux host packages:** checks (or installs with `--install-packages`) the
   same package list as CI (`tools/ci/linux-packages.txt`, plus `dnf` and
@@ -221,17 +212,18 @@ From PowerShell:
 
 The script downloads Patina's checksum-pinned x64 libmpv runtime and copies
 `libmpv-2.dll` beside `iptv-app.exe`. Keep these two files together when
-running the app. Windows release tags, manual desktop releases and selected
-packaging PRs build `Patina-<version>-windows-x86_64-setup.exe`. See the
-[validation tiers](docs/ci.md) for selection rules. The per-user installer
-adds a Start menu shortcut, bundles libmpv and the VC runtime, and preserves
-settings and playlists on uninstall.
-Windows installers are currently unsigned; no portable app ZIP is produced.
-The runtime has a separate [dependency build workflow](tools/mpv-runtime/README.md)
-with pinned sources, offline compilation, native component notices and retained
-source archives. Installers include those notices and the exact source download
-location. See [the release guide](docs/release.md#windows-installer-experimental)
-for dependency updates and source retention requirements.
+running the app. `-Check` runs the full Windows suite ([validation
+tiers](docs/ci.md)) and also needs Python to compare the NSH checkout with
+`nsh.rev`. A first build compiles OpenSSL from source and can take several
+minutes. For direct Cargo commands, put Strawberry Perl's `perl/bin` and
+`c/bin` directories, plus `target/mpv`, on `PATH`.
+
+The per-user installer adds a Start menu shortcut, bundles libmpv and the VC
+runtime, and preserves settings and playlists on uninstall. It is currently
+unsigned, and no portable app ZIP is produced. See
+[the release guide](docs/release.md#windows-installer-experimental) for how it
+is built, the [runtime build](tools/mpv-runtime/README.md) and source
+retention.
 
 Settings and encrypted data live in `%LOCALAPPDATA%\Patina`; the database
 key lives in Windows Credential Manager. The existing desktop keyboard,
@@ -240,14 +232,6 @@ the original player. Video is composed below the UI through mpv's software
 renderer, with output capped at 1920×1080 and scaled by Direct2D. This is
 CPU intensive; high-resolution playback and multiview need performance
 validation. GPU rendering is not yet implemented on Windows.
-
-The Windows PR job compiles the workspace test targets, runs Windows chrome
-checks and builds the app. Nightly and release CI run the full Windows suite,
-as does `-Check` by default. CI builds the portable WebAssembly targets on Linux.
-`-Check` also needs Python to compare the NSH checkout with `nsh.rev`. A first build
-compiles OpenSSL from source and can take several minutes. For direct Cargo
-commands, put Strawberry Perl's `perl/bin` and `c/bin` directories, plus
-`target/mpv`, on `PATH`.
 
 To build the installer locally (requires Python and `cargo-about` 0.9.3):
 
@@ -258,9 +242,8 @@ cargo install cargo-about --version 0.9.3 --features cli --locked
 ```
 
 The packaging script installs a checksum-pinned Inno Setup compiler under
-`target/tools`, embeds Patina's icon, and includes dependency notices. The smoke
-check uses a fresh synthetic profile and refuses to replace an existing installed
-copy. Release CI uploads only the installer, alongside the other platform packages.
+`target/tools`. The smoke check uses a fresh synthetic profile and refuses to
+replace an existing installed copy.
 
 ### Run
 
@@ -278,25 +261,22 @@ adb install -r hosts/android/app/build/outputs/apk/debug/app-debug.apk
 
 #### iPad
 
-The iPad app is complete and runs on devices, but it is not yet
-distributed. It plays video through the same libmpv player as the
-desktops (MPVKit's LGPL build) and adds touch navigation of its own.
-
-```bash
-rustup target add aarch64-apple-ios-sim aarch64-apple-ios
-tools/fetch-mpvkit.sh            # libmpv xcframeworks, checksums pinned
-source tools/ci/locked-build-env.sh
-nsh="$PWD/../nsh-patina/target/release/nsh"
-(cd crates/iptv-app && "$nsh" package . --target ios-simulator \
-  --icon icon-ios.png -o ../../target/ios-sim)
-```
+The iPad app runs on devices but is not yet distributed. It plays video
+through the same libmpv player as the desktops (MPVKit's LGPL build) and adds
+touch navigation of its own. For the simulator, follow
+[iOS simulator validation](docs/testing.md#build-install-and-launch).
 
 Installing on a device needs Developer Mode on the iPad and a development
 profile for `com.hantekllc.iptvrs`. Set `signing_identity` to the signing
 identity's SHA-1, `provisioning_profile` to the profile's absolute path and
-`device_id` to the iPad's identifier. From the same shell, run the device build:
+`device_id` to the iPad's identifier:
 
 ```bash
+rustup target add aarch64-apple-ios
+tools/fetch-mpvkit.sh            # libmpv xcframeworks, checksums pinned
+export IPTV_RS_MPVKIT="$PWD/target/mpvkit"
+source tools/ci/locked-build-env.sh
+nsh="$PWD/../nsh-patina/target/release/nsh"
 (cd crates/iptv-app && "$nsh" package . --target ios --icon icon-ios.png \
   -o ../../target/ios --sign "${signing_identity:?}" --profile "${provisioning_profile:?}")
 xcrun devicectl device install app --device "${device_id:?}" target/ios/Patina.app
@@ -317,7 +297,7 @@ IPTV_RS_DEV_PLAYLIST=http://127.0.0.1:8089/iptv/playlist.m3u cargo run -p iptv-a
 Use `10.0.2.2` instead of `127.0.0.1` from an Android emulator. The
 fixture channels end; `tools/mock-server.py --loop` serves them as endless
 live streams for long runs (see
-[fixture streams](docs/android-validation.md#fixture-streams-ending-or-looping-live)). Other
+[fixture streams](docs/testing.md#fixture-streams-ending-or-looping-live)). Other
 mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 (live streams the server keeps cutting), `tools/make-track-fixtures.sh`
 (multiple audio and subtitle tracks).
@@ -355,12 +335,7 @@ the top; if the lookup fails, an error and **Retry** keep the title to find.
   back; playing one of its episodes again does.
 - *Recently added* sorts by the date the provider reports adding a movie or
   last changing a series, newest first. Titles without such a date follow by
-  name. The release year is never used as that date. No index serves this
-  order across both catalogs, so each page sorts the enabled library.
-- Both shelves can take a while on a large library or a long watch history,
-  so the app reads them, and the place of a focused title, on a separate
-  store lane from the one the guide reads from, and stops a read when the
-  shelf closes.
+  name. The release year is never used as that date.
 - Disabled playlists are left out, and a deleted playlist's progress goes
   with it. Protected titles keep their row but not their poster or plot, and
   open only after the parental PIN. Playing always asks the provider for a
@@ -394,13 +369,8 @@ menu. The iPad and the Samsung TV packages do not record. **Recordings** is in
 the rail on Android TV and the desktops; on Android phones and tablets and on
 the iPad it appears once the library holds a recording. Before a capture starts
 Patina checks the 32 GiB library budget, the free space it needs (about 3.6 GB
-an hour), a free provider connection and, on a phone or a tablet, a metered
-network, and says what will stop it: on Android TV with Low Power Standby,
-turning the TV off (the part recorded is kept); on Android 15 and later, the
-six-hour background limit, after which Patina notifies you. A desktop keeps
-the computer from idle sleep while it records. Closing the window while a
-capture runs asks, on Windows and Linux, whether to stop recording and quit;
-on macOS the recording goes on with the Dock icon and Quit asks first.
+an hour) and a free provider connection, and says what could stop it; see
+[host limits and notices](docs/platform-support.md#record-now-and-the-recordings-library).
 
 On a TV while watching, press Menu or long-press OK to open the control strip,
 then choose **Record**.
@@ -424,20 +394,14 @@ programs in the guide.
 On Android, capture runs in a foreground service with a notification. Android
 force stop prevents execution until Patina is opened again, and Android 15 can
 limit background capture to six hours in a 24-hour period. Device, network and
-storage availability still apply.
+storage availability still apply. On desktop, quitting while a recording runs
+asks first, then stops the recording and keeps what was recorded; closing the
+window is covered in the [interaction contract](docs/interaction.md#closing).
 
-On desktop, quitting while a recording runs asks first (see above for closing
-the window), then stops the recording and keeps what was recorded.
-iPad background recording is not supported.
-
-Earlier versions could schedule recordings. Upgrading from one of them cancels
-its pending jobs and disables its repeating rules before any recorder starts,
-keeps their recordings, and tells you once: Recordings lists what was canceled
-until you close it. A capture the upgrade interrupted is kept as a
-partial recording. The first launch also removes what earlier versions
-registered: the Linux autostart entry, the macOS LaunchAgent, the Windows
-"Patina Recorder" task with its wake timer, and Android's pending recording
-alarm. A login launch from one of them removes them and exits.
+Upgrading from a version that could schedule recordings cancels its pending
+jobs and repeating rules, keeps their recordings (an interrupted capture as a
+partial one), lists what was canceled in Recordings until you close the notice,
+and removes the background launchers and alarms that version registered.
 
 Finished and partial recordings offer resume and playback from the beginning;
 the player uses its normal pause, rewind, fast-forward and seek bar controls.
@@ -467,7 +431,7 @@ directory stays playable.
 | D-pad, OK | Arrows, Enter |
 | Back | Escape |
 | Menu | `m` |
-| Channel up / down | Page Up / Page Down |
+| Channel up / down | `=` / `-` (a page in the guide) |
 | Play / pause | Space |
 | Info, Guide | `i`, `g` |
 | Previous channel | `p` |
@@ -475,6 +439,8 @@ directory stays playable.
 | Search | `/` or Ctrl+F (Cmd+F) |
 | Volume, mute | Ctrl+Up / Ctrl+Down (Cmd on macOS), Ctrl+M |
 | Full screen | F11 (Ctrl+Cmd+F on macOS) or double-click the video |
+
+The [desktop keyboard reference](docs/interaction.md#desktop-keyboard) lists every shortcut.
 
 ## Development
 
@@ -524,19 +490,18 @@ Useful environment variables: `IPTV_RS_AUDIO=null` (mute),
 `IPTV_RS_HWDEC` (mpv `hwdec`), `RUST_LOG=info` (player state, never stream
 addresses).
 
-[docs/contributing.md](docs/contributing.md) maps changes to subsystem owners,
-contracts and validation commands.
-[Accessibility journeys](docs/accessibility.md) documents semantic/layout checks and
-repeatable platform screen-reader validation.
-[docs/architecture.md](docs/architecture.md) explains the crate layering, the
-sans-IO ports, the state and video-layer rules, the import pipeline and the
-NSH boundary. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, checks and
-commit style; the project rules for contributors and coding agents are in
-[AGENTS.md](AGENTS.md). Release and signing setup is in
-[docs/release.md](docs/release.md), and changes per release in
-[CHANGELOG.md](CHANGELOG.md). The storage and transport security model is in
-[docs/security.md](docs/security.md); to report a vulnerability see
-[SECURITY.md](SECURITY.md).
+- [CONTRIBUTING.md](CONTRIBUTING.md): setup, checks and commit style;
+  [AGENTS.md](AGENTS.md) has the project rules for contributors and coding
+  agents.
+- [Documentation map](docs/README.md): the maintained document for each topic,
+  including [architecture](docs/architecture.md), the
+  [subsystem map](docs/development.md), the
+  [runtime API contract](docs/architecture.md#internal-application-service-contract-v1),
+  [feature availability](docs/platform-support.md),
+  [accessibility](docs/testing.md#accessibility-journeys), [security](docs/security.md) and
+  [releases](docs/release.md).
+- [CHANGELOG.md](CHANGELOG.md): changes per release.
+- [SECURITY.md](SECURITY.md): how to report a vulnerability.
 
 `python3 tools/bump-version.py patch` bumps the version. A `v<version>`
 tag builds and publishes the release.

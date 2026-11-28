@@ -6,10 +6,7 @@ external NSH platform [nsh-platform-tizen](https://github.com/teng-lin/nsh-platf
 pinned by revision in `Cargo.toml`.
 
 **Opt-in on Tizen 5.5.** The JavaScript bridge (`hosts/tizen`) is the
-supported app on 2020 sets: this package misses the launch and
-responsiveness gates there (decision of 2026-11-21 and its numbers in
-`docs/plans/2026-11-21-browser-tv-architecture.md`, "Decision on Tizen
-5.5"). A newer set (Tizen 6.5+, Chromium 85+) is measured next.
+supported app on 2020 sets. See [Migration gates](#migration-gates).
 
 ## How it runs
 
@@ -17,7 +14,7 @@ responsiveness gates there (decision of 2026-11-21 and its numbers in
 | --- | --- | --- |
 | Module | `src/lib.rs` (`patina-tizen`) | `iptv-app`'s root and UI set in the platform's runner (`nsh_platform_tizen::app!`). The engine, screens, `iptv-presentation` holders, runtime and SQLite store run in one WebAssembly instance in a Web Worker. |
 | Worker services | `app/patina-worker.js` | The imports iptv-web's adapters link: fetch and its streams, timers, clocks, randomness, the time zone, key-value storage, and the store's 64 KiB chunks in IndexedDB (read before the module starts, saved after each commit). |
-| Page | `app/index.html`, `app/patina-host.js` | Starts the platform, which draws the app's views on the page; `tv.player` is the platform's AVPlay component, refusing sources that need request headers (AVPlay cannot send them). |
+| Page | `app/index.html`, `app/patina-host.js` | Starts the platform, which draws the app's views on the page; `tv.player` is the platform's AVPlay component, refusing sources that need request headers other than `User-Agent` (AVPlay cannot send them, and sends its own `User-Agent`). |
 | Package | `app/config.xml`, `build.sh` | Its own application id (`PatinaNsh1.Patina` by default), CSP mode, the `tizen` profile. |
 | Package files | `build.sh`, `catalog.py` | iptv-app's data, kept out of the module (its `browser-package` feature): `i18n/<tag>.tsv`, one language's messages each, read by the Worker when the language is first shown; `fonts/`, the page's fonts (`patina-host.js`); `assets/banner.png`, the splash. |
 
@@ -27,15 +24,12 @@ then Yes), as
 Samsung's termination guide asks of a TV app: `src/lib.rs` calls
 `iptv_app::confirm_leaving`, and Yes sends `{"leave": true}` to the page
 (`nsh_platform_tizen::host`, the page's `onHost`), which exits. The
-platform never registers the remote's Exit key. Patina's chooser is rendered
-inside the app; expected termination over it is an implementation inference,
-not a verified popup dismissal by firmware. The generic CO-US-04 popup rule
-needs owner/Samsung clarification; test the system IME separately.
+platform never registers the remote's Exit key.
 Up or Left selects No; Down or Right selects Yes, without wrapping.
-OK chooses and Back dismisses. The [acceptance ledger](../../docs/platform-back-validation.md)
-separates these source/headless guarantees from pending physical-TV checks,
-including the firmware's held-Return/Exit behavior and the remaining Samsung
-certification questions.
+OK chooses and Back dismisses. The
+[exit policy](../../docs/interaction.md#samsung-tizen-exit-policy) records the
+open certification questions and the
+[pending TV checks](../../docs/interaction.md#pending-device-checks).
 
 Decisions stay in Rust: the Worker script performs the requests and
 writes the chunks it is handed; the destination policy, the store and
@@ -59,7 +53,7 @@ at `nsh.rev` (`tools/ci/pins.py check-nsh`), as `tools/check.sh` does.
 ```sh
 hosts/tizen-nsh/build.sh --stage                                  # target/tizen-nsh/stage
 TIZEN_SIGNING_PROFILE='<profile>' hosts/tizen-nsh/build.sh --install <tv-ip>:26101
-NSH_OPT=3 NSH_SIZE=0 hosts/tizen-nsh/build.sh --stage             # the ladder's first row
+NSH_OPT=3 NSH_SIZE=0 hosts/tizen-nsh/build.sh --stage             # opt-level 3, no size flags
 ```
 
 Every build uses the `tizen` profile (release, opt-level z: fat LTO, one
@@ -84,6 +78,28 @@ When an Add includes a guide URL, the browser swaps in the playlist and
 its required guide together. Cancel during saving discards both before
 that swap. The wizard waits for the result so it can show a completed add
 if Cancel arrived after the swap.
+
+## Migration gates
+
+A TV generation moves from the bridge to this package when it meets all of:
+
+| Measure | Gate |
+| --- | --- |
+| Module | Small enough to cache compiled (about 6 MB was the estimate for a 2020 set) |
+| First launch after an install | Within 30 s, behind a splash |
+| Cached launch | Within 8 s |
+| Key to frame on the guide | Within 80 ms |
+| A publish step on the app's thread | At most 50 ms |
+
+The 2020 set measured (UN55TU7000, Tizen 5.5) misses the launch,
+key-to-frame and publish-step gates, and the TV closed the app twice while
+zapping (cause not established). The decision of 2026-11-21 keeps the bridge
+as the supported app there, with no further size or performance work for
+Tizen 5.5. A newer set (Tizen 6.5+, Chromium 85+) has to be measured before
+deciding about Tizen as a whole; memory during a guide refresh is also still
+to be measured. The
+[original measurements](https://github.com/teng-lin/patina-iptv/blob/5db8843cd3b4f82a4b7821e7ef2b52a74c73c3d4/docs/plans/2026-11-21-browser-tv-architecture.md#decision-on-tizen-55-2026-11-21)
+are in the history.
 
 ## What does not work yet
 

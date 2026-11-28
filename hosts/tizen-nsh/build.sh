@@ -23,7 +23,8 @@
 #   NSH_RUSTFLAGS       more rustc flags
 #   IPTV_ALLOW_NSH_DRIFT=1  build on an NSH checkout other than nsh.rev's (development only)
 #
-# The size flags (the plan's "Module size and launch" measures each):
+# The size flags (each was measured for "Module size and launch",
+# https://github.com/teng-lin/patina-iptv/blob/5db8843cd3b4f82a4b7821e7ef2b52a74c73c3d4/docs/plans/2026-11-21-browser-tv-architecture.md):
 # std built with optimize_for_size, panics that abort at once
 # (-Cpanic=immediate-abort: a panic is a trap without its message, which
 # the platform reports as the app's fatal error), and no panic locations.
