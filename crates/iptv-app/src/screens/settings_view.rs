@@ -19,6 +19,7 @@ use crate::kit::toast::notify;
 use crate::wiring::navigation::{request, settings_guarded};
 use crate::wiring::settings_wiring::refresh;
 
+mod diagnostics;
 mod editors;
 pub(crate) mod remote_keys;
 pub(crate) mod updates;
@@ -400,6 +401,7 @@ fn run(ui: Ui, key: &'static str) {
             crate::library_ui::backup::export_ui,
         ),
         "general.restore" => crate::library_ui::backup::request_restore(ui),
+        "general.send_logs" => diagnostics::run(crate::library_ui::backup::pickers().create),
         "epg.update_now" => {
             if stored::update_now(&crate::wiring::runtime_owner::runtime(), move || {
                 refresh(ui.app)

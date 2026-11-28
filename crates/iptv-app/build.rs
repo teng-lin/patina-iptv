@@ -4,6 +4,11 @@ mod build_version;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build_version.rs");
+    println!("cargo:rerun-if-changed=../../nsh.rev");
+    println!(
+        "cargo:rustc-env=IPTV_TARGET={}",
+        std::env::var("TARGET").unwrap_or_default()
+    );
     build_version::emit();
     println!("cargo:rustc-check-cfg=cfg(patina_airplay_probe)");
     println!("cargo:rerun-if-env-changed=PATINA_AIRPLAY_PROBE");
@@ -15,12 +20,18 @@ fn main() {
         std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
         Ok("macos" | "ios")
     ) {
+        let log_shim = "src/host/native/apple_os_log.c";
+        println!("cargo:rerun-if-changed={log_shim}");
+        cc::Build::new()
+            .file(log_shim)
+            .compile("patina_apple_os_log");
         let source = "src/host/native/apple_airplay.m";
         println!("cargo:rerun-if-changed={source}");
         cc::Build::new()
             .file(source)
             .flag("-fobjc-arc")
             .compile("patina_airplay_probe");
+        println!("cargo:rustc-link-lib=framework=CoreFoundation");
         println!("cargo:rustc-link-lib=framework=AVKit");
         println!("cargo:rustc-link-lib=framework=AVFoundation");
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {

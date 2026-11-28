@@ -14,6 +14,7 @@ class DocumentPickersTest {
 
     @Test fun theTvFrameworkStubsAreNoPicker() {
         assertFalse(DocumentPickers.usable(listOf("com.android.tv.frameworkpackagestubs")))
+        assertFalse(DocumentPickers.usable(listOf("com.android.frameworkpackagestubs")))
         assertFalse(DocumentPickers.usable(listOf("com.android.tv.frameworkpackagestubs", null)))
     }
 

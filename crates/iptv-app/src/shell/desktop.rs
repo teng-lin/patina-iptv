@@ -398,6 +398,7 @@ pub(crate) fn quit(playback: crate::PlaybackUi) {
 
 pub(crate) fn close_after_shutdown(ui: crate::PlaybackUi) {
     crate::playback::player::watch_time::flush(ui);
+    crate::host::diagnostics::flush();
     with_window(WindowRef::close);
     // The window may be hidden (macOS), and closing it alone would
     // leave the app running: quit the app too.

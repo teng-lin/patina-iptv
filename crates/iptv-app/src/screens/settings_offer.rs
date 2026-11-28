@@ -60,6 +60,7 @@ pub const COMMANDS: &[&str] = &[
     "about.privacy_policy",
     "general.backup",
     "general.restore",
+    "general.send_logs",
     "epg.add_source",
     "epg.manage_sources",
     "epg.update_now",
@@ -233,6 +234,14 @@ pub fn offer(device: Device, key: &str) -> Offer {
     }
     if matches!(key, "general.backup" | "general.restore")
         && !crate::library_ui::backup::offered(key)
+    {
+        return Offer::Hidden;
+    }
+    if key == "general.send_logs"
+        && !crate::host::diagnostics::export_offered(
+            host,
+            crate::library_ui::backup::pickers().create,
+        )
     {
         return Offer::Hidden;
     }

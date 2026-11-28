@@ -102,7 +102,8 @@ pub static COMMANDS: &[Command] = &[
         "privacy",
         "general.send_logs",
         key("Send a diagnostic log, redacted of credentials."),
-    ),
+    )
+    .confirm(),
     Command::new(
         S::About,
         "",

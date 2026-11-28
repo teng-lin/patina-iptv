@@ -34,6 +34,7 @@ use crate::{IOS, Input, SharedUi, Ui, ViewMode, pointer_down, pointer_input};
 
 #[component]
 pub fn App() -> impl IntoElement {
+    host::diagnostics::install();
     startup::mark("rust root");
     host::log_library_base();
     fonts::register();
@@ -54,7 +55,7 @@ pub fn App() -> impl IntoElement {
     // This root's owner becomes the shell's handle, and the one the host's
     // stop callback flushes. Only a root does this: constructing a runtime
     // elsewhere changes neither.
-    let owner = Rc::new(runtime_owner::new_runtime(directory));
+    let owner = Rc::new(runtime_owner::new_runtime(directory.clone()));
     host::flush_on_host_stop(owner.host_handle());
     runtime_owner::install_root(owner);
     if let Err(error) = runtime().lock_storage() {
@@ -64,6 +65,10 @@ pub fn App() -> impl IntoElement {
             .items_center()
             .justify_center()
             .child(text(i18n::tr(message)));
+    }
+    host::diagnostics::seed_roots(&directory);
+    if !runtime().restore_is_pending() {
+        host::diagnostics::set_panic_dir(&directory);
     }
     // Restore validation can decrypt/migrate SQLite and copied documents. It
     // must finish off the UI thread before settings or the live store open.
@@ -142,6 +147,7 @@ pub fn App() -> impl IntoElement {
 
 /// Constructed once after recovery; all player surfaces belong to this owner.
 fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
+    host::diagnostics::activate_storage(&data::data_dir());
     settings::load();
     startup::mark("settings loaded");
     // Establish host-report signals before eager feature bindings subscribe.

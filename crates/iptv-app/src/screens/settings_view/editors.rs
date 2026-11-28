@@ -377,6 +377,9 @@ fn question(key: &str) -> &'static str {
         "general.restore" => tr(
             "Choose a backup to apply when you next open Patina. You can cancel the scheduled restore before closing the app.",
         ),
+        "general.send_logs" => tr(
+            "Includes the app version, platform, and redacted event log; no playlists, URLs or passwords.",
+        ),
         "epg.clear" => tr(
             "The stored programs are deleted. The guide stays empty until it is downloaded again.",
         ),

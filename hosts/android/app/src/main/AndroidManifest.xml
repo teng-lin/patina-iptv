@@ -29,9 +29,18 @@
             <data android:mimeType="application/octet-stream" />
         </intent>
         <intent>
+            <action android:name="android.intent.action.CREATE_DOCUMENT" />
+            <category android:name="android.intent.category.OPENABLE" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
             <action android:name="android.intent.action.OPEN_DOCUMENT" />
             <category android:name="android.intent.category.OPENABLE" />
             <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
         </intent>
     </queries>
 

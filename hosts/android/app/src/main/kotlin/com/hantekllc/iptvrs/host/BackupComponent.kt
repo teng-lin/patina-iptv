@@ -85,7 +85,17 @@ class BackupComponent(
     internal fun probe() {
         if (destroyed) return
         val pickers = DocumentPickers.probe(activity.packageManager)
-        nsh.emit("pickers", mapOf("create" to pickers.first, "open" to pickers.second))
+        val createText = DocumentPickers.probeCreateText(activity.packageManager)
+        val share = DocumentPickers.probeShare(activity.packageManager)
+        nsh.emit(
+            "pickers",
+            mapOf(
+                "create" to pickers.first,
+                "open" to pickers.second,
+                "createText" to createText,
+                "share" to share,
+            ),
+        )
     }
 
     override fun setProp(
@@ -143,13 +153,29 @@ class BackupComponent(
  */
 internal object DocumentPickers {
     /** Packages that claim document intents without a usable picker. */
-    private val STUBS = setOf("com.android.tv.frameworkpackagestubs")
+    private val STUBS =
+        setOf(
+            "com.android.tv.frameworkpackagestubs",
+            "com.android.frameworkpackagestubs",
+        )
 
     fun create(): Intent =
         Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "application/octet-stream"
             putExtra(Intent.EXTRA_TITLE, "Patina.patinabackup")
+        }
+
+    fun createText(title: String): Intent =
+        Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, title)
+        }
+
+    fun shareText(): Intent =
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
         }
 
     fun open(): Intent =
@@ -195,6 +221,12 @@ internal object DocumentPickers {
 
     /** (create, open): which pickers resolve on this device now. */
     fun probe(manager: PackageManager): Pair<Boolean, Boolean> = (picker(manager, create()) != null) to (picker(manager, open()) != null)
+
+    /** Whether a non-stub text document creator resolves on this device now. */
+    fun probeCreateText(manager: PackageManager): Boolean = picker(manager, createText("patina-diagnostics.txt")) != null
+
+    /** Whether a non-stub text share receiver resolves on this device now. */
+    fun probeShare(manager: PackageManager): Boolean = picker(manager, shareText()) != null
 }
 
 /** Owns the one document chooser/copy operation for an activity. */
@@ -217,6 +249,7 @@ class BackupHost(
         val id: String,
         val archive: File,
         val importing: Boolean,
+        val diagnosticLog: Boolean = false,
     ) {
         val canceled = AtomicBoolean(false)
         val ownsArchive = AtomicBoolean(!importing)
@@ -231,6 +264,7 @@ class BackupHost(
     private fun privateArchive(
         path: String,
         importing: Boolean,
+        diagnosticLog: Boolean = false,
     ): File? =
         try {
             val file = File(path)
@@ -239,12 +273,21 @@ class BackupHost(
             // Rust uses /data/data/<package>/files, whereas filesDir may name
             // /data/user/0/<package>/files. Allow that Android directory alias,
             // but reject a symlink at the archive file itself.
-            val direct = File(file.parentFile?.canonicalFile ?: directory, file.name)
+            val expectedParent = if (diagnosticLog) File(directory, "diagnostics").canonicalFile else directory
+            val direct = File(file.parentFile?.canonicalFile ?: expectedParent, file.name)
+            val validName =
+                if (diagnosticLog) {
+                    !importing &&
+                        canonical.name.startsWith("patina-diagnostics-") &&
+                        canonical.name.endsWith(".txt")
+                } else {
+                    canonical.name.startsWith(if (importing) "backup-import-" else "backup-export-") &&
+                        canonical.name.endsWith(SUFFIX)
+                }
             if (file.isAbsolute &&
                 direct == canonical &&
-                canonical.parentFile == directory &&
-                canonical.name.startsWith(if (importing) "backup-import-" else "backup-export-") &&
-                canonical.name.endsWith(SUFFIX) &&
+                canonical.parentFile == expectedParent &&
+                validName &&
                 (if (importing) !canonical.exists() else canonical.isFile)
             ) {
                 canonical
@@ -270,12 +313,13 @@ class BackupHost(
             handler.postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 100L)
             return
         }
-        if (operation != "import" && operation != "export") {
+        if (operation != "import" && operation != "export" && operation != "export-log") {
             component.complete(id, success = false, canceled = false)
             return
         }
         val importing = operation == "import"
-        val archive = privateArchive(path, importing)
+        val diagnosticLog = operation == "export-log"
+        val archive = privateArchive(path, importing, diagnosticLog)
         if (destroyed || archive == null) {
             component.complete(id, success = false, canceled = false)
             return
@@ -286,14 +330,17 @@ class BackupHost(
             component.complete(id, success = false, canceled = false)
             return
         }
-        val request = Request(component, id, archive, importing)
+        val request = Request(component, id, archive, importing, diagnosticLog)
         active = request
+        val pickerIntent =
+            when {
+                importing -> DocumentPickers.open()
+                diagnosticLog -> DocumentPickers.createText(archive.name)
+                else -> DocumentPickers.create()
+            }
         try {
             activity.startActivityForResult(
-                DocumentPickers.aimed(
-                    activity.packageManager,
-                    if (importing) DocumentPickers.open() else DocumentPickers.create(),
-                ),
+                DocumentPickers.aimed(activity.packageManager, pickerIntent),
                 TRANSFER_BACKUP,
             )
         } catch (_: Exception) {
@@ -323,7 +370,7 @@ class BackupHost(
                 // Recheck ownership after the chooser. Import requires an
                 // absent file; exclusive creation will never overwrite one.
                 val archive =
-                    privateArchive(request.archive.path, request.importing)
+                    privateArchive(request.archive.path, request.importing, request.diagnosticLog)
                         ?: throw java.io.IOException("Archive unavailable")
                 if (request.importing) {
                     val input =

@@ -7,11 +7,11 @@
 
 #[cfg(target_os = "linux")]
 fn main() -> impl std::process::Termination {
-    env_logger::init();
+    iptv_app::install_diagnostics();
     iptv_app::exit_background_recorder_launch();
     use nsh_platform_linux as platform;
     platform::set_components(iptv_app::components);
-    platform::run_app(
+    let code = platform::run_app(
         platform::AppSource::Rust(platform::Root::of::<iptv_app::App>()),
         platform::AppOptions {
             title: "Patina".to_owned(),
@@ -20,16 +20,18 @@ fn main() -> impl std::process::Termination {
             schemes: vec!["patina".into()],
             ..Default::default()
         },
-    )
+    );
+    iptv_app::flush_diagnostics();
+    code
 }
 
 #[cfg(target_os = "macos")]
 fn main() -> impl std::process::Termination {
-    env_logger::init();
+    iptv_app::install_diagnostics();
     iptv_app::exit_background_recorder_launch();
     use nsh_platform_macos as platform;
     platform::set_components(iptv_app::components);
-    platform::run_app(
+    let code = platform::run_app(
         platform::AppSource::Rust(platform::Root::of::<iptv_app::App>()),
         platform::AppOptions {
             title: "Patina".to_owned(),
@@ -37,16 +39,18 @@ fn main() -> impl std::process::Termination {
             size: (1280, 720),
             ..Default::default()
         },
-    )
+    );
+    iptv_app::flush_diagnostics();
+    code
 }
 
 #[cfg(windows)]
 fn main() -> impl std::process::Termination {
-    env_logger::init();
+    iptv_app::install_diagnostics();
     iptv_app::exit_background_recorder_launch();
     use nsh_platform_windows as platform;
     platform::set_components(iptv_app::components);
-    platform::run_app(
+    let code = platform::run_app(
         platform::AppSource::Rust(platform::Root::of::<iptv_app::App>()),
         platform::AppOptions {
             title: "Patina".to_owned(),
@@ -55,7 +59,9 @@ fn main() -> impl std::process::Termination {
             schemes: vec!["patina".into()],
             ..Default::default()
         },
-    )
+    );
+    iptv_app::flush_diagnostics();
+    code
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
