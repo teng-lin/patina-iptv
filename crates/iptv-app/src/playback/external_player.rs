@@ -1,12 +1,12 @@
 //! Handoff for an explicit channel choice in a group with external playback.
-use crate::runtime::Runtime;
-use crate::runtime::model::{ResolveFailure, StreamPurpose};
-use crate::{Playback, Ui, ViewMode, chrome::i18n::tr, host};
+use crate::{Playback, Ui, ViewMode, host, kit::i18n::tr};
 use iptv_core::guide::{Program, Schedule};
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
 use iptv_presentation::external_player::{Handoff, State};
 use iptv_presentation::lists::{Entry, ListId};
+use iptv_runtime::Runtime;
+use iptv_runtime::model::{ResolveFailure, StreamPurpose};
 use nsh_core::prelude::{Memo, Signal, Stored, computed, signal, stored, untracked};
 use std::rc::Rc;
 
@@ -157,11 +157,11 @@ fn clear_pending_target(cast: crate::screens::casting::CastUi, ticket: Option<u6
 struct PendingHandoff {
     ui: Ui,
     ticket: u64,
-    owner: Rc<crate::runtime::Runtime>,
+    owner: Rc<iptv_runtime::Runtime>,
 }
 
 impl PendingHandoff {
-    fn new(ui: Ui, ticket: u64, owner: Rc<crate::runtime::Runtime>) -> Self {
+    fn new(ui: Ui, ticket: u64, owner: Rc<iptv_runtime::Runtime>) -> Self {
         Self { ui, ticket, owner }
     }
 
@@ -269,7 +269,7 @@ impl PreviousPlayback {
         if ui.playback.playing.get_untracked() == Some(channel) {
             ui.chrome
                 .mode
-                .apply(crate::chrome::mode::Action::Restore(self.mode));
+                .apply(crate::kit::mode::Action::Restore(self.mode));
         } else {
             pending.owner.parental_end_transfer(&target);
         }
@@ -324,8 +324,8 @@ pub(crate) fn open_archive(
 
 /// Archive fallback calls this only after authorization starts playback.
 pub(crate) fn missing_handler(screens: crate::ScreensUi, list: ListId) {
-    crate::chrome::menu_view::offer_external_player_reset(screens, list);
-    crate::chrome::toast::notify(tr(
+    crate::wiring::navigation::offer_external_player_reset(screens, list);
+    crate::kit::toast::notify(tr(
         "No external player is installed, so this channel plays here.",
     ));
 }
@@ -403,7 +403,7 @@ fn open_from(
         return Outcome::Handled;
     }
     let at = archive.map(|p| crate::guide::unix_of(&*schedule, p.start));
-    let clock = crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), at);
+    let clock = iptv_runtime::time::playback_clock(crate::guide::clock::wall_unix(), at);
     let epoch = schedule.epoch_unix();
     let epg_offset = epg.epg_offset_minutes(local);
     let expected = authority.clone();
@@ -423,7 +423,7 @@ fn open_from(
             if selected != channel {
                 return None;
             }
-            let clock = crate::runtime::time::playback_clock(
+            let clock = iptv_runtime::time::playback_clock(
                 crate::time::wall_unix(),
                 Some(crate::guide::unix_of(&*schedule, program.start)),
             );
@@ -561,7 +561,7 @@ async fn connect_handoff(
         }
     }
     let Some(lease) = owner.reserve_external_viewing(iptv_library::SourceId(target.source)) else {
-        crate::chrome::toast::notify(tr(
+        crate::kit::toast::notify(tr(
             "No provider connection available while recording; stop a recording or check Streams at once",
         ));
         return;
@@ -619,5 +619,5 @@ async fn connect_handoff(
 }
 
 fn unavailable() {
-    crate::chrome::toast::notify(tr("Could not open this channel in an external player."));
+    crate::kit::toast::notify(tr("Could not open this channel in an external player."));
 }

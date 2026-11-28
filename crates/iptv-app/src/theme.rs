@@ -5,7 +5,7 @@
 
 use iptv_settings::{Settings, Target, keys};
 
-use crate::chrome::i18n::key;
+use crate::kit::i18n::key;
 
 /// An accent bundle: lighter tone and main accent (`0xRRGGBB`). The focus
 /// fill is an opaque dark main accent.

@@ -9,7 +9,7 @@
 //! Entry points: first run without a stored source, the top bar's "Add
 //! playlist" (tap), and Menu in the groups pane (remote).
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 
 mod entry;
 pub(crate) mod words;
@@ -22,10 +22,10 @@ use iptv_presentation::wizard::{
 use nsh_core::picker::FilePickRequest;
 use nsh_core::prelude::*;
 
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::icons::{self, Icon};
-use crate::chrome::ui_kit::{self, ERROR};
-use crate::guide::list_rows::Mark;
+use crate::kit::list_rows::Mark;
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::icons::{self, Icon};
+use crate::kit::ui_kit::{self, ERROR};
 use crate::library_ui::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::wiring::data::{self, Job, Purpose, Update};
@@ -47,7 +47,7 @@ fn open_with(ui: Ui, wizard: Wizard) {
     if let Some(Step::Processing { id, .. } | Step::Canceling { id }) =
         read(ui.screens, Wizard::step)
     {
-        crate::runtime_owner::runtime().cancel_wizard_import(id, false);
+        crate::wiring::runtime_owner::runtime().cancel_wizard_import(id, false);
     }
     ui.screens.wizard.set(Some(Open {
         wizard,
@@ -63,7 +63,7 @@ fn imports_unavailable() -> bool {
     if crate::host::IMPORTS {
         return false;
     }
-    crate::chrome::toast::notify(crate::chrome::i18n::tr(
+    crate::kit::toast::notify(crate::kit::i18n::tr(
         "This device cannot import playlists yet.",
     ));
     true
@@ -137,9 +137,9 @@ pub fn send(ui: Ui, event: WizardEvent) {
 }
 
 /// The M3U link form starts with the development playlist's URL, when the
-/// build has one ([`crate::runtime::build_config::DEV_PLAYLIST`]).
+/// build has one ([`iptv_runtime::build_config::DEV_PLAYLIST`]).
 fn prefill(ui: Ui) {
-    let Some(url) = crate::runtime::build_config::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
+    let Some(url) = iptv_runtime::build_config::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
         return;
     };
     let due = read(ui.screens, |w| {
@@ -195,7 +195,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
         WizardEffect::StartImport { draft } => {
             let runtime = crate::wiring::runtime_owner::runtime();
             let fallback =
-                iptv_presentation::i18n::translate(crate::chrome::i18n::language(), "Playlist");
+                iptv_presentation::i18n::translate(crate::kit::i18n::language(), "Playlist");
             let (source, epg_url) = data::source_from_draft(&draft, fallback);
             let source_kind = source.kind();
             let job = Job {
@@ -265,7 +265,7 @@ pub fn key(ui: Ui, action: Action) {
         // On the first run's welcome screen, where Back leaves: the
         // question first, where the host asks it (`crate::confirm_leaving`).
         Action::Back => {
-            let _ = back(ui) || crate::ask_before_leaving(ui);
+            let _ = back(ui) || crate::wiring::navigation::ask_before_leaving(ui);
         }
         _ => {}
     }
@@ -333,7 +333,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .test_id("wizard-layer")
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::Wizard.accessibility_covered(ui)
+                    crate::kit::overlay::Overlay::Wizard.accessibility_covered(ui)
                 })
                 .child(dynamic(move || {
                     let shown = screen.get();
@@ -424,7 +424,7 @@ fn choice(
                     .gap(move || size.px(4.0))
                     .child(
                         ui_kit::body(size, title)
-                            .font_weight(crate::chrome::fonts::MEDIUM)
+                            .font_weight(crate::kit::fonts::MEDIUM)
                             .text_color(move || mark().text()),
                     )
                     .child(ui_kit::caption(size, detail).text_color(move || mark().secondary())),

@@ -43,7 +43,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     {
         return false;
     }
-    let Some(context) = crate::runtime::Runtime::stored_playback_context(&stored.source.config)
+    let Some(context) = iptv_runtime::Runtime::stored_playback_context(&stored.source.config)
     else {
         return false;
     };
@@ -52,7 +52,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     };
     let id = stored.id;
     let content = ContentId::from_stored(key.clone());
-    let row = match crate::runtime::commands::channel(
+    let row = match iptv_runtime::commands::channel(
         &crate::wiring::runtime_owner::runtime(),
         id,
         content,
@@ -83,14 +83,14 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         return false;
     }
     log::info!("iptv player: resuming the last channel before the guide");
-    crate::chrome::startup::mark("last channel resolved");
+    crate::kit::startup::mark("last channel resolved");
     let main = ui.playback.player.main();
     let mut session = 0;
     let now = ui.now_ms();
     main.health.update(|h| session = h.start(true, now));
     ui.playback.player.resume.set(false);
     ui.playback.playback.set(Playback::Live);
-    let authority = crate::runtime::Runtime::stored_source_authority(stored).resolve(&row.channel);
+    let authority = iptv_runtime::Runtime::stored_source_authority(stored).resolve(&row.channel);
     ui.playback.player.early.set(Some(Early {
         authority: authority.clone(),
         source_id: stored.id.0,
@@ -100,7 +100,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     super::load_authorized(ui, 0, session, source, Some(authority));
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::EnterFullscreen);
+        .apply(crate::kit::mode::Action::EnterFullscreen);
     true
 }
 
@@ -128,7 +128,7 @@ pub fn adopt(ui: Ui) -> bool {
         super::stop(ui);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
         return true;
     };
     if crate::wiring::runtime_owner::schedule().channel_block(channel)
@@ -137,7 +137,7 @@ pub fn adopt(ui: Ui) -> bool {
         super::stop(ui);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
         return true;
     }
     // Preparing the early stream already owns this request, even before a

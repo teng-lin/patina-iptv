@@ -3,14 +3,14 @@
 //! again once retries stopped (OK retries too). Compact in the guide's
 //! preview.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use iptv_presentation::playback_health::Phase;
 use nsh_core::prelude::*;
 
 use super::words::{failure_message, waiting_text};
 use super::{PANEL_ALPHA, WHITE};
-use crate::chrome::fonts::{OSD_BADGE, OSD_TEXT, OSD_TITLE};
+use crate::kit::fonts::{OSD_BADGE, OSD_TEXT, OSD_TITLE};
 use crate::theme::{FOCUS_ALPHA, RADIUS, RADIUS_LARGE, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, ViewMode, channel_name, tint};
 

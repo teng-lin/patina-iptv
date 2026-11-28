@@ -355,7 +355,7 @@ what the content needs at the current text size, not from the device type.
   Android's font scale or iOS Dynamic Type). Search's two-row header uses
   Compact.
 - **Now:** the guide scales from 1.0 to 0.8 with the desktop window
-  (`crates/iptv-app/src/chrome/scale.rs`). Tablets keep the full sizes in every
+  (`crates/iptv-app/src/kit/scale.rs`). Tablets keep the full sizes in every
   window: an Android tablet's screen, and an iPad's full screen in either
   orientation, Split View, Slide Over and Stage Manager windows. A phone
   draws the guide at 0.7 (rows 50 → 35 dp, type 20 → 14), with the

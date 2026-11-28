@@ -2,7 +2,7 @@
 //! Blocking platform credential access runs exclusively on the store worker.
 use std::path::Path;
 
-use crate::runtime::{Error, model::DatabaseKey};
+use iptv_runtime::{Error, model::DatabaseKey};
 #[cfg(all(target_os = "linux", not(feature = "test-support")))]
 mod cast_store;
 #[cfg(all(target_os = "linux", not(feature = "test-support")))]
@@ -206,14 +206,14 @@ mod tests {
         super::cast_store::verify_disposable_pairing_store();
         let directory = tempfile::tempdir().unwrap();
         let owner = || {
-            std::rc::Rc::new(crate::runtime::Runtime::new(crate::runtime::Ports::new(
+            std::rc::Rc::new(iptv_runtime::Runtime::new(iptv_runtime::Ports::new(
                 directory.path().to_owned(),
                 database_key,
             )))
         };
         let first = owner();
         first.start_services();
-        block_on(crate::runtime::commands::remember_combined_channel(
+        block_on(iptv_runtime::commands::remember_combined_channel(
             &first,
             "synthetic-secret".into(),
         ))
@@ -222,7 +222,7 @@ mod tests {
         drop(first);
         let second = owner();
         second.start_services();
-        let saved = block_on(crate::runtime::commands::combined_resume_key(&second)).unwrap();
+        let saved = block_on(iptv_runtime::commands::combined_resume_key(&second)).unwrap();
         assert_eq!(saved.as_deref(), Some("synthetic-secret"));
         assert!(second.drain_services());
         drop(second);
@@ -244,7 +244,7 @@ mod tests {
         let assert_closed = || {
             let failed = owner();
             failed.start_services();
-            assert!(block_on(crate::runtime::commands::combined_resume_key(&failed)).is_err());
+            assert!(block_on(iptv_runtime::commands::combined_resume_key(&failed)).is_err());
             assert!(failed.drain_services());
             drop(failed);
             assert_eq!(std::fs::read(&path).unwrap(), encrypted);
@@ -261,7 +261,7 @@ mod tests {
         let restored = owner();
         restored.start_services();
         assert_eq!(
-            block_on(crate::runtime::commands::combined_resume_key(&restored))
+            block_on(iptv_runtime::commands::combined_resume_key(&restored))
                 .unwrap()
                 .as_deref(),
             Some("synthetic-secret")

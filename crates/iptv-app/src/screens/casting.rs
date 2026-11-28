@@ -1,10 +1,9 @@
 //! Intent handling for the Cast picker and remote.
 use crate::{
     Playback, Ui,
-    chrome::chooser,
-    chrome::i18n::{tr, trf},
-    chrome::toast::notify,
-    runtime::model::{ResolveFailure, StreamPurpose},
+    kit::i18n::{tr, trf},
+    kit::toast::notify,
+    wiring::navigation::{ChooserKind, close_chooser, open_chooser, show_cast_receivers},
     wiring::runtime_owner::{runtime, schedule},
 };
 use iptv_core::{
@@ -12,6 +11,7 @@ use iptv_core::{
     cast::{Command, Controls, Error, Receiver, RemoteState, Target},
 };
 use iptv_presentation::cast::{Prompt, State};
+use iptv_runtime::model::{ResolveFailure, StreamPurpose};
 use nsh_core::prelude::{Memo, Signal, Stored, computed, set_timeout, signal, stored};
 use std::time::Duration;
 
@@ -72,7 +72,7 @@ pub(super) fn discover(ui: Ui) {
     if ui.cast.discovering.get_untracked() {
         return;
     }
-    chooser::show_receivers(ui, Vec::new());
+    show_cast_receivers(ui, Vec::new());
     if !runtime().network_cast_available() {
         return;
     }
@@ -83,7 +83,7 @@ pub(super) fn discover(ui: Ui) {
         ui.cast.state.update(|state| state.discovering = false);
         let still_open = ui.screens.chooser.with_untracked(|open| {
             open.as_ref()
-                .is_some_and(|open| open.kind == chooser::Kind::Cast)
+                .is_some_and(|open| open.kind == ChooserKind::Cast)
         });
         if !still_open || channel != ui.playback.player.main().key.get_untracked() || !available(ui)
         {
@@ -91,7 +91,7 @@ pub(super) fn discover(ui: Ui) {
         }
         // Keep current and local destinations usable when discovery fails.
         if let Ok(receivers) = result {
-            chooser::show_receivers(ui, receivers);
+            show_cast_receivers(ui, receivers);
         }
     });
 }
@@ -165,15 +165,15 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let Some((epg, local)) = iptv_guide::combined::epg_channel(&*guide, channel) else {
         return;
     };
-    let Some(authority) = crate::runtime::Runtime::playback_authority(&*guide, channel) else {
+    let Some(authority) = iptv_runtime::Runtime::playback_authority(&*guide, channel) else {
         return;
     };
     let resolution = epg.resolve(
         local,
         None,
-        crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
+        iptv_runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
-    let context = crate::runtime::Runtime::playback_context(&*guide, channel);
+    let context = iptv_runtime::Runtime::playback_context(&*guide, channel);
     let Some(target) = crate::screens::parental_view::live_target(ui.app, channel) else {
         return;
     };
@@ -187,7 +187,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let current = move || runtime().cast_intent_current(ticket);
     ui.cast.state.update(|state| state.busy = true);
     if airplay && runtime().native_cast_view().is_none() {
-        chooser::open(ui, chooser::Kind::AirPlay);
+        open_chooser(ui, ChooserKind::AirPlay);
     }
     crate::wiring::tasks::spawn_in_app(async move {
         let mut retired = false;
@@ -345,11 +345,10 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             }
         }
         if ui.screens.chooser.with_untracked(|open| {
-            open.as_ref().is_some_and(|open| {
-                matches!(open.kind, chooser::Kind::AirPlay | chooser::Kind::Cast)
-            })
+            open.as_ref()
+                .is_some_and(|open| matches!(open.kind, ChooserKind::AirPlay | ChooserKind::Cast))
         }) {
-            chooser::close(ui);
+            close_chooser(ui);
         }
         finish_pending_stop(ui);
     });
@@ -370,7 +369,7 @@ fn monitor(ui: Ui, ticket: u64) {
                         report(error);
                     }
                     if !ui.cast.busy.get_untracked() {
-                        chooser::open(ui, chooser::Kind::CastEnded);
+                        open_chooser(ui, ChooserKind::CastEnded);
                     }
                 }
                 Ok(state) => {
@@ -467,7 +466,7 @@ pub(crate) fn finish_pending_stop(ui: Ui) {
         if stop_requested {
             stop(ui);
         } else if local {
-            chooser::close(ui);
+            close_chooser(ui);
             control(ui, Command::Stop, true);
         }
     } else if local
@@ -481,11 +480,11 @@ pub(crate) fn finish_pending_stop(ui: Ui) {
             open.as_ref().is_some_and(|open| {
                 matches!(
                     open.kind,
-                    chooser::Kind::Cast | chooser::Kind::AirPlay | chooser::Kind::CastEnded
+                    ChooserKind::Cast | ChooserKind::AirPlay | ChooserKind::CastEnded
                 )
             })
         }) {
-            chooser::close(ui);
+            close_chooser(ui);
         }
         ui.play(channel, Playback::Live);
     }

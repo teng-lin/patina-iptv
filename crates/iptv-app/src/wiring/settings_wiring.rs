@@ -26,7 +26,7 @@ pub(crate) fn refresh(app: crate::SharedUi) {
 pub fn bind(ui: Ui) {
     settings::bind_revision(ui.app.settings);
     if crate::host::NOTIFICATIONS_FOLLOW_LANGUAGE {
-        effect(move || crate::host::language_changed(crate::chrome::i18n::language().tag));
+        effect(move || crate::host::language_changed(crate::kit::i18n::language().tag));
     }
     effect(move || {
         let s = read(ui.app);

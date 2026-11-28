@@ -7,13 +7,13 @@ use nsh_core::prelude::*;
 use crate::screens::settings_view::updates as facade;
 use crate::{
     Ui, ViewMode,
-    chrome::i18n::{tr, trf},
-    chrome::scale::Scale,
-    chrome::ui_kit,
     host::updates::{
         self as host, CheckError, Frequency, Metadata, ReleaseStatus, Service, Snapshot, Trigger,
         UpdatePrompts,
     },
+    kit::i18n::{tr, trf},
+    kit::scale::Scale,
+    kit::ui_kit,
 };
 
 #[derive(Clone, Copy)]
@@ -55,14 +55,14 @@ fn metadata() -> Metadata {
 }
 
 fn service() -> Service {
-    Service::new(crate::runtime())
+    Service::new(crate::wiring::runtime_owner::runtime())
 }
 
 struct Prompts(Ui);
 
 impl UpdatePrompts for Prompts {
     fn notify(&self, key: &'static str) {
-        crate::chrome::toast::notify(tr(key));
+        crate::kit::toast::notify(tr(key));
     }
 
     fn translate(&self, key: &'static str) -> &'static str {
@@ -93,7 +93,7 @@ impl UpdatePrompts for Prompts {
     }
 
     fn close_after_shutdown(&self) {
-        crate::chrome::desktop::close_after_shutdown(self.0.playback);
+        crate::wiring::navigation::close_after_shutdown(self.0.playback);
     }
 
     fn flush_bookmarks(&self) {
@@ -155,7 +155,7 @@ pub(crate) fn bind(ui: Ui) {
     effect(move || {
         if ui.screens.update_dialog_open.get()
             && lifecycle() != nsh_core::platform::Lifecycle::Background
-            && ui.top_overlay() == Some(crate::chrome::overlays::Overlay::AppUpdate)
+            && ui.top_overlay() == Some(crate::kit::overlay::Overlay::AppUpdate)
             && snapshot(ui.screens).notice.is_some()
         {
             acknowledge(ui.screens);
@@ -227,7 +227,7 @@ fn check(ui: Ui, trigger: Trigger) {
         if let Err(error) = service.persist().await {
             log::warn!("iptv update schedule save failed: {error}");
             if trigger == Trigger::Manual {
-                crate::chrome::toast::notify(tr("Could not save update preferences. Try again."));
+                crate::kit::toast::notify(tr("Could not save update preferences. Try again."));
             }
         }
     });
@@ -238,7 +238,7 @@ fn persist(screens: crate::ScreensUi) {
     crate::wiring::tasks::spawn_in_app(async move {
         if let Err(error) = service().persist().await {
             log::warn!("iptv update preferences save failed: {error}");
-            crate::chrome::toast::notify(tr("Could not save update preferences. Try again."));
+            crate::kit::toast::notify(tr("Could not save update preferences. Try again."));
         }
     });
 }
@@ -472,13 +472,14 @@ fn progress_timer(ui: Ui) {
 
 fn cancellation_allowed(screens: crate::ScreensUi) -> bool {
     update_ui(screens).revision.get();
-    !update_ui(screens).install_busy.get() || host::can_cancel_install(&crate::runtime())
+    !update_ui(screens).install_busy.get()
+        || host::can_cancel_install(&crate::wiring::runtime_owner::runtime())
 }
 
 fn cancel_download(screens: crate::ScreensUi) -> bool {
     // Native extraction can win between rendering an enabled button and the
     // press. Do not claim cancellation or persist Skip after that boundary.
-    if !host::try_cancel_current(&crate::runtime()) {
+    if !host::try_cancel_current(&crate::wiring::runtime_owner::runtime()) {
         changed(screens);
         return false;
     }
@@ -531,7 +532,7 @@ fn download(ui: Ui) {
     crate::wiring::tasks::spawn_in_app(async move {
         let _operation = operation;
         let prompts = Prompts(ui);
-        let owner = crate::runtime();
+        let owner = crate::wiring::runtime_owner::runtime();
         let Some(result) =
             host::until_update_cancelled(&prompts, host::action_for(&owner, metadata(), &check))
                 .await
@@ -667,7 +668,7 @@ fn panel(ui: Ui) -> View {
         .test_id("app-update-panel")
         .on_press(|| {})
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::AppUpdate.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::AppUpdate.accessibility_covered(ui)
         })
         .child(ui_kit::header(
             ui,
@@ -816,9 +817,9 @@ pub(crate) fn notice_open(ui: Ui) -> bool {
     {
         return false;
     }
-    crate::chrome::overlays::Overlay::ALL
+    crate::kit::overlay::Overlay::ALL
         .into_iter()
-        .filter(|overlay| *overlay != crate::chrome::overlays::Overlay::AppUpdateNotice)
+        .filter(|overlay| *overlay != crate::kit::overlay::Overlay::AppUpdateNotice)
         .all(|overlay| !overlay.is_open(ui))
 }
 

@@ -4,13 +4,13 @@
 mod library;
 pub(crate) mod pages;
 pub(crate) mod stored;
-pub use crate::runtime::data::{
+pub use iptv_library::guides;
+pub use iptv_runtime::data::{
     Activity, Job, Playlist, Purpose, Update, delete, edit_guides, organization_changed, refresh,
     refresh_all, rename, reorder, set_user_agent, source_from_draft, switch_all, switch_to,
     toggle_playlist, try_details, update_policy,
 };
-pub use crate::runtime::data::{assign, combined};
-pub use iptv_library::guides;
+pub use iptv_runtime::data::{assign, combined};
 pub use library::Library;
 use std::path::PathBuf;
 

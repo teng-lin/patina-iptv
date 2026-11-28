@@ -5,8 +5,8 @@
 use nsh_core::prelude::*;
 
 use super::{CELL_H, CELL_RADIUS, fill};
-use crate::chrome::fonts::{CHANNEL, SANS};
-use crate::chrome::scale::Scale;
+use crate::kit::fonts::{CHANNEL, SANS};
+use crate::kit::scale::Scale;
 use crate::theme::BRIGHT_TEXT;
 use crate::{Ui, channel_name};
 
@@ -23,10 +23,7 @@ const GAP: f32 = 14.0;
 const MARKER_W: f32 = 20.0;
 
 /// Shown where a channel has no logo (an image needs a source).
-pub(crate) fn no_logo() -> String {
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E"
-        .to_owned()
-}
+pub(crate) use crate::kit::content_image::no_logo;
 
 pub(crate) fn show_channel_logos(app: crate::SharedUi) -> bool {
     crate::wiring::settings_wiring::read(app).bool(
@@ -91,7 +88,7 @@ pub(super) fn cell(
                 return;
             }
             if let Some(ch) = channel.get() {
-                crate::chrome::menu_view::open_at(ui, ch);
+                crate::wiring::navigation::open_menu_at(ui, ch);
             }
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
@@ -100,7 +97,7 @@ pub(super) fn cell(
             if !crate::library_ui::organization_view::guide_order_open(ui.screens)
                 && let Some(ch) = channel.get()
             {
-                crate::chrome::menu_view::open_at(ui, ch);
+                crate::wiring::navigation::open_menu_at(ui, ch);
             }
         })
         .role(move || {
@@ -170,7 +167,7 @@ pub(super) fn cell(
                 .items_center()
                 .justify_center()
                 .child(
-                    image(crate::chrome::content_image::source(logo))
+                    image(crate::kit::content_image::source(logo))
                         .w(move || px(size.whole(LOGO_W) - 2.0 * size.of(LOGO_PAD)))
                         .h(move || px(size.whole(CELL_H) - 2.0 * size.of(LOGO_PAD)))
                         .object_fit(ResizeMode::Contain)
@@ -188,7 +185,7 @@ pub(super) fn cell(
                 let star = ui.app.favorites.with(|f| f.contains(&ch));
                 let name = format!("{}{}", if star { "★ " } else { "" }, channel_name(ch));
                 let scale = size.get();
-                crate::chrome::fonts::fit(
+                crate::kit::fonts::fit(
                     &name,
                     name_width(column(), number_w.get(), playing(), scale)
                         + if show_logo() { 0.0 } else { size.whole(LOGO_W) }
@@ -211,7 +208,7 @@ pub(super) fn cell(
         )
         .child(
             // The playing marker, after the name.
-            crate::guide::list_rows::triangle(size, move || if playing() { "▶" } else { "" })
+            crate::kit::list_rows::triangle(size, move || if playing() { "▶" } else { "" })
                 .test_id("guide-playing-marker")
                 .text_color(move || rgb(ui.app.theme.with(|t| t.guide().playing))),
         )

@@ -5,10 +5,10 @@ use iptv_presentation::tracks::fps_label;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 
-use crate::chrome::fonts::{
+use crate::kit::fonts::{
     OSD_BADGE, OSD_COMPACT_DETAIL, OSD_COMPACT_TITLE, OSD_COMPACT_TV_TITLE, OSD_DETAIL,
 };
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 use crate::theme::{RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, channel_name, clock, tint};
 
@@ -72,8 +72,7 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
     };
     let fps = computed(move || fps_label(ui.playback.player.main().format.with(|f| f.fps)));
     let live = move || !ui.playback.paused.get() && ui.playback.playback.get() == Playback::Live;
-    let show_quality =
-        move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::chrome::scale::phone();
+    let show_quality = move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::kit::scale::phone();
     let show_next = move || next.with(Option::is_some) && window().width.0 >= NEXT_MIN_WIDTH;
     let has_title = move || {
         crate::playback::on_demand::title(ui.playback)

@@ -10,40 +10,46 @@ pub fn bind(ui: Ui) {
     let _guide = set_timeout(Duration::from_secs(2), move || {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         println!("DEMO: the actual guide; the main channel continues in its preview");
     });
     let _menu = set_timeout(Duration::from_secs(4), move || {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         let schedule = crate::wiring::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_SECOND_KEY")
             .ok()
             .and_then(|key| schedule.find_channel(&key))
         {
-            crate::chrome::menu_view::open_at(ui, channel);
+            crate::wiring::navigation::open_menu_at(ui, channel);
         }
         println!("DEMO: channel context menu offers Open in new window");
     });
     let _open = set_timeout(Duration::from_secs(9), move || {
-        crate::chrome::menu_view::perform(ui, iptv_presentation::menu::MenuItem::WatchInNewWindow);
+        crate::wiring::navigation::perform_menu(
+            ui,
+            iptv_presentation::menu::MenuItem::WatchInNewWindow,
+        );
         println!("DEMO: channel two plays in a new window; main playback unchanged");
     });
     let _next_menu = set_timeout(Duration::from_secs(14), move || {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         let schedule = crate::wiring::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_THIRD_KEY")
             .ok()
             .and_then(|key| schedule.find_channel(&key))
         {
-            crate::chrome::menu_view::open_at(ui, channel);
+            crate::wiring::navigation::open_menu_at(ui, channel);
         }
     });
     let _next = set_timeout(Duration::from_secs(18), move || {
-        crate::chrome::menu_view::perform(ui, iptv_presentation::menu::MenuItem::WatchInNewWindow);
+        crate::wiring::navigation::perform_menu(
+            ui,
+            iptv_presentation::menu::MenuItem::WatchInNewWindow,
+        );
         println!("DEMO: two independent windows and the original guide/player in one process");
     });
 }

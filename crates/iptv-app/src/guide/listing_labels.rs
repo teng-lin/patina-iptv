@@ -3,7 +3,7 @@
 use iptv_core::guide::{GroupName, Listing};
 
 pub fn listing(listing: Option<Listing>) -> String {
-    iptv_presentation::listings::listing_text(listing, crate::chrome::i18n::language())
+    iptv_presentation::listings::listing_text(listing, crate::kit::i18n::language())
 }
 
 pub fn group(name: GroupName) -> String {
@@ -11,7 +11,7 @@ pub fn group(name: GroupName) -> String {
     // listings returned typed values. Stored and guide-generated names do not.
     #[cfg(feature = "test-support")]
     {
-        use crate::chrome::i18n::tr;
+        use crate::kit::i18n::tr;
         match name {
             GroupName::Favorites => return tr("Favorites").to_owned(),
             GroupName::Recent => return tr("Recently watched").to_owned(),
@@ -20,5 +20,5 @@ pub fn group(name: GroupName) -> String {
             GroupName::Named(_) | GroupName::Ungrouped => {}
         }
     }
-    iptv_presentation::listings::group_text(name, crate::chrome::i18n::language())
+    iptv_presentation::listings::group_text(name, crate::kit::i18n::language())
 }

@@ -2,8 +2,8 @@
 //! The portable picker owns selection, filtering and remote focus; the
 //! guide's list and the persistent player surfaces stay in place.
 
-use crate::chrome::i18n::{tr, trf};
 use crate::guide::lists::entry_name;
+use crate::kit::i18n::{tr, trf};
 
 use iptv_core::guide::Schedule;
 use iptv_guide::combined::CombinedSchedule;
@@ -14,10 +14,10 @@ use nsh_base::input;
 use nsh_core::prelude::*;
 use std::rc::Rc;
 
-use crate::chrome::fonts::CONDENSED;
-use crate::chrome::scale::Scale;
-use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
-use crate::{Ui, chrome::ui_kit, clock};
+use crate::kit::fonts::CONDENSED;
+use crate::kit::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::kit::scale::Scale;
+use crate::{Ui, clock, kit::ui_kit};
 
 /// An independent browser over the shared channel catalog. The portable
 /// schedule owns playlist expansion; replacing this snapshot never changes
@@ -286,7 +286,7 @@ fn screen(ui: Ui) -> impl IntoElement {
     });
     ui_kit::screen(ui, size)
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::ChannelPicker.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::ChannelPicker.accessibility_covered(ui)
         })
         .test_id("multiview-picker")
         .child(header(ui, size))
@@ -347,8 +347,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let editing = computed(move || {
         state(ui.playback, |p| p.keyboard && p.pane == Pane::Search).unwrap_or(false)
     });
-    crate::chrome::input::bind_field_focus(field, move || editing.get());
-    crate::chrome::keyboard::on_dismissed(
+    crate::kit::input::bind_field_focus(field, move || editing.get());
+    crate::kit::keyboard::on_dismissed(
         move || editing.get(),
         move || update(ui.playback, ChannelPicker::keyboard_hidden),
     );

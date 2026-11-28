@@ -15,10 +15,10 @@ use iptv_search::ProgramIndex;
 pub fn build(
     schedule: &dyn Schedule,
     rows: usize,
-    done: impl FnOnce(Result<ProgramIndex, crate::runtime::Error>) + 'static,
+    done: impl FnOnce(Result<ProgramIndex, iptv_runtime::Error>) + 'static,
 ) {
     let mut sources: Vec<(
-        crate::runtime::model::SourceId,
+        iptv_runtime::model::SourceId,
         String,
         Vec<ChannelKey>,
         usize,
@@ -40,13 +40,13 @@ pub fn build(
                 .source_authority()
                 .filter(|authority| authority.source() == part.id)
             else {
-                done(Err(crate::runtime::Error::unavailable(
+                done(Err(iptv_runtime::Error::unavailable(
                     "Search source is unavailable",
                 )));
                 return;
             };
             sources.push((
-                crate::runtime::model::SourceId(part.id),
+                iptv_runtime::model::SourceId(part.id),
                 authority.incarnation().to_owned(),
                 keys,
                 offset,
@@ -79,14 +79,14 @@ pub fn build(
             .source_authority()
             .filter(|authority| authority.source() == source.0)
         else {
-            done(Err(crate::runtime::Error::unavailable(
+            done(Err(iptv_runtime::Error::unavailable(
                 "Search source is unavailable",
             )));
             return;
         };
         sources.push((source, authority.incarnation().to_owned(), keys, 0));
     } else {
-        done(Err(crate::runtime::Error::unavailable(
+        done(Err(iptv_runtime::Error::unavailable(
             "Search guide is unavailable",
         )));
         return;

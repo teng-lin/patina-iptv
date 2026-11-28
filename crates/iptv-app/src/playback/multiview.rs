@@ -89,7 +89,7 @@ fn account_streams(ui: Ui) -> Option<u32> {
         let (source, _) = all.channel_source(channel)?;
         crate::wiring::data::combined::connection_limit(
             &crate::wiring::runtime_owner::runtime(),
-            crate::runtime::model::SourceId(source.id),
+            iptv_runtime::model::SourceId(source.id),
         )
     })
 }
@@ -247,7 +247,7 @@ pub fn surface_rect(playback: crate::PlaybackUi, surface: usize) -> Option<(f32,
 /// On a detour it goes back to the grid.
 pub fn open(ui: Ui) {
     if let Some(reason) = untracked(|| crate::playback::multiview::availability(ui)).reason() {
-        crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
+        crate::kit::toast::notify(crate::wiring::capabilities::reason(reason));
         return;
     }
     if untracked(|| detour(ui.playback)) {
@@ -387,7 +387,7 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
             let (source, _) = all.channel_source(channel)?;
             let allowed = crate::wiring::data::combined::connection_limit(
                 &crate::wiring::runtime_owner::runtime(),
-                crate::runtime::model::SourceId(source.id),
+                iptv_runtime::model::SourceId(source.id),
             )?;
             let replacing = match m.pick() {
                 Some(iptv_presentation::multiview::Pick::Replace(tile)) => Some(tile),

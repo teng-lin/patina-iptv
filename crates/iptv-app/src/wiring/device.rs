@@ -9,7 +9,7 @@
 //!   the physical display's smallest width, so a tablet's split-screen
 //!   window stays a tablet. NSH's idiom cannot stand in for it there: it
 //!   follows the window's smallest width.
-//! - The window size class (`crate::chrome::layout::Class`), of the current
+//! - The window size class (`crate::kit::layout::Class`), of the current
 //!   window at the guide's scale and the viewer's text size.
 //! - The connected input: a hardware keyboard or a D-pad. A desktop has a
 //!   keyboard and a browser TV its remote, from the build; Android's
@@ -38,7 +38,7 @@ use iptv_presentation::capabilities::Device;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 
-use crate::chrome::layout::Class;
+use crate::kit::layout::Class;
 
 /// What the host reported: nothing until it does.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -149,7 +149,7 @@ pub fn window_class() -> Class {
     }
     Class::of(
         window().width.0,
-        crate::chrome::scale::now() * crate::wiring::settings::text_factor(),
+        crate::kit::scale::now() * crate::wiring::settings::text_factor(),
     )
 }
 

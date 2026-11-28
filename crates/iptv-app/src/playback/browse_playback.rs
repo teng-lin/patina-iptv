@@ -11,7 +11,7 @@ use std::time::Duration;
 
 fn current(ui: Ui) -> Option<Target> {
     ui.guide_data();
-    let context = crate::chrome::input::context(&ui);
+    let context = crate::wiring::navigation::input_context(&ui);
     if let Some(target) = ui.playback.pending_zap.get()
         && matches!(
             context,
@@ -74,7 +74,7 @@ fn current(ui: Ui) -> Option<Target> {
 /// apply. Desktops and TVs keep them regardless of the input report.
 pub(crate) fn autoplay_supported(host: Host) -> bool {
     !crate::wiring::device::handheld(host.form_factor)
-        || crate::chrome::input::keys_for(host).is_some()
+        || crate::kit::input::keys_for(host).is_some()
 }
 
 /// Whether choosing a channel in the guide over the video or in the
@@ -282,7 +282,7 @@ fn full(ui: Ui) {
     }
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::EnterFullscreen);
+        .apply(crate::kit::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {

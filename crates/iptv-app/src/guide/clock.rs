@@ -68,30 +68,17 @@ pub fn clock(minute: i32) -> String {
 /// the settings choose, with the weekday and day when it is not the day
 /// of `now` (`14:05`, `Tue 10 · 2:05 PM`).
 pub fn label(unix: i64, now: i64) -> String {
-    iptv_presentation::clock::label(
-        unix,
-        now,
-        offset_minutes,
-        crate::chrome::i18n::clock_style(),
-    )
+    iptv_presentation::clock::label(unix, now, offset_minutes, crate::kit::i18n::clock_style())
 }
 
 /// A calendar date without a time, for date selectors.
 pub fn date_only(unix: i64) -> String {
-    iptv_presentation::clock::date(
-        unix,
-        offset_minutes(unix),
-        crate::chrome::i18n::clock_style(),
-    )
+    iptv_presentation::clock::date(unix, offset_minutes(unix), crate::kit::i18n::clock_style())
 }
 
 /// A local clock time without a date, respecting the chosen hour cycle.
 pub fn time_only(unix: i64) -> String {
-    iptv_presentation::clock::time_at(
-        unix,
-        offset_minutes(unix),
-        crate::chrome::i18n::clock_style(),
-    )
+    iptv_presentation::clock::time_at(unix, offset_minutes(unix), crate::kit::i18n::clock_style())
 }
 
 /// Time until just after the next guide minute boundary.

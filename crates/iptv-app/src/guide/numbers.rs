@@ -33,7 +33,7 @@ fn width(digits: usize, measured: f32, size: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chrome::fonts::CHANNEL;
+    use crate::kit::fonts::CHANNEL;
 
     #[test]
     fn digits_count_the_widest_number() {

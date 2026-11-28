@@ -4,7 +4,7 @@
 //! command. Each says what it is about; the remote drives them through
 //! `iptv_presentation::settings::screen`, taps directly.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use std::rc::Rc;
 
@@ -15,11 +15,11 @@ use nsh_core::prelude::*;
 
 use super::view::swatch_color;
 use super::{WHITE, state, update, words};
-use crate::chrome::fonts::TITLE;
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit;
-use crate::chrome::ui_kit::entry::{self, Sheet};
-use crate::guide::list_rows::{self, Mark, ROW};
+use crate::kit::fonts::TITLE;
+use crate::kit::list_rows::{self, Mark, ROW};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit;
+use crate::kit::ui_kit::entry::{self, Sheet};
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::{Ui, tint};
 

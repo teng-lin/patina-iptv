@@ -56,7 +56,7 @@ pub(crate) fn schedule(active: bool) {
 }
 
 /// Reports an incomplete capture to the Android host without its metadata.
-pub(crate) fn notify_failed(reason: crate::runtime::RecordingFailure) {
+pub(crate) fn notify_failed(reason: iptv_runtime::RecordingFailure) {
     let Some((vm, class)) = HOST.get() else {
         return;
     };
@@ -65,8 +65,8 @@ pub(crate) fn notify_failed(reason: crate::runtime::RecordingFailure) {
     };
     let class: &JClass = class.as_obj().into();
     let code = match reason {
-        crate::runtime::RecordingFailure::Unexpected => 0,
-        crate::runtime::RecordingFailure::TvStandby => 1,
+        iptv_runtime::RecordingFailure::Unexpected => 0,
+        iptv_runtime::RecordingFailure::TvStandby => 1,
     };
     let _ = env.call_static_method(class, "notifyFailed", "(I)V", &[JValue::Int(code)]);
     if env.exception_check().unwrap_or(false) {
@@ -103,16 +103,14 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_start(
         if !directory.is_absolute() {
             return None;
         }
-        let mut ports = crate::runtime::Ports::new(
-            directory,
-            crate::host::native::credential_key::database_key,
-        );
+        let mut ports =
+            iptv_runtime::Ports::new(directory, crate::host::native::credential_key::database_key);
         ports.background_recordings = true;
         ports.recording_schedule = schedule;
         ports.recording_failed = notify_failed;
         ports.recording_standby = Some(standby_blocks_recording);
         ports.exclude_from_backup = crate::host::native::platform_data::exclude_from_backup;
-        crate::runtime::recordings::host::start_background_host(ports).ok()?;
+        iptv_runtime::recordings::host::start_background_host(ports).ok()?;
         Some(1)
     }));
     result.ok().flatten().unwrap_or(0)
@@ -125,7 +123,7 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stop(
 ) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if let Ok(path) = env.get_string(&path) {
-            crate::runtime::recordings::host::stop_background_host(std::path::Path::new(
+            iptv_runtime::recordings::host::stop_background_host(std::path::Path::new(
                 &String::from(path),
             ));
         }
@@ -143,7 +141,7 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stopCaptures
     path: JString,
     why: jni::sys::jint,
 ) -> jni::sys::jint {
-    use crate::runtime::recordings::host::{EarlyStop, stop_captures};
+    use iptv_runtime::recordings::host::{EarlyStop, stop_captures};
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let why = match why {
             1 => EarlyStop::TvOff,
@@ -166,7 +164,7 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_suspendViewi
 ) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if let Ok(path) = env.get_string(&path) {
-            crate::runtime::recordings::host::suspend_viewing(std::path::Path::new(&String::from(
+            iptv_runtime::recordings::host::suspend_viewing(std::path::Path::new(&String::from(
                 path,
             )));
         }
@@ -182,7 +180,7 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_resumeViewin
         let Ok(path) = env.get_string(&path) else {
             return false;
         };
-        crate::runtime::recordings::host::resume_viewing(std::path::Path::new(&String::from(path)))
+        iptv_runtime::recordings::host::resume_viewing(std::path::Path::new(&String::from(path)))
     }))
     .unwrap_or(false) as u8
 }

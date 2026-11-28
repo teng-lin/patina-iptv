@@ -11,7 +11,7 @@
 //! the video SurfaceView. [`status`] draws the waiting and error
 //! states of `player.rs`.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
@@ -22,7 +22,7 @@ use iptv_presentation::sound::delay_label;
 use iptv_presentation::tracks::{audio_layout_in, summary_in};
 use nsh_core::prelude::*;
 
-use crate::chrome::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};
+use crate::kit::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};
 use crate::theme::{FOCUS_ALPHA, RADIUS, RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, ViewMode, tint};
 
@@ -105,24 +105,24 @@ fn label(ui: Ui, control: Control) -> String {
             with(
                 tr("Video"),
                 tracks
-                    .with(|t| summary_in(t, Track::Video, crate::chrome::i18n::language()))
+                    .with(|t| summary_in(t, Track::Video, crate::kit::i18n::language()))
                     .or(playing),
             )
         }
         AudioTracks => {
             let ch = main.format.with(|f| f.channels);
-            let layout = (ch > 0).then(|| audio_layout_in(ch, crate::chrome::i18n::language()));
+            let layout = (ch > 0).then(|| audio_layout_in(ch, crate::kit::i18n::language()));
             with(
                 tr("Audio"),
                 tracks
-                    .with(|t| summary_in(t, Track::Audio, crate::chrome::i18n::language()))
+                    .with(|t| summary_in(t, Track::Audio, crate::kit::i18n::language()))
                     .or(layout),
             )
         }
         AudioOffset => with(
             tr("Audio delay"),
             Some(delay_label(
-                crate::chrome::i18n::language(),
+                crate::kit::i18n::language(),
                 ui.playback.media.delay_ms.get(),
             )),
         ),
@@ -130,13 +130,13 @@ fn label(ui: Ui, control: Control) -> String {
             tr("Subtitles"),
             Some(
                 tracks
-                    .with(|t| summary_in(t, Track::Text, crate::chrome::i18n::language()))
+                    .with(|t| summary_in(t, Track::Text, crate::kit::i18n::language()))
                     .unwrap_or_else(|| tr("Off").to_owned()),
             ),
         ),
         Scaling => with(
             tr("Picture size"),
-            Some(crate::chrome::chooser::picture_name(ui).into()),
+            Some(crate::wiring::navigation::picture_name(ui).into()),
         ),
         SleepTimer => with(
             tr("Sleep timer"),
@@ -321,9 +321,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 || ui.playback.player.vod.with(Option::is_some))
                     },
                     move || {
-                        let size = crate::chrome::scale::Scale::new();
-                        crate::chrome::ui_kit::card(ui, size, 620.0)
-                            .child(crate::chrome::ui_kit::title(size, move || {
+                        let size = crate::kit::scale::Scale::new();
+                        crate::kit::ui_kit::card(ui, size, 620.0)
+                            .child(crate::kit::ui_kit::title(size, move || {
                                 if let Some(title) = crate::screens::vod_view::title(ui.playback) {
                                     return title;
                                 }
@@ -333,7 +333,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                         .unwrap_or_default()
                                 })
                             }))
-                            .child(crate::chrome::ui_kit::body(size, move || {
+                            .child(crate::kit::ui_kit::body(size, move || {
                                 ui.playback.player.recorded.with(|r| {
                                     r.as_ref()
                                         .map(|(job, _)| job.request.channel_name.clone())
@@ -444,7 +444,7 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
                 date_time(
                     unix,
                     crate::guide::clock::offset_minutes(unix),
-                    crate::chrome::i18n::clock_style(),
+                    crate::kit::i18n::clock_style(),
                 )
             })
             .text_size(px(OSD_TEXT))
@@ -554,7 +554,7 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
             ui.app.settings.get();
             crate::wiring::settings::choice(iptv_settings::keys::SEEK_KEYS)
         });
-        words::hint(crate::chrome::input::PROFILE, shown.get(), focused, seek)
+        words::hint(crate::kit::input::PROFILE, shown.get(), focused, seek)
     };
     text(words)
         .px(px(8.0))

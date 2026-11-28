@@ -17,24 +17,24 @@
 //! tappable; a tap beside a sheet closes it. Links are shown with their
 //! accounts hidden. State: `state.rs`; wording: `words.rs`.
 
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
 
 use iptv_presentation::library::epg_sources as state;
 mod words;
 
-use crate::runtime::model::SourceId;
 use iptv_nav::Action;
+use iptv_runtime::model::SourceId;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 pub use state::Screen as Open;
 use state::{Act, Effect, Item, Key, Layer, Screen};
 
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::entry;
-use crate::chrome::ui_kit::{self, ERROR, ROW_THREE, TOUCH};
-use crate::guide::list_rows::{self, Mark};
+use crate::kit::list_rows::{self, Mark};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::entry;
+use crate::kit::ui_kit::{self, ERROR, ROW_THREE, TOUCH};
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::wiring::data::stored::{self, GuideStatus};
 use crate::{Ui, tint};
@@ -49,7 +49,7 @@ pub fn open(screens: crate::ScreensUi, playlist: SourceId) {
     screens.guide_sources.set(Some(screen(playlist)));
     // Timer failures can occur without publishing a new visible guide.
     // Opening the controls always reads the latest persisted refresh result.
-    crate::runtime::data::refresh_guide_status(&crate::wiring::runtime_owner::runtime());
+    iptv_runtime::data::refresh_guide_status(&crate::wiring::runtime_owner::runtime());
 }
 
 /// The screen for `playlist`; a host that cannot import offers no guide
@@ -174,7 +174,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
                 playlist,
                 move |completed| {
                     if completed {
-                        crate::chrome::toast::notify(tr("Guide updated"));
+                        crate::kit::toast::notify(tr("Guide updated"));
                     }
                 },
             );
@@ -182,7 +182,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
                 // Shows tr("Updating…").
                 ui.app.library.version.update(|v| *v += 1);
             } else {
-                crate::chrome::toast::notify(tr("No guide source is switched on"));
+                crate::kit::toast::notify(tr("No guide source is switched on"));
             }
         }
         Effect::Clear => {
@@ -190,7 +190,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
                 &crate::wiring::runtime_owner::runtime(),
                 playlist,
                 move |deleted| {
-                    crate::chrome::toast::notify(if deleted {
+                    crate::kit::toast::notify(if deleted {
                         tr("Guide data deleted")
                     } else {
                         tr("The guide data could not be deleted")
@@ -218,7 +218,7 @@ fn edit_name(edit: &crate::wiring::data::guides::Edit) -> String {
 }
 
 /// A guide source's title (its name, else where it comes from).
-pub fn source_title(s: &crate::runtime::model::GuideSource) -> String {
+pub fn source_title(s: &iptv_runtime::model::GuideSource) -> String {
     words::title(s)
 }
 
@@ -265,7 +265,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("guide-sources-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::GuideSources.accessibility_covered(ui)
+                    crate::kit::overlay::Overlay::GuideSources.accessibility_covered(ui)
                 })
                 .child(header(ui, size).accessibility_elements_hidden(move || contents_hidden(ui)))
                 .child(
@@ -489,13 +489,13 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
                 ),
         )
         .child(
-            list_rows::second(size, switched, crate::chrome::fonts::SANS).text_color(
-                move || match (mark(), enabled()) {
+            list_rows::second(size, switched, crate::kit::fonts::SANS).text_color(move || {
+                match (mark(), enabled()) {
                     (Mark::Focused, _) => Mark::Focused.text(),
                     (_, true) => rgb(ui.app.theme.with(|t| t.accent.light)),
                     (_, false) => ui_kit::secondary(),
-                },
-            ),
+                }
+            }),
         )
 }
 

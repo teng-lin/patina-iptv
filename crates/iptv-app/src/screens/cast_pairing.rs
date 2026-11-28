@@ -1,11 +1,11 @@
 //! Receiver approval belongs to the window that chose the destination.
 use crate::{
     Ui,
-    chrome::i18n::tr,
-    chrome::overlays::Overlay,
-    chrome::scale::Scale,
-    chrome::ui_kit,
-    chrome::ui_kit::entry::{frame, sheet_buttons, sheet_field},
+    kit::i18n::tr,
+    kit::overlay::Overlay,
+    kit::scale::Scale,
+    kit::ui_kit,
+    kit::ui_kit::entry::{frame, sheet_buttons, sheet_field},
     wiring::runtime_owner::runtime,
 };
 use iptv_core::cast::{Error, Receiver};
@@ -63,7 +63,7 @@ fn submit(cast: crate::screens::casting::CastUi) {
     let mut effect = None;
     cast.state.update(|state| effect = state.submit_pin());
     let Some(Effect::SubmitPin { ticket, pin }) = effect else {
-        crate::chrome::toast::notify(tr("Enter the four digits shown on the receiver."));
+        crate::kit::toast::notify(tr("Enter the four digits shown on the receiver."));
         return;
     };
     if let Some(request) = cast.pairing.replace(None) {
@@ -91,7 +91,7 @@ fn forget(ui: Ui) {
         if ui.cast.busy.try_get().is_some() {
             ui.cast.state.update(|state| state.busy = false);
             if result.is_err() {
-                crate::chrome::toast::notify(tr("Could not forget the AirPlay pairing."));
+                crate::kit::toast::notify(tr("Could not forget the AirPlay pairing."));
             }
             crate::screens::casting::finish_pending_stop(ui);
         }

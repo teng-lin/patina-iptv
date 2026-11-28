@@ -13,9 +13,9 @@ use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 
 use super::{PANEL_ALPHA, WHITE, device_limit, with_state};
-use crate::chrome::fonts::{OSD_BADGE, OSD_DETAIL};
-use crate::chrome::i18n::tr;
-use crate::chrome::ui_kit::icons::{self, Icon};
+use crate::kit::fonts::{OSD_BADGE, OSD_DETAIL};
+use crate::kit::i18n::tr;
+use crate::kit::ui_kit::icons::{self, Icon};
 use crate::playback::multiview;
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, channel_name, tint};

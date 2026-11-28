@@ -1,11 +1,10 @@
 //! Channel and provider-group organization, including hidden-item recovery.
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::entry::{self, TextSheet};
-use crate::guide::list_rows::{self, Mark, ROW};
-use crate::runtime::{Error, model::SourceId};
-use crate::{Ui, chrome::ui_kit, wiring::data};
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
+use crate::kit::list_rows::{self, Mark, ROW};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::entry::{self, TextSheet};
+use crate::{Ui, kit::ui_kit, wiring::data};
 use iptv_core::organization::{Block, BlockKind, Item, Sort};
 use iptv_nav::Action;
 use iptv_presentation::guide::Pane;
@@ -14,6 +13,7 @@ use iptv_presentation::organization::{
     Action as Edit, Editor, Items, LEAVE_CHOICES, Mode, OrderSave, Placement, step_choice,
 };
 use iptv_presentation::reorder::{Key, LeaveChoice, Outcome};
+use iptv_runtime::{Error, model::SourceId};
 use nsh_core::{Checked, prelude::*};
 use std::collections::{HashMap, HashSet};
 
@@ -21,7 +21,7 @@ pub use iptv_library::OrganizationScope as Kind;
 pub use iptv_presentation::organization::Open;
 
 async fn items(source: SourceId, kind: &Kind, order: Option<Sort>) -> Result<Items, Error> {
-    crate::runtime::commands::organization_editor(
+    iptv_runtime::commands::organization_editor(
         &crate::wiring::runtime_owner::runtime(),
         source,
         kind.clone(),
@@ -73,7 +73,7 @@ pub fn rename_group(ui: Ui, source: SourceId, id: String) {
 /// The group column displays just the playlist headings during a move.
 /// Its normal catalog keeps the viewer's expansion and visibility choices.
 pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
-    let Ok(playlists) = crate::runtime().playlists() else {
+    let Ok(playlists) = crate::wiring::runtime_owner::runtime().playlists() else {
         return;
     };
     if playlists.is_empty()
@@ -100,7 +100,7 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         crate::guide::lists::open_groups(ui.guide);
         crate::playback::browse_playback::hold(ui);
         ui.screens
@@ -158,7 +158,7 @@ fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
     }
     from_player
 }
@@ -271,10 +271,10 @@ fn block_state(state: &Open, id: &str) -> Block {
 pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked: bool) {
     let generation = ui.screens.organization.epoch();
     let owner = crate::wiring::runtime_owner::runtime();
-    let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
+    let save = iptv_runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
     crate::wiring::tasks::spawn_in_app(async move {
         if save.await.is_err() {
-            crate::chrome::toast::notify(tr(
+            crate::kit::toast::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             ));
             if still_open(ui.screens, generation) {
@@ -282,7 +282,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             }
             return;
         }
-        crate::chrome::toast::notify(if blocked {
+        crate::kit::toast::notify(if blocked {
             tr("Content blocked")
         } else {
             tr("Content unblocked")
@@ -291,7 +291,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
         if !still_open(ui.screens, generation) || !is_open(ui.screens) {
             return;
         }
-        let blocks = crate::runtime::commands::guide_blocks(&owner, source).await;
+        let blocks = iptv_runtime::commands::guide_blocks(&owner, source).await;
         if !still_open(ui.screens, generation) {
             return;
         }
@@ -299,7 +299,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             Ok(blocks) => update(ui.screens, |state| state.finish_block(blocks)),
             Err(_) => {
                 close(ui);
-                crate::chrome::toast::notify(tr(
+                crate::kit::toast::notify(tr(
                     "The list could not be reloaded. Reopen it and try again.",
                 ));
             }
@@ -490,7 +490,7 @@ fn save_order(ui: Ui) {
                 return;
             }
             if !crate::wiring::settings::playlists_by_hand()
-                && let Err(error) = crate::runtime()
+                && let Err(error) = crate::wiring::runtime_owner::runtime()
                     .check_setting_write(iptv_settings::keys::PLAYLIST_SORT.as_str())
             {
                 crate::screens::settings_view::notify_setting_error(error);
@@ -504,27 +504,29 @@ fn save_order(ui: Ui) {
 }
 
 fn check_playlist_order_catalog(ui: Ui) -> bool {
-    let valid = crate::runtime().playlists().is_ok_and(|rows| {
-        untracked(|| {
-            state(ui.screens, |s| {
-                if let Some(saved) = &s.saved_playlist_positions {
-                    // The saved positions can change the tie order of equal names.
-                    // The draft can still be retried while its playlists all exist.
-                    let saved: HashSet<_> = saved.iter().copied().collect();
-                    rows.len() == saved.len() && rows.iter().all(|p| saved.contains(&p.id))
-                } else {
-                    rows.iter().map(|p| p.id.0.to_string()).eq(s
-                        .editor
-                        .items
-                        .iter()
-                        .map(|item| item.id.clone()))
-                }
-            })
-        }) == Some(true)
-    });
+    let valid = crate::wiring::runtime_owner::runtime()
+        .playlists()
+        .is_ok_and(|rows| {
+            untracked(|| {
+                state(ui.screens, |s| {
+                    if let Some(saved) = &s.saved_playlist_positions {
+                        // The saved positions can change the tie order of equal names.
+                        // The draft can still be retried while its playlists all exist.
+                        let saved: HashSet<_> = saved.iter().copied().collect();
+                        rows.len() == saved.len() && rows.iter().all(|p| saved.contains(&p.id))
+                    } else {
+                        rows.iter().map(|p| p.id.0.to_string()).eq(s
+                            .editor
+                            .items
+                            .iter()
+                            .map(|item| item.id.clone()))
+                    }
+                })
+            }) == Some(true)
+        });
     if !valid {
         untracked(|| close(ui));
-        crate::chrome::toast::notify(tr(
+        crate::kit::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }
@@ -576,7 +578,7 @@ fn persist_order(ui: Ui) {
                 expected_sort,
                 from_custom,
             } => {
-                let result = crate::runtime::commands::save_organization_order(
+                let result = iptv_runtime::commands::save_organization_order(
                     &owner,
                     source,
                     kind,
@@ -624,7 +626,7 @@ fn persist_order(ui: Ui) {
                         return;
                     }
                     if matches!(error, crate::wiring::settings::SaveError::Storage(_)) {
-                        crate::chrome::toast::notify(tr(
+                        crate::kit::toast::notify(tr(
                             "Playlist positions saved. Could not switch to Custom order. Try saving again.",
                         ));
                     } else {
@@ -647,7 +649,7 @@ fn persist_order(ui: Ui) {
                         crate::wiring::settings::SaveError::ParentalLocked,
                     );
                 } else {
-                    crate::chrome::toast::notify(tr(
+                    crate::kit::toast::notify(tr(
                         "The change could not be saved. Reopen the list and try again.",
                     ));
                 }
@@ -700,7 +702,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             let kind = block_kind(&scope_kind);
             let blocked = block_state(&s, &item.id);
             if kind == BlockKind::Channel && blocked == Block::Group {
-                crate::chrome::toast::notify(tr("This channel is blocked by a group."));
+                crate::kit::toast::notify(tr("This channel is blocked by a group."));
                 return;
             }
             update(ui.screens, Open::begin_block);
@@ -753,7 +755,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     }
     if scope_kind == Kind::Favorites && edit == Edit::ResetOrder {
         let keys = crate::guide::favorites::ordered_keys();
-        let ordered = crate::runtime::commands::favorite_provider_order(
+        let ordered = iptv_runtime::commands::favorite_provider_order(
             &crate::wiring::runtime_owner::runtime(),
             source,
             keys,
@@ -791,7 +793,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         }
         let id = order.remove(at);
         order.insert(to, id);
-        let result = crate::runtime::commands::save_organization_order(
+        let result = iptv_runtime::commands::save_organization_order(
             &crate::wiring::runtime_owner::runtime(),
             source,
             scope_kind.clone(),
@@ -815,7 +817,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     };
     update(ui.screens, Open::begin_save);
     let finished = s.clone();
-    let result = crate::runtime::commands::edit_organization(
+    let result = iptv_runtime::commands::edit_organization(
         &crate::wiring::runtime_owner::runtime(),
         source,
         scope_kind,
@@ -832,7 +834,7 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
     let Some((source, kind)) = s.scope.clone() else {
         return;
     };
-    let result = crate::runtime::commands::set_organization_sort(
+    let result = iptv_runtime::commands::set_organization_sort(
         &crate::wiring::runtime_owner::runtime(),
         source,
         kind,
@@ -860,7 +862,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
             update(ui.screens, Open::finish_save);
         }
         log::warn!("iptv organization: change refused: {e}");
-        crate::chrome::toast::notify(tr(
+        crate::kit::toast::notify(tr(
             "The change could not be saved. Reopen the list and try again.",
         ));
         return;
@@ -903,13 +905,13 @@ fn commit(ui: Ui) {
         }
     ) && text.trim().is_empty()
     {
-        crate::chrome::toast::notify(tr("Enter a group name."));
+        crate::kit::toast::notify(tr("Enter a group name."));
         return;
     }
     let Some((source, kind)) = s.scope.clone() else {
         return;
     };
-    let result = crate::runtime::commands::rename_organization_item(
+    let result = iptv_runtime::commands::rename_organization_item(
         &crate::wiring::runtime_owner::runtime(),
         source,
         kind,
@@ -1507,7 +1509,7 @@ pub(crate) fn invalidate_changed_guide_order(ui: Ui, keys: &HashMap<String, usiz
     }) == Some(true);
     if stale {
         close(ui);
-        crate::chrome::toast::notify(tr(
+        crate::kit::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }
@@ -1530,7 +1532,7 @@ pub(crate) fn inline_order_open(screens: crate::ScreensUi) -> bool {
 
 pub(crate) fn guide_order_accessible(ui: Ui) -> bool {
     guide_order_open(ui.screens)
-        && ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
+        && ui.top_overlay() == Some(crate::kit::overlay::Overlay::Organization)
         && !contents_hidden(ui.screens)
 }
 
@@ -1560,7 +1562,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
         .absolute()
         .inset_0()
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Organization.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1637,7 +1639,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Organization.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1660,7 +1662,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .child(ui_kit::caption(size, move || reorder_hint(ui)))
                 .child(when(
                     move || {
-                        ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
+                        ui.top_overlay() == Some(crate::kit::overlay::Overlay::Organization)
                             && ui.drag_editing()
                             && reordering(ui.screens)
                             && !contents_hidden(ui.screens)
@@ -1705,7 +1707,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .absolute()
                 .top(move || px(safe_area().top.0 + crate::playback::panels::header_now().0))
                 .bottom(px(0.0))
-                .left(move || px(crate::chrome::rail::width(ui.guide)))
+                .left(move || px(crate::guide::rail::width(ui.guide)))
                 .w(move || px(crate::playback::panels::groups_width(ui.guide)))
                 .px(px(8.0))
                 .py(px(6.0))
@@ -1842,8 +1844,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             .inset_0()
                             .test_id("organization-sort")
                             .accessibility_elements_hidden(move || {
-                                crate::chrome::overlays::Overlay::Organization
-                                    .accessibility_covered(ui)
+                                crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
                             })
                             .child(when(
                                 move || {
@@ -1860,8 +1861,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         ui_kit::screen(ui, size)
                             .test_id("organization-screen")
                             .accessibility_elements_hidden(move || {
-                                crate::chrome::overlays::Overlay::Organization
-                                    .accessibility_covered(ui)
+                                crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
                             })
                             .child(
                                 ui_kit::header(

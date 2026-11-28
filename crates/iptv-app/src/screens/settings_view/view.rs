@@ -6,13 +6,13 @@
 
 use std::time::Duration;
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use super::*;
-use crate::chrome::fonts::{LIST_ITEM, SANS, SECTION};
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::{self, HEADING_ROW};
-use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::kit::fonts::{LIST_ITEM, SANS, SECTION};
+use crate::kit::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::{self, HEADING_ROW};
 use crate::theme::LIST_TEXT;
 use nsh_core::Checked;
 
@@ -31,7 +31,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     view()
         .test_id("settings-layer")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Settings.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Settings.accessibility_covered(ui)
         })
         .absolute()
         .inset_0()
@@ -194,7 +194,7 @@ pub(crate) fn focused_playlist(screens: crate::ScreensUi) -> Option<i64> {
 /// Stored playlist `id` (reactive: the library's version).
 fn stored_playlist(app: crate::SharedUi, id: i64) -> Option<crate::wiring::data::Playlist> {
     app.library.version.get();
-    crate::runtime()
+    crate::wiring::runtime_owner::runtime()
         .playlists()
         .ok()?
         .into_iter()
@@ -529,7 +529,7 @@ fn row_view(
                                 settings_guarded(ui.screens, move || {
                                     crate::library_ui::playlists_view::open_only(
                                         ui.screens,
-                                        crate::runtime::model::SourceId(playlist.id),
+                                        iptv_runtime::model::SourceId(playlist.id),
                                         crate::library_ui::playlists_view::Only::Delete,
                                     )
                                 });

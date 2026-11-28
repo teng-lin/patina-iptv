@@ -1,8 +1,8 @@
 //! Shared routes into library screens and the runtime's parental gate.
 
-use crate::runtime::model::SourceId;
 use iptv_core::parental::Target;
 use iptv_presentation::parental::Phase;
+use iptv_runtime::model::SourceId;
 
 use crate::Ui;
 
@@ -31,7 +31,7 @@ pub(crate) fn request_if(
         };
         match result {
             Ok(()) => done(),
-            Err(crate::runtime::parental::Error::Locked) => {
+            Err(iptv_runtime::parental::Error::Locked) => {
                 let phase = if owner.parental_has_pin() {
                     Phase::Unlock
                 } else {
@@ -39,9 +39,9 @@ pub(crate) fn request_if(
                 };
                 crate::screens::parental_view::show(ui, target, phase, done);
             }
-            Err(_) => crate::chrome::toast::notify(crate::chrome::i18n::tr(
-                "Parental settings are unavailable",
-            )),
+            Err(_) => {
+                crate::kit::toast::notify(crate::kit::i18n::tr("Parental settings are unavailable"))
+            }
         }
     });
 }
@@ -50,7 +50,7 @@ pub(crate) fn request_if(
 pub(crate) fn settings_guarded(ui: crate::ScreensUi, then: impl FnOnce() + 'static) {
     if crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed()
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::screens::parental_view::protected_settings(ui, then);
     } else {
@@ -69,7 +69,9 @@ pub(crate) fn guide_sources(ui: Ui, playlist: Option<SourceId>) {
 }
 
 pub(crate) fn add_playlist(ui: Ui) {
-    if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed() {
+    if crate::wiring::runtime_owner::runtime().parental_has_pin()
+        && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
+    {
         request(ui.screens, Target::settings(), move || {
             crate::library_ui::wizard_view::open_add(ui)
         });
@@ -86,3 +88,28 @@ pub(crate) fn manage_playlists(screens: crate::ScreensUi) {
 pub(crate) fn reorder_playlists(ui: Ui) {
     crate::library_ui::organization_view::open_playlist_reorder(ui, None);
 }
+
+// Shell dispatch entry points exposed to feature trees without naming `shell/`.
+pub(crate) use crate::shell::app::{guide_chrome_pointer_events, pointer_moved, toggle_panels};
+pub(crate) use crate::shell::back::ask_before_leaving;
+pub(crate) use crate::shell::chooser::{
+    Kind as ChooserKind, close as close_chooser, layer as chooser_layer, open as open_chooser,
+    open_more as open_more_chooser, picture_identity, picture_name,
+    show_receivers as show_cast_receivers,
+};
+pub(crate) use crate::shell::desktop::{
+    close_after_shutdown, focus_main, keep_reachable as keep_window_reachable, pointer_entered,
+    pointer_forget, with_window,
+};
+pub(crate) use crate::shell::input::{
+    bind as bind_input, context as input_context, window as input_window,
+};
+#[cfg(feature = "test-support")]
+pub(crate) use crate::shell::menu_view::perform as perform_menu;
+pub(crate) use crate::shell::menu_view::{
+    close as close_menu, empty_group_settings_available, group_order_label, has_group_options,
+    layer as menu_layer, offer_external_player_reset, open as open_menu, open_at as open_menu_at,
+    open_channel as open_channel_menu, open_empty_group_settings, open_group_options,
+    open_playlist_options, open_playlist_order, open_timeline_context,
+};
+pub(crate) use crate::shell::remote_editor::{media_toggle_override, open as open_remote_editor};

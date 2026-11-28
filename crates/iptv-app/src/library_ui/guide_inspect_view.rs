@@ -1,16 +1,16 @@
 //! Existing guide-source workflow's read-only coverage/candidate inspection.
-use crate::chrome::input::dismiss_keyboard;
-use crate::runtime::model::{InspectionControl, ProbeRequest, ProbeTarget};
+use crate::kit::input::dismiss_keyboard;
 use crate::{
     Ui,
-    chrome::i18n::tr,
-    chrome::scale::Scale,
-    chrome::ui_kit,
-    guide::list_rows::{self, Mark, ROW_TWO},
+    kit::i18n::tr,
+    kit::list_rows::{self, Mark, ROW_TWO},
+    kit::scale::Scale,
+    kit::ui_kit,
 };
 use iptv_library::{SourceId, inspection::*};
 use iptv_nav::Action;
 use iptv_presentation::library::guide_inspect::{Mode, Reply, Row, Screen};
+use iptv_runtime::model::{InspectionControl, ProbeRequest, ProbeTarget};
 use nsh_core::{element::input, prelude::*};
 use std::time::Duration;
 
@@ -478,7 +478,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     let field = element_ref();
-    crate::chrome::input::bind_field_focus(field, move || {
+    crate::kit::input::bind_field_focus(field, move || {
         state(ui.screens, |s| s.typing).unwrap_or(false)
     });
     when(
@@ -487,7 +487,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("guide-inspection-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::GuideInspection.accessibility_covered(ui)
+                    crate::kit::overlay::Overlay::GuideInspection.accessibility_covered(ui)
                 })
                 .child(ui_kit::header(
                     ui,
