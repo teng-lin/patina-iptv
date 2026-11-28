@@ -142,6 +142,11 @@ not guaranteed. Legacy encryption closes its SQLite handle before replacing
 the database on Windows, under the application's process-lifetime instance lock.
 
 
+Setting aside a positively corrupt library moves the database, its sidecars and
+the stored playlist copies into `recovered/<timestamp>/` in the app's data
+directory. They stay encrypted with the device key, and at most three such copies
+are retained.
+
 ## Artwork and provider-selected destinations
 
 Natively, artwork passes through the public-address/DNS-pinning transport
