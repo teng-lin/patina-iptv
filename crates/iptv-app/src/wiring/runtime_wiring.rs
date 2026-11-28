@@ -33,6 +33,7 @@ pub(crate) fn start(ui: Ui) {
                 if !runtime().drain_services() {
                     log::error!("iptv persistence: store did not drain at shutdown");
                 }
+                crate::host::diagnostics::shutdown();
             });
         }
     }
@@ -55,6 +56,9 @@ pub(crate) fn start(ui: Ui) {
         }
         if background && !runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");
+        }
+        if background {
+            crate::host::diagnostics::flush();
         }
     });
     tasks::bind_owner();

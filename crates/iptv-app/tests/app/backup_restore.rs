@@ -441,7 +441,7 @@ fn absent(app: &Headless, label: &str) {
 }
 
 /// The iPad has no backup document transport yet: no Backup or Restore
-/// row, nor their Data and privacy heading.
+/// row, while Data and privacy stays for diagnostic log export.
 #[test]
 fn ipad_settings_show_no_backup_rows() {
     let Some(home) = isolated!() else { return };
@@ -451,9 +451,10 @@ fn ipad_settings_show_no_backup_rows() {
     let mut fixture = crate::personalization::start(home, Settings::default(), false);
     let app = &mut fixture.app;
     open_settings(app);
-    for label in ["Back up", "Restore a backup", "Data and privacy"] {
+    for label in ["Back up", "Restore a backup"] {
         absent(app, label);
     }
+    step(app.wait_for(&message("Send a diagnostic log")));
 }
 
 /// Each action follows its own picker: a device that creates files but
@@ -585,9 +586,11 @@ fn without_pickers_a_scheduled_restore_stays_reviewable_and_cancelable() {
             "{shown:?}"
         );
     }
-    // Nothing scheduled and no picker: the entry point goes too.
+    // Nothing scheduled and no picker: the backup entry point goes too, while
+    // diagnostic export stays reachable under Data and privacy.
     step(app.wait_for_gone(&message("Restore a backup"), Duration::from_secs(3)));
-    absent(&app, "Data and privacy");
+    absent(&app, "Back up");
+    step(app.wait_for(&message("Send a diagnostic log")));
     drop(app);
     drop(home);
 }

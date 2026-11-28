@@ -57,6 +57,8 @@ pub(crate) const IMPORTS: bool = true;
 
 /// The name the store's memory files are kept under.
 const DIRECTORY: &str = "/patina";
+#[cfg(not(feature = "browser-package"))]
+pub(crate) const DIAGNOSTIC_DIR: &str = DIRECTORY;
 
 /// The runtime's ports on a browser TV. The runtime reads the host's
 /// clocks too: the Worker has no other.

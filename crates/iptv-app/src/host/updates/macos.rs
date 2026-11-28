@@ -87,6 +87,7 @@ pub(super) async fn update(owner: &Rc<Runtime>, prompts: &impl UpdatePrompts, ve
                 } else {
                     host_stopped = true;
                     prompts.flush_bookmarks();
+                    crate::host::diagnostics::flush();
                     // SAFETY: the native generation fence accepts approval only for this live session.
                     unsafe { patina_sparkle_allow_restart(session.0) };
                 }

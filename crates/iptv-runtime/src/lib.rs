@@ -61,8 +61,8 @@ pub mod recordings;
 pub mod recordings;
 pub mod vod;
 pub use error::Error;
+pub use model::StoreQueueStats;
 pub use operations::ExternalPlaybackAuthorization;
-pub use store_service::StoreQueueStats;
 #[cfg(feature = "test-support")]
 mod testing;
 #[cfg(feature = "test-support")]

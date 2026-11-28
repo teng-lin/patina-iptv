@@ -52,14 +52,16 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/keep_awake.rs", "HELD"),          // The OS idle-sleep hold while a capture runs.
     ("host/native/keep_awake.rs", "FAILED"),        // That hold failed, for the start notice.
     ("host/backup_documents.rs", "PROBE"),          // Android document picker probe request.
-    ("library_ui/backup.rs", "PICKERS"),            // The document pickers the host reported.
-    ("library_ui/backup.rs", "PICKERS_FOR_TEST"),   // Synthetic picker injection (headless tests).
-    ("kit/content_image.rs", "CACHE"),              // Artwork cache.
-    ("kit/content_image.rs", "PERMITS"),            // Artwork concurrency limit.
-    ("kit/content_image.rs", "CLIENT"),             // Artwork transport cache.
-    ("host/native/credential_key.rs", "TEST_KEY"),  // Synthetic test key injection.
-    ("host/updates/android.rs", "HOST"),            // Direct APK installer JNI class handle.
-    ("host/native/external_player.rs", "HOST"),     // Android chooser JNI class handle.
+    ("host/backup_documents.rs", "CREATE_TEXT"), // Android non-stub text document creator probe signal.
+    ("host/backup_documents.rs", "SHARE"),       // Android non-stub text share probe signal.
+    ("library_ui/backup.rs", "PICKERS"),         // The document pickers the host reported.
+    ("library_ui/backup.rs", "PICKERS_FOR_TEST"), // Synthetic picker injection (headless tests).
+    ("kit/content_image.rs", "CACHE"),           // Artwork cache.
+    ("kit/content_image.rs", "PERMITS"),         // Artwork concurrency limit.
+    ("kit/content_image.rs", "CLIENT"),          // Artwork transport cache.
+    ("host/native/credential_key.rs", "TEST_KEY"), // Synthetic test key injection.
+    ("host/updates/android.rs", "HOST"),         // Direct APK installer JNI class handle.
+    ("host/native/external_player.rs", "HOST"),  // Android chooser JNI class handle.
     ("host/native/external_player.rs", "PLAYBACK"), // External playback outlives the foreground activity.
     ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
@@ -107,6 +109,16 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     // Synthetic receiver for headless Cast journeys.
     ("host/native.rs", "TEST_CAST"),
     ("host/native.rs", "TEST_NATIVE_CAST"), // Synthetic native sender port in isolated test processes.
+    // Process-wide forwarding diagnostic logger, panic hook and rotating log handles.
+    ("host/diagnostics.rs", "LOGGER"),
+    ("host/native/diagnostics.rs", "ORIGIN"),
+    ("host/native/diagnostics.rs", "PANIC_HOOK"),
+    ("host/native/diagnostics.rs", "PANIC_DIR"),
+    ("host/native/diagnostics.rs", "ACTIVATED"),
+    ("host/native/diagnostics.rs", "TEMP_SEQ"),
+    ("host/native/diagnostics.rs", "ENV_LOGGER"),
+    ("host/native/diagnostics.rs", "IN_PANIC"),
+    ("host/native/diagnostics.rs", "ANDROID_INIT"),
 ];
 
 /// Platform `cfg` outside `src/host/`, the host glue: what is still to
