@@ -178,7 +178,7 @@ pub(crate) fn local_ipv4_subnet() -> Option<String> {
     }
 }
 
-/// Detects whether the Linux host has UFW or firewalld installed.
+/// Detects whether the Linux host has UFW or firewalld installed, or neither.
 pub(crate) fn detect_linux_firewall() -> super::LinuxFirewall {
     #[cfg(target_os = "linux")]
     {
@@ -188,8 +188,12 @@ pub(crate) fn detect_linux_firewall() -> super::LinuxFirewall {
         if command_in_path("firewall-cmd") {
             return super::LinuxFirewall::Firewalld;
         }
+        super::LinuxFirewall::Unknown
     }
-    super::LinuxFirewall::Ufw
+    #[cfg(not(target_os = "linux"))]
+    {
+        super::LinuxFirewall::Ufw
+    }
 }
 
 #[cfg(target_os = "linux")]

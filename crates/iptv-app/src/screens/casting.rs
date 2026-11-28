@@ -25,7 +25,9 @@ pub(crate) struct CastUi {
     pub(crate) remote: Memo<bool>,
     pub(crate) prompt: Memo<Option<Prompt>>,
     pub(crate) pairing: Stored<Option<iptv_runtime::cast::PairingRequest>>,
-    pub(crate) cached_receivers: Stored<Vec<Receiver>>,
+    /// The last scan, tagged with the AirPlay setting it ran under: the host
+    /// drops its routes when that setting changes, so older entries cannot start.
+    pub(crate) cached_receivers: Stored<(bool, Vec<Receiver>)>,
     pub(crate) external: crate::playback::external_player::ExternalUi,
 }
 
@@ -41,7 +43,7 @@ impl CastUi {
             remote: computed(move || state.with(|state| state.remote)),
             prompt: computed(move || state.with(State::prompt)),
             pairing: stored(None),
-            cached_receivers: stored(Vec::new()),
+            cached_receivers: stored((false, Vec::new())),
             external: crate::playback::external_player::ExternalUi::new(),
         }
     }
@@ -74,12 +76,14 @@ pub(super) fn discover(ui: Ui) {
     if ui.cast.discovering.get_untracked() {
         return;
     }
-    let mut cached = ui.cast.cached_receivers.with(|cached| cached.clone());
-    if (crate::host::LINUX || crate::host::WINDOWS)
-        && !crate::wiring::settings::flag(iptv_settings::keys::AIRPLAY_CASTING)
-    {
-        cached.retain(|receiver| receiver.protocol != iptv_core::cast::NetworkProtocol::AirPlay);
-    }
+    let airplay = crate::wiring::settings::flag(iptv_settings::keys::AIRPLAY_CASTING);
+    let cached = ui.cast.cached_receivers.with(|(scanned_with, cached)| {
+        if (crate::host::LINUX || crate::host::WINDOWS) && *scanned_with != airplay {
+            Vec::new()
+        } else {
+            cached.clone()
+        }
+    });
     show_cast_receivers(ui, cached);
     if !runtime().network_cast_available() {
         return;
@@ -90,7 +94,9 @@ pub(super) fn discover(ui: Ui) {
         let result = runtime().cast_receivers().await;
         ui.cast.state.update(|state| state.discovering = false);
         if let Ok(receivers) = result {
-            ui.cast.cached_receivers.replace(receivers.clone());
+            ui.cast
+                .cached_receivers
+                .replace((airplay, receivers.clone()));
             let still_open = ui.screens.chooser.with_untracked(|open| {
                 open.as_ref()
                     .is_some_and(|open| open.kind == ChooserKind::Cast)

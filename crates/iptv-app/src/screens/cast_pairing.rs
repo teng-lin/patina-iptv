@@ -39,16 +39,16 @@ pub(crate) fn offer_forget(
 }
 
 pub(crate) fn show_linux_airplay_setup(cast: crate::screens::casting::CastUi) {
-    let tcp_port = configured_port("PATINA_CAST_RELAY_PORT", 49152);
-    let udp_port = configured_port("PATINA_AIRPLAY_TIMING_PORT", 49153);
-    let subnet = crate::host::local_ipv4_subnet().unwrap_or_else(|| "192.168.1.0/24".into());
+    let (tcp_port, udp_port) = airplay_ports();
+    // An undetected subnet stays a visible placeholder, never a guess.
+    let subnet = crate::host::local_ipv4_subnet();
     cast.pairing.replace(None);
     cast.state.update(|state| {
         state.open_firewall_help(FirewallHelp {
             peer_ip: None,
             tcp_port: Some(tcp_port),
             udp_port: Some(udp_port),
-            subnet: Some(subnet),
+            subnet,
             copy_selected: true,
         });
     });
@@ -72,6 +72,14 @@ pub(crate) fn show_firewall_blocked(
     });
 }
 
+/// The relay and timing ports the sender listens on, as the dialog and footer name them.
+pub(crate) fn airplay_ports() -> (u16, u16) {
+    (
+        configured_port("PATINA_CAST_RELAY_PORT", 49152),
+        configured_port("PATINA_AIRPLAY_TIMING_PORT", 49153),
+    )
+}
+
 fn configured_port(env_var: &str, default: u16) -> u16 {
     std::env::var(env_var)
         .ok()
@@ -83,12 +91,17 @@ fn firewall_commands(help: &FirewallHelp) -> String {
     firewall_commands_for(help, crate::host::detect_linux_firewall())
 }
 
-fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewall) -> String {
-    let source = help
-        .peer_ip
+const SUBNET_PLACEHOLDER: &str = "LAN_SUBNET";
+
+fn firewall_source(help: &FirewallHelp) -> &str {
+    help.peer_ip
         .as_deref()
         .or(help.subnet.as_deref())
-        .unwrap_or("192.168.1.0/24");
+        .unwrap_or(SUBNET_PLACEHOLDER)
+}
+
+fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewall) -> String {
+    let source = firewall_source(help);
     let family = if source.contains(':') { "ipv6" } else { "ipv4" };
     let mut lines = Vec::new();
     for (port, proto) in [(help.tcp_port, "tcp"), (help.udp_port, "udp")] {
@@ -97,12 +110,44 @@ fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewa
             crate::host::LinuxFirewall::Ufw => lines.push(format!(
                 "sudo ufw allow from {source} to any port {port} proto {proto}"
             )),
+            // Permanent, like ufw, so the rule survives a reload or reboot.
             crate::host::LinuxFirewall::Firewalld => lines.push(format!(
-                "sudo firewall-cmd --add-rich-rule='rule family=\"{family}\" source address=\"{source}\" port port=\"{port}\" protocol=\"{proto}\" accept'"
+                "sudo firewall-cmd --permanent --add-rich-rule='rule family=\"{family}\" source address=\"{source}\" port port=\"{port}\" protocol=\"{proto}\" accept'"
             )),
+            crate::host::LinuxFirewall::Unknown => {}
         }
     }
+    if firewall == crate::host::LinuxFirewall::Firewalld && !lines.is_empty() {
+        lines.push("sudo firewall-cmd --reload".to_owned());
+    }
     lines.join("\n")
+}
+
+/// What the commands cannot say: a missing firewall CLI, an undetected subnet, IPv6.
+fn firewall_notes(help: &FirewallHelp, firewall: crate::host::LinuxFirewall) -> String {
+    let source = firewall_source(help);
+    let mut notes = Vec::new();
+    if firewall == crate::host::LinuxFirewall::Unknown {
+        let port = |port: Option<u16>| port.map_or_else(|| "-".to_owned(), |p| p.to_string());
+        notes.push(trf(
+            "No ufw or firewalld was found. In your firewall, allow TCP {tcp} and UDP {udp} from {source}.",
+            &[
+                ("tcp", port(help.tcp_port).as_str().into()),
+                ("udp", port(help.udp_port).as_str().into()),
+                ("source", source.into()),
+            ],
+        ));
+    }
+    if source == SUBNET_PLACEHOLDER {
+        notes.push(tr("Replace LAN_SUBNET with your network, such as 192.168.1.0/24.").to_owned());
+    }
+    if help.peer_ip.is_none() {
+        notes.push(
+            tr("These rules cover IPv4. If your TV connects over IPv6, also allow its IPv6 address.")
+                .to_owned(),
+        );
+    }
+    notes.join("\n")
 }
 
 fn copy_firewall_commands(cast: crate::screens::casting::CastUi) {
@@ -281,6 +326,11 @@ fn firewall_card(ui: Ui, scale: Scale) -> View {
                     help().map_or_else(String::new, |h| firewall_commands(&h))
                 })),
         )
+        .child(ui_kit::caption(scale, move || {
+            help().map_or_else(String::new, |h| {
+                firewall_notes(&h, crate::host::detect_linux_firewall())
+            })
+        }))
         .child(
             view()
                 .flex_row()
@@ -402,9 +452,21 @@ mod tests {
         );
         assert_eq!(
             firewall_commands_for(&setup, LinuxFirewall::Firewalld),
-            "sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49152\" protocol=\"tcp\" accept'\n\
-             sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49153\" protocol=\"udp\" accept'"
+            "sudo firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49152\" protocol=\"tcp\" accept'\n\
+             sudo firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49153\" protocol=\"udp\" accept'\n\
+             sudo firewall-cmd --reload"
         );
+        assert_eq!(firewall_commands_for(&setup, LinuxFirewall::Unknown), "");
+        assert!(firewall_notes(&setup, LinuxFirewall::Unknown).contains("TCP 49152 and UDP 49153"));
+
+        let undetected = FirewallHelp {
+            subnet: None,
+            ..setup.clone()
+        };
+        assert!(
+            firewall_commands_for(&undetected, LinuxFirewall::Ufw).contains("from LAN_SUBNET ")
+        );
+        assert!(firewall_notes(&undetected, LinuxFirewall::Ufw).contains("Replace LAN_SUBNET"));
 
         let blocked = FirewallHelp {
             peer_ip: Some("192.0.2.10".into()),

@@ -540,6 +540,13 @@ pub(super) struct Video {
     tasks: Vec<Task>,
 }
 
+/// The UDP timing port: required, or a preferred default with an ephemeral fallback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TimingPort {
+    pub(crate) port: Option<NonZeroU16>,
+    pub(crate) fallback: bool,
+}
+
 fn timing_address(
     mut local: SocketAddr,
     remote: SocketAddr,
@@ -580,19 +587,27 @@ impl Video {
         self.addresses
     }
 
-    pub(super) async fn prepare(
-        &mut self,
-        timing_port: Option<NonZeroU16>,
-        url: &str,
-    ) -> Result<Queue> {
+    pub(super) async fn prepare(&mut self, timing_port: TimingPort, url: &str) -> Result<Queue> {
         let (local, remote) = self.addresses;
-        let local = timing_address(local, remote, timing_port);
-        let socket = UdpSocket::bind(local)
-            .await
-            .map_err(|_| VideoFault::Timing {
-                local,
-                timed_out: false,
-            })?;
+        let local = timing_address(local, remote, timing_port.port);
+        let socket = match UdpSocket::bind(local).await {
+            Ok(socket) => socket,
+            // A default port is a firewall hint, not a requirement.
+            Err(_) if timing_port.fallback && timing_port.port.is_some() => {
+                UdpSocket::bind(timing_address(local, remote, None))
+                    .await
+                    .map_err(|_| VideoFault::Timing {
+                        local,
+                        timed_out: false,
+                    })?
+            }
+            Err(_) => {
+                return Err(VideoFault::Timing {
+                    local,
+                    timed_out: false,
+                });
+            }
+        };
         let local = socket.local_addr().map_err(|_| VideoFault::Timing {
             local,
             timed_out: false,

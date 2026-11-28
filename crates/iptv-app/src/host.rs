@@ -31,10 +31,16 @@ use iptv_core::capabilities::{Host, Platform};
 pub(crate) enum LinuxFirewall {
     Ufw,
     #[cfg_attr(
-        not(target_os = "linux"),
+        all(not(test), not(target_os = "linux")),
         expect(dead_code, reason = "constructed only on Linux hosts")
     )]
     Firewalld,
+    /// Neither CLI was found; the dialog names the ports instead of a command.
+    #[cfg_attr(
+        all(not(test), not(target_os = "linux")),
+        expect(dead_code, reason = "constructed only on Linux hosts")
+    )]
+    Unknown,
 }
 
 /// The host as its build describes it, before the device reports its form

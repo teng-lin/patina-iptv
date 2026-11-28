@@ -25,7 +25,7 @@ use tokio::{
     task::JoinHandle,
     time::{Instant, sleep_until},
 };
-use video::{MediaState, Video, VideoFault};
+use video::{MediaState, TimingPort, Video, VideoFault};
 use wire::Fault;
 
 const SERVICE: &str = "_airplay._tcp.local.";
@@ -34,7 +34,7 @@ const APPROVAL_WINDOW: Duration = Duration::from_secs(60);
 const MAX_ROUTES: usize = 128;
 
 pub(crate) struct AirPlay {
-    timing_port: Option<NonZeroU16>,
+    timing_port: TimingPort,
     #[cfg(test)]
     browse_daemon: Option<Box<dyn Fn() -> ServiceDaemon + Send + Sync>>,
 }
@@ -42,10 +42,19 @@ pub(crate) struct AirPlay {
 impl AirPlay {
     pub(crate) fn new(timing_port: Option<NonZeroU16>) -> Self {
         Self {
-            timing_port,
+            timing_port: TimingPort {
+                port: timing_port,
+                fallback: false,
+            },
             #[cfg(test)]
             browse_daemon: None,
         }
+    }
+
+    /// Bind an ephemeral timing port when the preferred one is unavailable.
+    pub(crate) fn with_timing_fallback(mut self, fallback: bool) -> Self {
+        self.timing_port.fallback = fallback;
+        self
     }
 
     fn new_daemon(&self) -> Result<ServiceDaemon, ErrorKind> {
@@ -90,10 +99,9 @@ impl AirPlay {
     ) -> Result<Records, ErrorKind> {
         #[cfg(all(target_os = "linux", feature = "avahi"))]
         {
-            #[cfg(test)]
-            let use_avahi = self.browse_daemon.is_none();
-            #[cfg(not(test))]
-            let use_avahi = true;
+            // Unit tests never read the host's Avahi daemon: real LAN devices
+            // would make them nondeterministic.
+            let use_avahi = !cfg!(test);
             if use_avahi {
                 // Keep part of the common budget for mDNS if Avahi is
                 // unavailable or cannot see this network.
@@ -482,6 +490,10 @@ impl Records {
                     if existing.identity.is_none() {
                         existing.identity = record_identity.clone();
                     }
+                    // A sparse resolve must not hide a PIN another resolve requires.
+                    if pin_hint == PinHint::Required || existing.pin_hint == PinHint::Unspecified {
+                        existing.pin_hint = pin_hint;
+                    }
                 })
                 .or_insert_with(|| Record {
                     identity: record_identity,
@@ -609,7 +621,7 @@ fn video_error(fault: VideoFault, stage: Stage, delivery: Delivery) -> Error {
 struct AirPairing {
     challenge: Option<JoinHandle<Result<Challenge, AuthFailure>>>,
     expires: Instant,
-    timing_port: Option<NonZeroU16>,
+    timing_port: TimingPort,
 }
 
 impl Drop for AirPairing {
@@ -658,11 +670,11 @@ impl PairDriver for AirPairing {
 struct AirDriver {
     video: Video,
     trust: PeerTrust,
-    timing_port: Option<NonZeroU16>,
+    timing_port: TimingPort,
 }
 
 impl AirDriver {
-    fn new(secure: SecureSession, timing_port: Option<NonZeroU16>) -> Result<Self, Error> {
+    fn new(secure: SecureSession, timing_port: TimingPort) -> Result<Self, Error> {
         let trust = secure.trust;
         let video = Video::new(secure)
             .map_err(|fault| video_error(fault, Stage::Connect, Delivery::NotSent))?;

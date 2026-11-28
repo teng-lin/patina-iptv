@@ -386,5 +386,6 @@ iptv-runtime/src/network.rs	declared body
 iptv-runtime/src/network.rs	{what} exceeds its byte budget
 
 # Literal Linux firewall CLI commands; shell syntax is not translated.
-iptv-app/src/screens/cast_pairing.rs	sudo firewall-cmd --add-rich-rule='rule family="{family}" source address="{source}" port port="{port}" protocol="{proto}" accept'
+iptv-app/src/screens/cast_pairing.rs	sudo firewall-cmd --permanent --add-rich-rule='rule family="{family}" source address="{source}" port port="{port}" protocol="{proto}" accept'
 iptv-app/src/screens/cast_pairing.rs	sudo ufw allow from {source} to any port {port} proto {proto}
+iptv-app/src/screens/cast_pairing.rs	sudo firewall-cmd --reload

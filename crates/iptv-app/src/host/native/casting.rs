@@ -290,7 +290,8 @@ impl Port for Sender {
                 .as_ref()
                 .map(|active| active.generation);
             if current_generation != Some(client.generation) {
-                return Ok(Vec::new());
+                // Not an empty scan: the UI keeps what it last showed.
+                return Err(Error::Cancelled);
             }
             let mut route_cache = self.routes.lock().map_err(|_| Error::Unavailable)?;
             *route_cache = Routes::default();

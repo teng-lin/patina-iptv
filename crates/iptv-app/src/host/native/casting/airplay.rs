@@ -40,7 +40,9 @@ impl Configuration {
         // so a bad value cannot prevent Chromecast discovery.
         let builder = builder
             .airplay_enabled(true)
-            .airplay_timing_port(timing_port(self.timing_port.as_deref()).ok());
+            .airplay_timing_port(timing_port(self.timing_port.as_deref()).ok())
+            // Only an explicit port is a hard requirement.
+            .airplay_timing_port_fallback(self.timing_port.is_none());
         #[cfg(not(feature = "test-support"))]
         {
             builder.credential_store(self.store.clone())
