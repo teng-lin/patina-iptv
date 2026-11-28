@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import http.client
 import importlib.util
 import json
 import os
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -24,6 +26,10 @@ SPECS = {
     "ios": ("tools/mpv-runtime-ios/runtime-ios.json", "Libavformat.xcframework.zip", "mpv-runtime-ios-sources.tar.gz", "runtime-ios.json", ("ios-build",)),
 }
 SHA = re.compile(r"[a-f0-9]{64}")
+# GitHub's release downloads have refused hosted runners for a moment (403 while
+# a sibling job fetched the same asset). 404 is not here: it means unpublished.
+TRANSIENT_STATUS = frozenset((403, 408, 429, 500, 502, 503, 504))
+RETRY_DELAYS = (5, 15, 45)
 
 
 def digest(path):
@@ -53,6 +59,31 @@ def validate_pin(platform, pin, repository):
     for field, checksum, filename in [("url", "sha256", SPECS[platform][1]), ("source_url", "source_sha256", SPECS[platform][2])]:
         if pin.get(field) != base + filename or not SHA.fullmatch(pin.get(checksum, "")):
             raise ValueError("Native asset URL or checksum is outside its pinned release")
+
+
+def download(url, stream):
+    """Copy a published release asset into stream, retrying transient failures."""
+    request = urllib.request.Request(url, headers={"User-Agent": "Patina-native-pins/1"})
+    for delay in (*RETRY_DELAYS, None):
+        stream.seek(0)
+        stream.truncate()
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                if not response.geturl().startswith("https://"):
+                    raise ValueError("Native asset redirected away from HTTPS")
+                shutil.copyfileobj(response, stream)
+            return
+        except urllib.error.HTTPError as error:
+            if delay is None or error.code not in TRANSIENT_STATUS:
+                raise
+            failure = error
+        except (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError) as error:
+            if delay is None:
+                raise
+            failure = error
+        # stdout carries only the fetched path.
+        print(f"Native asset download failed ({failure}); retrying in {delay} seconds", file=sys.stderr)
+        time.sleep(delay)
 
 
 def gh_json(endpoint):
@@ -143,12 +174,8 @@ def fetch(platform, kind, cache, root=ROOT):
     with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
         temporary = Path(stream.name)
         try:
-            request = urllib.request.Request(url, headers={"User-Agent": "Patina-native-pins/1"})
             try:
-                with urllib.request.urlopen(request, timeout=120) as response:
-                    if not response.geturl().startswith("https://"):
-                        raise ValueError("Native asset redirected away from HTTPS")
-                    shutil.copyfileobj(response, stream)
+                download(url, stream)
             except urllib.error.HTTPError as error:
                 if error.code != 404:
                     raise

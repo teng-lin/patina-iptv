@@ -28,8 +28,6 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         timeout-minutes: 25
-        env:
-          PATINA_APT_UBUNTU_ONLY: 'true'
         with:
           prerequisites: android-check
           cargo-cache: 'false'

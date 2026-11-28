@@ -288,8 +288,8 @@ FAKES = {
     "sudo": 'exec "$@"\n',
     "chown": "exit 0\n",
     "debconf-set-selections": 'cat >> "$FAKE_LOG.debconf"\n',
-    # `timeout --kill-after=30 SECONDS COMMAND...` records the bound it was given.
-    "timeout": 'echo "bound $2" >> "$FAKE_LOG"; shift 2; exec "$@"\n',
+    # `timeout [--kill-after=30] SECONDS COMMAND...` records the bound it was given.
+    "timeout": 'case "$1" in --*) shift ;; esac; echo "bound $1" >> "$FAKE_LOG"; shift; exec "$@"\n',
     "dpkg": 'if [ "$1" = --print-architecture ]; then echo amd64; else echo "dpkg $*" >> "$FAKE_LOG"; fi\n',
     "apt-get": textwrap.dedent("""\
         echo "apt-get $*" >> "$FAKE_LOG"
@@ -344,7 +344,9 @@ class AptInstall(unittest.TestCase):
         result = subprocess.run(["bash", str(APT), str(self.root / "state"), restored, "generated-a", "generated-b"],
                                 env=environment, capture_output=True, text=True)
         calls = self.log.read_text().splitlines() if self.log.exists() else []
-        return result, [call for call in calls if not call.startswith("bound")], calls
+        # Most assertions name only the apt action; the source selection has its own.
+        distro = f" -o Dir::Etc::sourcelist={self.ubuntu} -o Dir::Etc::sourceparts=-"
+        return result, [call.replace(distro, "") for call in calls if not call.startswith("bound")], calls
 
     def test_cache_miss_refreshes_lists_once_and_bounds_every_apt_call(self):
         result, calls, raw = self.install("false")
@@ -384,10 +386,10 @@ class AptInstall(unittest.TestCase):
         self.assertEqual(self.ubuntu.read_text(), original)
         self.assertFalse((self.root / "state/ubuntu-archive").exists())
 
-    def test_ubuntu_only_fetch_and_retry_use_the_signed_distro_source(self):
-        self.environment["PATINA_APT_UBUNTU_ONLY"] = "true"
+    def test_fetch_and_retry_use_only_the_signed_distro_source(self):
         original = self.ubuntu.read_text(), self.legacy.read_text(), self.other.read_text()
-        result, calls, _ = self.install("false", fail="1", github_actions="true")
+        result, _, raw = self.install("false", fail="1", github_actions="true")
+        calls = [call for call in raw if not call.startswith("bound")]
         self.assertEqual(result.returncode, 0, result.stderr)
         apt = f"apt-get -o Dir::Etc::sourcelist={self.ubuntu} -o Dir::Etc::sourceparts=-"
         self.assertEqual(calls, [
@@ -400,22 +402,29 @@ class AptInstall(unittest.TestCase):
         self.assertNotIn(f"Using archive.ubuntu.com for {self.legacy}", result.stdout.splitlines())
         self.assertEqual((self.ubuntu.read_text(), self.legacy.read_text(), self.other.read_text()), original)
 
-    def test_ubuntu_only_cache_hit_still_installs_offline(self):
-        self.environment["PATINA_APT_UBUNTU_ONLY"] = "true"
-        result, calls, _ = self.install("true", github_actions="true")
+    def test_distro_source_cache_hit_still_installs_offline(self):
+        result, _, raw = self.install("true", github_actions="true")
+        calls = [call for call in raw if not call.startswith("bound")]
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, [
             f"apt-get -o Dir::Etc::sourcelist={self.ubuntu} -o Dir::Etc::sourceparts=-"
             " install -q --no-download generated-a generated-b",
         ])
 
-    def test_ubuntu_only_fails_before_apt_if_its_source_is_missing(self):
-        self.environment["PATINA_APT_UBUNTU_ONLY"] = "true"
+    def test_an_image_without_the_distro_source_file_uses_its_configured_sources(self):
         self.ubuntu.unlink()
         result, calls, _ = self.install("false", github_actions="true")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn(str(self.ubuntu), result.stderr)
-        self.assertEqual(calls, [])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls[0], "apt-get update -q -o APT::Update::Error-Mode=any")
+        self.assertEqual(self.legacy.read_text(), "deb https://archive.ubuntu.com/ubuntu/ noble main\n")
+
+    def test_source_indexes_are_refreshed_from_the_distro_source_alone(self):
+        script = ROOT / "tools/ci/enable-deb-src.sh"
+        result = subprocess.run(["bash", str(script)], env=os.environ | self.environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Types: deb deb-src\n", self.ubuntu.read_text())
+        update = [line for line in self.log.read_text().splitlines() if line.endswith(" update")]
+        self.assertEqual(update, [f"apt-get -o Dir::Etc::sourcelist={self.ubuntu} -o Dir::Etc::sourceparts=- update"])
 
     def test_an_archive_cache_reuses_its_source_and_installs_offline(self):
         marker = self.root / "state/ubuntu-archive"
@@ -453,7 +462,7 @@ class AptInstall(unittest.TestCase):
         self.assertIn("URIs: http://security.ubuntu.com/ubuntu\n", changed)
         self.assertIn("Suites: noble noble-updates\n", changed)
         self.assertIn("Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n", changed)
-        self.assertEqual(self.legacy.read_text(), "deb https://archive.ubuntu.com/ubuntu/ noble main\n")
+        self.assertIn("http://us-east-2.ec2.archive.ubuntu.com/ubuntu/", self.legacy.read_text())
         self.assertEqual(self.other.read_text(), "deb https://packages.example.test/ubuntu noble main\n")
 
     def test_offline_install_failure_repairs_dpkg_without_another_download(self):
