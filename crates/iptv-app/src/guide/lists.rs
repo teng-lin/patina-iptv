@@ -6,7 +6,8 @@
 //! search and the player use catalog channels. The focus works on rows of
 //! [`Ui::list`] through [`view`]; [`focused_channel`] maps back. The list
 //! is rebuilt when the selection, the catalog or the favorites change,
-//! and the focus stays on its channel by key.
+//! and the focus stays on its channel by key. In the combined guide a row
+//! nobody chose is not followed: the focus stays on the first row.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -214,10 +215,36 @@ fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> 
     }
 }
 
+/// The viewer pressed something, or a channel was chosen for them (resume,
+/// search): from here the focus follows that channel by identity.
+pub(crate) fn claim_row(guide: crate::GuideUi) {
+    guide.default_row.with(|default| *default = false);
+}
+
+/// The combined guide fills one playlist at a time, in whatever order they
+/// load. Forgets a row only the app's default put the focus on, so the guide
+/// stays at its top instead of following whichever playlist came first.
+/// Returns whether the swap leaves the focus on such a row again.
+fn forget_default_row(kept: &mut Kept, catalog: &dyn Schedule, default_row: bool) -> bool {
+    if catalog.all_channels_label() != GroupName::AllPlaylists {
+        return false;
+    }
+    if default_row {
+        kept.key = None;
+    }
+    // Nothing to follow (the first rows, or the channel is gone).
+    kept.key
+        .as_deref()
+        .is_none_or(|key| catalog.find_channel(key).is_none())
+}
+
 /// After a catalog swap: the same list and channel by identity, at the new
-/// catalog's now, with the same column focused.
+/// catalog's now, with the same column focused. See [`forget_default_row`]
+/// for the one row that is not followed.
 pub(crate) fn restore(ui: Ui, mut kept: Kept, catalog: Rc<dyn Schedule>) {
     let player = kept.player.take();
+    let default_row = ui.guide.default_row.with(|default| *default);
+    let defaulted = forget_default_row(&mut kept, &*catalog, default_row);
     let now = crate::guide::clock::now_minute_in(&*catalog);
     let entries = entries_in(ui.app, &*catalog);
     let (mut focus, list) = restored_list(
@@ -230,6 +257,10 @@ pub(crate) fn restore(ui: Ui, mut kept: Kept, catalog: Rc<dyn Schedule>) {
     );
     focus.retain_rail(&rail_untracked(ui));
     let view = ListView::new(catalog, list.clone());
+    // Before the signals: an effect they run may choose a channel.
+    ui.guide
+        .default_row
+        .with(|default| *default = defaulted && view.channel_count() > 0);
     batch(|| {
         ui.guide.list.set(list);
         ui.guide.focus.set(focus);
@@ -327,6 +358,7 @@ fn listed(ui: Ui, channel: usize) -> usize {
 /// Shows what plays on catalog `channel` (a zap, a resumed or previous
 /// channel): its row, its live program, the default window.
 pub fn show_channel(ui: Ui, channel: usize) {
+    claim_row(ui.guide);
     let row = listed(ui, channel);
     let view = view(ui.guide);
     ui.guide.focus.update(|f| f.show_channel(row, &view));
@@ -381,6 +413,7 @@ fn into_resume_list(ui: Ui, channel: usize) -> bool {
 /// Focuses catalog `channel`'s program at `minute` where it is (a search
 /// result, a closed menu).
 pub fn tap(ui: Ui, channel: usize, minute: i32) {
+    claim_row(ui.guide);
     let row = listed(ui, channel);
     let view = view(ui.guide);
     ui.guide.focus.update(|f| f.tap(row, minute, &view));

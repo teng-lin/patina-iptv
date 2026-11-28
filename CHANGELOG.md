@@ -7,6 +7,12 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+### Fixed
+
+- A guide that combines playlists no longer opens partway down the list when a
+  later playlist loads before an earlier one. Until you choose a channel, it
+  stays at the top.
+
 ## [0.1.13] - 2026-11-28
 
 ### Added
