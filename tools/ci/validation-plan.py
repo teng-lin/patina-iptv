@@ -19,7 +19,8 @@ LANES = ("host", "windows", "android", "packages", "windows-package", "coverage"
 HOST_VERIFICATIONS = {"credentials": "credentials-verified", "ios": "ios-verified"}
 BUILD = ("Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "rust-toolchain.toml", "nsh.rev", ".cargo/**", "vendor/nsh-tv/**")
 CI = (".github/workflows/**", ".github/actions/**", "tools/ci/validation-plan.py", "tools/ci/check-plan.py",
-      "tools/ci/pins.py", "tools/ci/apt-install.sh", "tools/ci/locked-build-env.sh", "tools/ci/locked-cargo.py", "tools/check.sh",
+      "tools/ci/pins.py", "tools/ci/apt-install.sh", "tools/ci/linux-packages.txt", "tools/ci/locked-build-env.sh",
+      "tools/ci/locked-cargo.py", "tools/check.sh",
       "tools/ci/build-inventory.py", "tools/ci/build-provenance.py", "tools/ci/release-plan.py", "tools/ci/signing-config.py",
       "tools/ci/signing-policy.json", "tools/ci/publish-release.py", "tools/ci/native-candidates.json", "tools/ci/native_candidates.py", "tools/ci/run-xvfb.py")
 # Called leaf workflows have their own coverage. Other called/shared workflows
@@ -73,8 +74,8 @@ STRESS = (*BUILD, *(f"crates/{crate}/**" for crate in STRESS_CRATES), "tools/ci/
 COVERAGE = ("tools/ci/coverage.sh", "tools/ci/*coverage*.py")
 HOST_INPUTS = ("docs/capabilities.md", "tools/ci/lint.sh", "tools/ci/check-line-length.sh")
 OTHER_HOSTS = ("hosts/android/**", "hosts/ios/**", "hosts/linux/**", "hosts/windows/**",
-               "hosts/tizen/**", "hosts/tizen-nsh/**")
-HELPER_INPUTS = ("docs/contributing.md",)
+               "hosts/tizen/**", "hosts/tizen-nsh/**", "tools/bootstrap.ps1")
+HELPER_INPUTS = ("docs/contributing.md", "README.md")
 IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
        "tools/check-ios-simulator-entitlements.sh", "tools/apple-airplay-probe/**",
        "crates/iptv-app/src/host/native/apple_airplay.m",
@@ -226,8 +227,8 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False, draft=False):
     native_rust = matches(production, (*BUILD, "crates/**/*.rs"))
     # Unknown code/build inputs still receive host validation. A documentation
     # change alone never installs GTK, Rust targets, media runtimes, or Android.
-    helper_paths = (*METADATA, "tools/ci/**", "tools/mpv-runtime*/**", "tools/*windows*.ps1", "tools/sync-host.sh",
-                    "tools/package-*", "tools/bundle-*.py", "tools/mock-server.py", "tools/make-*fixtures*")
+    helper_paths = (*METADATA, "tools/ci/**", "tools/mpv-runtime*/**", "tools/*windows*.ps1", "tools/bootstrap.ps1",
+                    "tools/sync-host.sh", "tools/package-*", "tools/bundle-*.py", "tools/mock-server.py", "tools/make-*fixtures*")
     host = (full or ci or "host" in requested or matches(inputs, HOST_INPUTS)
             or any(not documentation(path) and not matches([path], helper_paths) for path in inputs))
     common_package = full or ci or "packages" in requested or any(
@@ -246,7 +247,7 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False, draft=False):
         "helpers_full": full or matches(paths, (*HOST_INPUTS, *HELPER_INPUTS, *METADATA)) or any(not documentation(path) for path in paths),
         "actionlint": full or matches(paths, (".github/workflows/**", ".github/actions/**")),
         "windows": (full or ci or rust or "windows" in requested
-                    or matches(inputs, (*WINDOWS_RESOURCES, "hosts/windows/**", "tools/*windows*.ps1"))),
+                    or matches(inputs, (*WINDOWS_RESOURCES, "hosts/windows/**", "tools/*windows*.ps1", "tools/bootstrap.ps1"))),
         "android": full or ci or native_rust or android_package_inputs,
         "android_package": False,
         "packages": bool(platforms),

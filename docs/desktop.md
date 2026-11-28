@@ -22,7 +22,8 @@ rule was checked on.
 | Recordings | Scrolls the recordings | Nothing | The recording's actions | ⋯ at the end of each row |
 
 - **Now:** all rows above (`crates/iptv-app/src/guide/grid/wheel.rs`,
-  `channels_view.rs`, `panels.rs`, `recordings_view/rows.rs`). A wheel, a
+  `screens/channels_view.rs`, `playback/panels.rs`,
+  `screens/recordings_view/rows.rs`). A wheel, a
   right-click or a ⋯ never plays, tunes or stops anything.
 - **Now:** hovering never changes the channel or the focus that playback
   follows. Moving the mouse over full-screen video shows the player's
@@ -61,8 +62,8 @@ Windows and Command on macOS.
 | Mod+, (macOS) | Settings |
 
 - **Now:** the set above (`crates/iptv-app/src/shell/input/keys.rs`,
-  `input.rs`). macOS also has its menu bar (`desktop.rs`); Linux and
-  Windows draw none.
+  `shell/input.rs`). macOS also has its menu bar (`shell/desktop.rs`); Linux
+  and Windows draw none.
 - **Now: a shortcut belongs to the window that has the keyboard focus.**
   Keys pressed in a second player window control that player only, and the
   main window's keys its own. The view keys F and O exist in the main
@@ -183,8 +184,8 @@ inhibitors for the lid by default); on Linux, a suspend chosen from the
 system menu may first say that Patina is recording.
 
 - **Now:** all rows (`crates/iptv-app/src/shell/desktop.rs`,
-  `desktop/quit_confirm.rs`, `desktop/player_windows.rs`,
-  `desktop/pip_window.rs`). The headless scenarios keep the macOS close
+  `shell/desktop/quit_confirm.rs`, `playback/player_windows.rs`,
+  `playback/pip_window.rs`). The headless scenarios keep the macOS close
   behavior unless `IPTV_TEST_CLOSE_ASKS` is set
   (`desktop_workflows.rs`).
 
@@ -196,7 +197,7 @@ system menu may first say that Patina is recording.
   Patina window
   whose title bar can no longer be grabbed moves onto the nearest remaining
   display, at its size or smaller
-  (`iptv_app::desktop::display_bounds::reachable`). A window the viewer can
+  (`iptv_app::shell::desktop::display_bounds::reachable`). A window the viewer can
   still grab is never moved. Moving a window plays and stops nothing.
 
 | Host | Window positions | Compact window above others | After a display goes away | Fallback |
@@ -216,7 +217,9 @@ system menu may first say that Patina is recording.
   recordings), `guide_player_windows` (#60's player windows),
   `pip_control`, `pane_collapse`, `guide_nav` (the wheel through time) and
   `pointer`.
-- App unit tests in `iptv_app::desktop::display_bounds` (display recovery,
-  session and sound state) and presentation tests in `iptv_presentation::heard` (the heard
+- App unit tests in `iptv_app::shell::desktop::display_bounds` (display-geometry
+  recovery), `iptv_app::shell::desktop` (window recovery gating and pointer
+  travel) and `iptv_app::playback::player_windows` (session admission and window
+  placement), plus presentation tests in `iptv_presentation::heard` (the heard
   player and its hand-back).
 - The real-window journey: [issue #89 desktop journey](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-89-desktop-journey.md).

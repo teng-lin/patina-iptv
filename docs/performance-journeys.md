@@ -47,8 +47,11 @@ The cold measurement is **headless root startup**, not an OS process launch or
 physical display scanout. Fixture import and harness loading are excluded. The
 busy journey reuses the existing isolated writer-contention scenario and its
 deterministic checks. The canonical journey retains its measured maximum key-to-mounted-frame
-as an informational observation; the existing isolated `tools/check.sh` invocation
-continues to enforce its 50 ms limit separately. Guide
+as an informational observation; the isolated `busy-guide-navigation` check in
+`tools/check.sh` (`tools/ci/check-plan.py`) enforces the non-waiting bound that
+catches blocking on SQLite's 5 s busy timeout, while the strict 50 ms
+responsiveness budget is gated on `IPTV_STRICT_GUIDE_LATENCY=1` for controlled
+performance hosts. Guide
 navigation and the pending favorite exercise both UI progress and an actual
 blocked writer. Filtering/read independence remains covered by the existing
 isolated `a_store_read_does_not_wait_for_a_busy_writer` scenario in `tools/check.sh`.

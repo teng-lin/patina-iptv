@@ -75,6 +75,12 @@ jobs:
           policy-tool: ${{ matrix.part == 'core' }}
           # The core part builds every dependency the app part does; only it saves.
           cargo-cache-save: ${{ matrix.part != 'app' }}
+      - name: Verify bootstrap prerequisites match the host runner
+        if: matrix.part != 'app'
+        shell: bash
+        env:
+          PATINA_MPV_RUNTIME_DIR: ${{ runner.temp }}/patina-mpv-runtime-${{ runner.os == 'macOS' && 'macos' || 'linux' }}
+        run: /bin/bash tools/bootstrap.sh --check-only --skip-nsh
       - name: Install linters
         if: matrix.part == 'core'
         run: |

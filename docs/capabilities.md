@@ -19,10 +19,14 @@ native services report what the operating system actually accepted.
 ## Sending video
 
 The main player's **Cast to TV** control offers Chromecast on desktop hosts and
-**AirPlay** on macOS and iPad. AirPlay opens Apple's native video picker inside
-Patina. On iPad the play bar's Cast button opens the named-device picker directly.
-On desktop the destination sheet lists discovered receivers and includes the
-system device picker. The play bar controls pause, resume and channel changes.
+handheld Android (phones and tablets), **AirPlay** on macOS, iPad and handheld
+Android, and experimental AirPlay on Linux when started with
+`PATINA_RUST_AIRPLAY=1` (Android TV does not register a cast sender; see
+[casting](casting.md)). On macOS and iPad, AirPlay opens Apple's native video
+picker inside Patina; on iPad the play bar's Cast button opens the named-device
+picker directly. On desktop and handheld Android the destination sheet lists
+discovered receivers (and includes the system device picker on Apple hosts).
+The play bar controls pause, resume and channel changes.
 Choose this device in the picker to return playback locally. A channel change retires the previous stream while retaining
 the selected native route. Hiding the play bar does not stop playback.
 

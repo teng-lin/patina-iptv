@@ -1,6 +1,6 @@
 # Bundled fonts
 
-The app's text is set in Roboto and Roboto Condensed (`src/fonts.rs`
+The app's text is set in Roboto and Roboto Condensed (`src/kit/fonts.rs`
 registers them at startup on every platform). They come from Google's
 official release, not from any other app:
 

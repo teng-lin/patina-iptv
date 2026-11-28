@@ -87,12 +87,13 @@ and saved-source details show “Not encrypted” and explain the exposure. The 
 does not silently retry HTTPS sources over HTTP. Network redirects, HLS resource
 URIs and DASH resource URLs that downgrade HTTPS to HTTP are refused.
 
-Android's network-security configuration permits explicit HTTP because source
-domains are user supplied and cannot be enumerated in a static manifest. It also
-permits the app's loopback player connection. The Rust transport enforces the
-per-request downgrade policy on every platform. Its TLS verifier uses public
-Mozilla roots; Android's declarative trust configuration is not a replacement
-for that native verifier.
+Android's network-security configuration (`cleartextTrafficPermitted="false"` by
+default) permits cleartext HTTP only to `127.0.0.1` for the app's loopback
+player relay, denying Java players direct cleartext loads to other hosts.
+User-supplied `http://` sources go through the Rust transport, which enforces
+the per-request downgrade policy on every platform. Its TLS verifier uses public
+Mozilla roots (`webpki-roots`); Android's declarative trust configuration is not
+a replacement for that native verifier.
 
 Both Media3 and mpv use one bounded loopback transport per player. Only the
 transport sends upstream identity headers: Authorization, Cookie,

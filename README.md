@@ -136,23 +136,57 @@ the v0.1.4 exception above remains unverified by the build-provenance command.
 
 ## Build from source
 
-### Prerequisites
+### Setup
 
-- Rust (the version pinned in `rust-toolchain.toml`) with the
-  `wasm32-unknown-unknown` target, and for Android also
-  `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
-- The pinned [Patina NSH fork and CLI](docs/nsh.md).
-- **Linux:** GTK 4 and libmpv 2 (`mpv` on Arch, `libmpv-dev` on
-  Debian/Ubuntu).
-- **macOS:** Xcode command line tools and the pinned libmpv runtime below.
+On Linux and macOS, run the idempotent bootstrap script from the repository
+root (or any git worktree):
+
+```sh
+tools/bootstrap.sh               # add --install-packages to install missing OS packages
+source target/dev-env.sh         # load the pinned guarded libmpv library paths
+```
+
+Pass `--check-only` to inspect prerequisites without modifying anything, or
+`--direnv` to also write `.envrc`.
+
+On Windows (PowerShell):
+
+```powershell
+./tools/bootstrap.ps1
+```
+
+### What bootstrap does
+
+- **Rust:** checks or installs the release pinned in `rust-toolchain.toml` with
+  `clippy`, `rustfmt` and the `wasm32-unknown-unknown` target (for Android add
+  `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`).
+- **NSH:** clones or updates the sibling [Patina NSH fork](docs/nsh.md) at
+  `../nsh-patina` to `nsh.rev` and builds `nsh-cli` (`--skip-nsh` skips this).
+- **Linux host packages:** checks (or installs with `--install-packages`) the
+  same package list as CI (`tools/ci/linux-packages.txt`, plus `dnf` and
+  `pacman` equivalents on Fedora and Arch):
+  <!-- linux-packages:start -->
+  `clang`, `cmake`, `dbus-daemon`, `ffmpeg`, `libdbus-1-dev`,
+  `libgstreamer-plugins-base1.0-dev`, `libgstreamer1.0-dev`, `libgtk-4-dev`,
+  `libmpv-dev`, `libpipewire-0.3-0t64`, `libssl-dev`, `libva-drm2`,
+  `ninja-build` and `pkg-config`.
+  <!-- linux-packages:end -->
+- **macOS:** checks Xcode Command Line Tools and Homebrew `python` (3.11+),
+  `pkgconf` and `ffmpeg`.
+- **Bundled fonts:** verifies `crates/iptv-app/fonts` and runs
+  `tools/fetch-fonts.sh` only if the font files are absent.
+- `python3` (3.11+) and `ffmpeg` for the build helpers and synthetic test streams.
+
+Mobile targets have separate toolchain prerequisites outside `bootstrap.sh`:
+
 - **Android:** JDK 21, SDK platforms `android-35` (NSH packaging) and
   `android-36` (Gradle host), build-tools `35.0.1` and NDK `30.0.16248370`.
 - **iPad:** Xcode. `tools/fetch-mpvkit.sh` downloads the libmpv build.
-- `python3` and `ffmpeg` for the synthetic test streams.
 
 Linux and macOS development builds also require Patina's native relay guard.
-After installing the platform prerequisites, fetch the pinned runtime and set
-its library paths in the shell used for Cargo (use `platform=macos` on macOS):
+`tools/bootstrap.sh` fetches and SHA-256-verifies the pinned runtime into
+`target/mpv-runtime-<platform>` and writes `target/dev-env.sh` (`--skip-runtime`
+skips this). To perform that step manually (use `platform=macos` on macOS):
 
 ```sh
 platform=linux
@@ -290,7 +324,7 @@ mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 
 ## Movies, series and parental controls
 
-**Films** and **Series** in the navigation rail open the on-demand catalog
+**Movies** and **Shows** in the navigation rail open the on-demand catalog
 provided by Xtream Codes or Stalker sources. Filter by playlist/category, search
 by title and choose a sort order. Details show available metadata, seasons and
 episodes; Continue watching restores saved progress. Episode playback can
@@ -301,10 +335,10 @@ from channel names or URL extensions.
 **Continue watching** and **Recently added**, below Live TV in the rail, list
 movies and series from every enabled playlist in one place; the app still
 starts on the guide. They appear whenever any enabled playlist has movies or
-series, even while a live-only playlist is shown (Films and Series follow the
+series, even while a live-only playlist is shown (Movies and Shows follow the
 playlist on screen). Each row names its playlist, so titles that two
-playlists share stay separate. Choosing a row opens the same details as Films
-and Series: play, resume, seasons and episodes, on the same player. Leaving
+playlists share stay separate. Choosing a row opens the same details as Movies
+and Shows: play, resume, seasons and episodes, on the same player. Leaving
 and reopening a shelf returns to the same title, found by identity wherever
 it now is, however deep: the shelf shows the page of 40 holding it. **Load
 more** continues below and **Load previous** (or Up on the first title with a
@@ -457,18 +491,24 @@ directory stays playable.
 | `crates/iptv-search` | Channel and program search |
 | `crates/iptv-library` | Channel organization, custom groups, ordering, favorites and history |
 | `crates/iptv-player-mpv` | libmpv playback adapter for desktop and iPad |
+| `crates/iptv-cast` | Native Chromecast and AirPlay discovery, pairing and control |
 | `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and recorder |
 | `crates/iptv-net` | HTTP adapter (reqwest + rustls) |
 | `crates/iptv-store-sqlite` | SQLite store: encrypted natively, in-memory chunk files in the browser |
 | `crates/iptv-sqlcipher-init` | Native SQLCipher initialization barrier |
+| `crates/iptv-web` | Browser adapters and Live TV web bridge for Samsung Tizen |
 | `crates/iptv-app` | NSH app: screens, theme, video layer (libmpv on desktop and iPad) |
+| `crates/iptv-tui` | Terminal host for synthetic-playlist inspection |
+| `vendor/nsh-tv` | Vendored Android TV raw key-event adapter for NSH |
 | `hosts/android` | Kotlin host with the Media3 player |
-| `tools/` | Mock servers, fixtures, packaging and CI scripts |
+| `tools/` | Bootstrap, mock servers, fixtures, packaging and CI scripts |
 
-All crates except `iptv-app`, `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init`,
-`iptv-player-mpv` and `iptv-runtime` are
-sans-IO and build for `wasm32-unknown-unknown`. `iptv-store-sqlite` builds
-for it too, with SQLite compiled in through `sqlite-wasm-rs` and no SQLCipher.
+All crates under `crates/` except `iptv-app`, `iptv-cast`, `iptv-net`,
+`iptv-store-sqlite`, `iptv-sqlcipher-init`, `iptv-player-mpv`, `iptv-runtime`,
+`iptv-tui` and `iptv-web` are sans-IO and build for `wasm32-unknown-unknown`.
+`iptv-store-sqlite` (through `sqlite-wasm-rs`, without SQLCipher), `iptv-web`,
+`iptv-runtime` (without its `native` feature) and `iptv-app` (web host) also
+build for `wasm32-unknown-unknown`.
 
 Run every check before committing:
 
