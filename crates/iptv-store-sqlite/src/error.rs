@@ -11,10 +11,16 @@ use crate::SourceId;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum StoreError {
-    /// The service or platform key broker is unavailable; contains no secrets.
+    /// The service is unavailable; contains no secrets.
     Unavailable(&'static str),
+    /// The platform key broker or database key is unavailable; contains no secrets.
+    KeyUnavailable(&'static str),
     /// The host must initialize storage again before the library can be opened.
     RestartRequired(&'static str),
+    /// Sealing or recovering an encrypted private document failed.
+    PrivateDocument {
+        source: Box<StoreError>,
+    },
     /// SQLite failed (I/O, constraint, busy, corrupt file).
     Sqlite(rusqlite::Error),
     /// Applying a numbered migration failed; the database stays at the
@@ -39,7 +45,13 @@ pub enum StoreError {
 
 pub type Result<T, E = StoreError> = std::result::Result<T, E>;
 
+pub(crate) const LIBRARY_NOT_CORRUPT: &str = "saved library is not corrupt";
+
 impl StoreError {
+    /// Corruption re-verification found a missing, empty, or intact library file.
+    pub fn is_library_not_corrupt(&self) -> bool {
+        matches!(self, Self::Unavailable(LIBRARY_NOT_CORRUPT))
+    }
     /// Transient contention or device write failure may succeed on a bounded retry.
     pub fn retryable_write(&self) -> bool {
         matches!(self, Self::Sqlite(rusqlite::Error::SqliteFailure(error, _))
@@ -60,6 +72,11 @@ impl StoreError {
                     | "store worker stopped"
                     | "request belongs to a closed application"
             ),
+            Self::KeyUnavailable(reason) => !matches!(
+                *reason,
+                "no platform credential broker for this target" | "this device has no key store"
+            ),
+            Self::PrivateDocument { source } => source.retryable_open(),
             Self::Sqlite(error) | Self::Migration { source: error, .. } => matches!(
                 error,
                 rusqlite::Error::SqliteFailure(error, _)
@@ -123,8 +140,13 @@ impl StoreError {
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unavailable(reason) | Self::RestartRequired(reason) => {
+            Self::Unavailable(reason)
+            | Self::KeyUnavailable(reason)
+            | Self::RestartRequired(reason) => {
                 write!(f, "store unavailable: {reason}")
+            }
+            Self::PrivateDocument { .. } => {
+                write!(f, "store unavailable: private document could not be sealed")
             }
             Self::Sqlite(err) => write!(f, "database error: {err}"),
             Self::Migration { version, source } => {
@@ -146,6 +168,7 @@ impl std::error::Error for StoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Sqlite(err) | Self::Migration { source: err, .. } => Some(err),
+            Self::PrivateDocument { source } => Some(source.as_ref()),
             _ => None,
         }
     }
@@ -238,5 +261,21 @@ mod tests {
         ] {
             assert!(!error.is_snapshot_content_error(), "{error:?}");
         }
+    }
+
+    #[test]
+    fn private_document_retains_source_and_is_never_classified_as_catalog_corruption() {
+        use std::error::Error as _;
+        let wrapped = StoreError::PrivateDocument {
+            source: Box::new(sqlite(rusqlite::ffi::SQLITE_CORRUPT)),
+        };
+        assert!(!wrapped.is_corrupt_database());
+        assert!(!wrapped.is_not_database());
+        assert!(!wrapped.is_snapshot_content_error());
+        assert!(wrapped.source().is_some());
+        assert_eq!(
+            wrapped.to_string(),
+            "store unavailable: private document could not be sealed"
+        );
     }
 }

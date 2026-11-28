@@ -259,7 +259,16 @@ pub(super) fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: boo
     owner.spawn({
         let owner = owner.clone();
         async move {
-            let startup = match startup.await {
+            let mut startup = startup.await;
+            if startup.is_ok()
+                && services.is_current()
+                && services.ports().file_storage
+                && crate::backup::take_resumed_settings_dirty(owner.data_dir())
+            {
+                owner.load_settings();
+                owner.emit(crate::RuntimeEvent::SettingsChanged);
+            }
+            startup = match startup {
                 Ok(snapshot) if recovering => {
                     async {
                         // The startup writer and the parental reader have separate

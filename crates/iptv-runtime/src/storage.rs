@@ -1,8 +1,34 @@
 //! Native private-directory protection shared by startup and recovery tests.
 use std::{
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
+
+/// Serializes catalog file replacement, startup restore activation, and store
+/// opens across independent owners sharing the same private storage directory.
+pub(crate) fn with_directory_replacement<T>(directory: &Path, run: impl FnOnce() -> T) -> T {
+    static REPLACEMENT: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+    let gate = {
+        let mut gates = REPLACEMENT
+            .get_or_init(Mutex::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gates.retain(|_, gate| gate.strong_count() > 0);
+        if let Some(gate) = gates.get(directory).and_then(Weak::upgrade) {
+            gate
+        } else {
+            let gate = Arc::new(Mutex::new(()));
+            gates.insert(directory.to_owned(), Arc::downgrade(&gate));
+            gate
+        }
+    };
+    let _guard = gate
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    run()
+}
 
 pub fn sibling(root: &Path, suffix: &str) -> PathBuf {
     root.with_file_name(format!(

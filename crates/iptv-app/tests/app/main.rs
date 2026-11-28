@@ -34,6 +34,7 @@ mod cold_start;
 mod cold_start_slow_provider;
 mod combined_playlists;
 mod combined_resume;
+mod corrupt_library_recovery;
 mod cov_data;
 mod cov_data_player;
 mod cov_mpv_pip_window;

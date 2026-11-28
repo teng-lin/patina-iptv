@@ -34,7 +34,7 @@ pub(crate) fn database_key(path: &Path) -> Result<DatabaseKey, Error> {
     #[cfg(feature = "test-support")]
     {
         let _ = path;
-        TEST_KEY.get().cloned().ok_or(Error::unavailable(
+        TEST_KEY.get().cloned().ok_or(Error::key_unavailable(
             "synthetic database key was not installed",
         ))
     }
@@ -68,9 +68,9 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
     }
     let lock = options
         .open(Path::new(&lock_name))
-        .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
+        .map_err(|_| Error::key_unavailable("cannot lock the credential broker"))?;
     lock.lock()
-        .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
+        .map_err(|_| Error::key_unavailable("cannot lock the credential broker"))?;
     #[cfg(target_os = "linux")]
     let entry = Entry::new(
         "org.iptv-rs.database",
@@ -79,8 +79,8 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
     );
     #[cfg(not(target_os = "linux"))]
     let entry = Entry::new("org.iptv-rs.database", "catalog-v1");
-    let entry =
-        entry.map_err(|_| Error::unavailable("platform credential broker could not be opened"))?;
+    let entry = entry
+        .map_err(|_| Error::key_unavailable("platform credential broker could not be opened"))?;
     let secret = match entry.get_secret() {
         Ok(secret) => Zeroizing::new(secret),
         Err(keyring::Error::NoEntry) => {
@@ -91,7 +91,7 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
                         .read(&mut header)
                         .map_err(|_| Error::unavailable("cannot inspect existing database"))?;
                     if count != 0 && &header != b"SQLite format 3\0" {
-                        return Err(Error::unavailable(
+                        return Err(Error::key_unavailable(
                             "database key is missing from the platform credential broker",
                         ));
                     }
@@ -111,19 +111,19 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
                     .collect::<Vec<_>>(),
             );
             entry.set_secret(&encoded).map_err(|_| {
-                Error::unavailable("platform credential broker could not save the database key")
+                Error::key_unavailable("platform credential broker could not save the database key")
             })?;
             encoded
         }
         Err(_) => {
-            return Err(Error::unavailable(
+            return Err(Error::key_unavailable(
                 "platform credential broker is locked or unavailable",
             ));
         }
     };
     let mut bytes = [0; 32];
     if secret.len() != bytes.len() * 2 {
-        return Err(Error::unavailable(
+        return Err(Error::key_unavailable(
             "platform database key has an invalid length",
         ));
     }
@@ -135,7 +135,7 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
         };
         let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else {
             zeroize::Zeroize::zeroize(&mut bytes);
-            return Err(Error::unavailable(
+            return Err(Error::key_unavailable(
                 "platform database key has an invalid encoding",
             ));
         };

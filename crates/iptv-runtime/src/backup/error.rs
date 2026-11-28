@@ -140,7 +140,8 @@ impl From<StoreError> for Cause {
     fn from(error: StoreError) -> Self {
         Self::Store(match &error {
             _ if error.is_not_database() => "not a database, or another key",
-            StoreError::Unavailable(reason) => reason,
+            StoreError::Unavailable(reason) | StoreError::KeyUnavailable(reason) => reason,
+            StoreError::PrivateDocument { .. } => "a private document could not be sealed",
             StoreError::Sqlite(_) => "SQLite failed",
             StoreError::Migration { .. } => "a schema migration failed",
             StoreError::SchemaTooNew { .. } => "the schema is newer than this build",

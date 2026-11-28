@@ -84,6 +84,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::ClosePlaylists => crate::library_ui::playlists_view::close(ui.screens),
         RuntimeEvent::FirstRun => crate::library_ui::wizard_view::open_first_run(ui),
         RuntimeEvent::StoreStartupRecovered => crate::wiring::tasks::spawn_in_app(async move {
+            crate::screens::recordings_view::on_startup_recovered();
             // A failed initial read left recent searches unloaded. Reload
             // before unblocking input so a new search cannot overwrite them.
             crate::screens::search_view::refresh_saved_history(ui.screens).await;

@@ -53,7 +53,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{
     Arc, Mutex, OnceLock,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::thread::ThreadId;
 use std::time::Duration;
@@ -148,6 +148,19 @@ fn remaining(deadline: Instant) -> Duration {
     deadline.saturating_duration_since(Instant::now())
 }
 
+#[derive(Default)]
+struct RootServices {
+    replacing: Arc<AtomicBool>,
+    owners: Vec<std::sync::Weak<Service>>,
+}
+
+fn services_by_root() -> &'static Mutex<std::collections::HashMap<std::path::PathBuf, RootServices>>
+{
+    static BY_ROOT: OnceLock<Mutex<std::collections::HashMap<std::path::PathBuf, RootServices>>> =
+        OnceLock::new();
+    BY_ROOT.get_or_init(Mutex::default)
+}
+
 /// One connection's worker: a lane of the owner's execution port (natively
 /// a thread) that runs jobs in order, each with the connection.
 struct Lane {
@@ -194,6 +207,7 @@ impl Lane {
 struct Epochs {
     next: AtomicU64,
     active: AtomicU64,
+    replacing: AtomicBool,
     /// Closing admission must wake queries before accepted FIFO writes drain.
     closed: Mutex<CancelToken>,
 }
@@ -249,6 +263,8 @@ pub(crate) struct Service {
     ui_thread: OnceLock<ThreadId>,
     /// This service, for work it queues on itself (a host's persistence).
     me: OnceLock<std::sync::Weak<Service>>,
+    registered: AtomicBool,
+    root_replacing: OnceLock<Arc<AtomicBool>>,
     /// Imports and guide work where there are no workers (a cooperative
     /// host) run one at a time: a blocking store request made by one
     /// would otherwise step another's publish to its end inline.
@@ -287,6 +303,8 @@ impl Service {
             settings: Default::default(),
             ui_thread: OnceLock::new(),
             me: OnceLock::new(),
+            registered: AtomicBool::new(false),
+            root_replacing: OnceLock::new(),
             #[cfg(not(feature = "native"))]
             cooperative_imports: tokio::sync::Mutex::new(()),
             #[cfg(feature = "test-support")]
@@ -302,11 +320,27 @@ impl Service {
         &self.ports.directory
     }
 
-    #[cfg(all(test, feature = "native"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn has_open_connections(&self) -> bool {
         [&self.writer, &self.reader, &self.analysis]
             .into_iter()
             .any(|lane| lane.connection.lock().unwrap().store.is_some())
+    }
+
+    fn root_replacing(&self) -> Option<&Arc<AtomicBool>> {
+        if !self.ports.file_storage || self.ports.store_host.is_some() {
+            return None;
+        }
+        Some(self.root_replacing.get_or_init(|| {
+            let mut by_root = services_by_root()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            by_root
+                .entry(self.directory().to_owned())
+                .or_default()
+                .replacing
+                .clone()
+        }))
     }
 
     /// The calling (UI) thread starts accepting store work for this owner.
@@ -315,10 +349,33 @@ impl Service {
         self.epochs.begin();
     }
 
+    pub(crate) fn shared(ports: crate::Ports) -> Arc<Self> {
+        let service = Arc::new(Self::new(ports));
+        service.register();
+        service
+    }
+
+    fn register(self: &Arc<Self>) {
+        let _ = self.me.set(Arc::downgrade(self));
+        if !self.ports.file_storage || self.ports.store_host.is_some() {
+            return;
+        }
+        if self.registered.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let mut by_root = services_by_root()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = by_root.entry(self.directory().to_owned()).or_default();
+        let _ = self.root_replacing.set(entry.replacing.clone());
+        entry.owners.retain(|weak| weak.strong_count() > 0);
+        entry.owners.push(Arc::downgrade(self));
+    }
+
     /// A handle for work accepted now. It stays bound to this owner and to
     /// the application epoch of this moment, on whichever thread it runs.
     pub(crate) fn accept(self: &Arc<Self>) -> Services {
-        let _ = self.me.set(Arc::downgrade(self));
+        self.register();
         let closed = self.epochs.closed.lock().unwrap_or_else(|e| e.into_inner());
         Services {
             service: self.clone(),
@@ -350,6 +407,15 @@ impl Service {
     }
 
     fn open_store(&self) -> Result<Store, StoreError> {
+        if self.epochs.replacing.load(Ordering::SeqCst)
+            || self
+                .root_replacing()
+                .is_some_and(|flag| flag.load(Ordering::SeqCst))
+        {
+            return Err(StoreError::Unavailable(iptv_core::message::key(
+                "The saved library could not be opened",
+            )));
+        }
         if let Some(host) = &self.ports.store_host {
             return host.open();
         }
@@ -397,6 +463,109 @@ impl Service {
         #[cfg(feature = "test-support")]
         let limit = self.hooks.drain_limit().unwrap_or(limit);
         limit
+    }
+
+    /// Closes open SQLite handles across all lanes of every owner sharing this
+    /// storage root and blocks new store opens while `operation` moves or
+    /// replaces the database files on disk, keeping this owner's epoch active
+    /// so `retry_startup` can reopen immediately.
+    pub(crate) fn with_closed_connections<R>(
+        self: &Arc<Self>,
+        operation: impl FnOnce() -> R,
+    ) -> Option<R> {
+        struct Guard<'a>(&'a AtomicBool);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        struct ArcGuard(Arc<AtomicBool>);
+        impl Drop for ArcGuard {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let snapshot_root = |root: &Path, current: &Arc<Service>| -> Vec<Arc<Service>> {
+            let mut by_root = services_by_root()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut found = Vec::new();
+            if let Some(entry) = by_root.get_mut(root) {
+                entry.owners.retain(|weak| {
+                    if let Some(strong) = weak.upgrade() {
+                        found.push(strong);
+                        true
+                    } else {
+                        false
+                    }
+                });
+            }
+            if !found.iter().any(|item| Arc::ptr_eq(item, current)) {
+                found.push(current.clone());
+            }
+            found.sort_by_key(|item| Arc::as_ptr(item) as usize);
+            found.dedup_by(|a, b| Arc::ptr_eq(a, b));
+            found
+        };
+        let (_root_guard, owners) = if let Some(root_flag) = self.root_replacing().cloned() {
+            self.register();
+            if root_flag
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return None;
+            }
+            let root_guard = ArcGuard(root_flag);
+            let owners = snapshot_root(self.directory(), self);
+            (Some(root_guard), owners)
+        } else {
+            (None, vec![self.clone()])
+        };
+        let mut guards = Vec::with_capacity(owners.len());
+        for owner in &owners {
+            if owner
+                .epochs
+                .replacing
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return None;
+            }
+            guards.push(Guard(&owner.epochs.replacing));
+        }
+        let deadline = Instant::now() + self.drain_limit();
+        let reset = |lane: &Lane, limit: Instant| {
+            if lane.jobs.get().is_none() {
+                *lane
+                    .connection
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Connection::default();
+                return true;
+            }
+            lane.barrier(remaining(limit), |connection| {
+                *connection = Connection::default();
+            })
+        };
+        for owner in &owners {
+            if !(reset(&owner.writer, deadline)
+                && reset(&owner.reader, deadline)
+                && reset(&owner.analysis, deadline))
+            {
+                return None;
+            }
+        }
+        let output = operation();
+        let post_owners = (self.ports.file_storage && self.ports.store_host.is_none())
+            .then(|| snapshot_root(self.directory(), self));
+        let post_deadline = Instant::now() + self.drain_limit();
+        for owner in post_owners.as_deref().unwrap_or(&owners) {
+            let _ = reset(&owner.writer, post_deadline);
+            let _ = reset(&owner.reader, post_deadline);
+            let _ = reset(&owner.analysis, post_deadline);
+        }
+        drop(guards);
+        drop(_root_guard);
+        Some(output)
     }
 
     #[cfg(all(test, feature = "test-support"))]
@@ -1299,7 +1468,7 @@ impl Default for Service {
 impl Service {
     /// A started owner on `ports` (tests of other modules).
     pub(crate) fn started_for_tests(ports: crate::Ports) -> Arc<Self> {
-        let service = Arc::new(Self::new(ports));
+        let service = Self::shared(ports);
         service.epochs.begin();
         service
     }
@@ -1312,7 +1481,7 @@ impl Services {
     pub(crate) fn for_tests(directory: &Path) -> Self {
         let mut ports = crate::Ports::for_tests();
         ports.directory = directory.to_owned();
-        let service = Arc::new(Service::new(ports));
+        let service = Service::shared(ports);
         service.epochs.begin();
         service.accept()
     }
@@ -2098,5 +2267,27 @@ mod tests {
         }
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         inspect(&source, &source.join("store_service/mod.rs"));
+    }
+
+    #[test]
+    fn owner_registered_during_replacement_cannot_open_store_until_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let owner_a = service(dir.path(), 0x5a);
+        let late_owner = owner_a
+            .with_closed_connections(|| {
+                let late = service(dir.path(), 0x5a);
+                assert!(
+                    late.open_store().is_err(),
+                    "owners registered mid-replacement must not open the database"
+                );
+                late
+            })
+            .expect("replacement gate should run");
+        assert!(
+            late_owner.open_store().is_ok(),
+            "late owner may open the database once replacement finishes"
+        );
+        assert!(owner_a.drain_on_shutdown());
+        assert!(late_owner.drain_on_shutdown());
     }
 }

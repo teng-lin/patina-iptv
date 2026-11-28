@@ -253,44 +253,72 @@ fn restore_ui(ui: crate::Ui) {
 /// Independent facts are paragraphs so recovery guidance remains readable in
 /// native dialogs at enlarged text sizes. No archive-provided text is shown.
 fn rejection_description(error: Error) -> String {
-    let (detail, newer) = match error.rejection() {
-        Some(Rejection::Format { found: Some(found), supported }) => (
-            trf("Backup format version {found} is not supported; this Patina supports version {supported}.",
-                &[("found", found.into()), ("supported", supported.into())]),
+    rejection_paragraphs(
+        error.rejection(),
+        tr("Your current data and any previously scheduled restore have been kept."),
+    )
+}
+
+pub(crate) fn recovery_rejection_description(rejection: Rejection) -> String {
+    rejection_paragraphs(
+        Some(rejection),
+        tr("Choose another backup, or start fresh with an empty library."),
+    )
+}
+
+fn rejection_paragraphs(rejection: Option<Rejection>, outcome: &str) -> String {
+    let (detail, newer) = match rejection {
+        Some(Rejection::Format {
+            found: Some(found),
+            supported,
+        }) => (
+            trf(
+                "Backup format version {found} is not supported; this Patina supports version {supported}.",
+                &[("found", found.into()), ("supported", supported.into())],
+            ),
             found > supported,
         ),
-        Some(Rejection::Format { found: None, .. }) => (
-            tr("This backup format is not supported.").to_owned(), false,
-        ),
-        Some(Rejection::Settings { found: Some(found), supported }) => (
-            trf("This Patina cannot restore these backup settings (version {found}; supported version {supported}).",
-                &[("found", found.into()), ("supported", supported.into())]),
+        Some(Rejection::Format { found: None, .. }) => {
+            (tr("This backup format is not supported.").to_owned(), false)
+        }
+        Some(Rejection::Settings {
+            found: Some(found),
+            supported,
+        }) => (
+            trf(
+                "This Patina cannot restore these backup settings (version {found}; supported version {supported}).",
+                &[("found", found.into()), ("supported", supported.into())],
+            ),
             found > supported,
         ),
         Some(Rejection::Settings { found: None, .. }) => (
-            tr("This backup contains settings in an unsupported format.").to_owned(), false,
+            tr("This backup contains settings in an unsupported format.").to_owned(),
+            false,
         ),
         Some(Rejection::Database { found, supported }) => (
-            trf("Backup database schema {found} is not supported; this Patina supports schema {supported}.",
-                &[("found", found.into()), ("supported", supported.into())]),
+            trf(
+                "Backup database schema {found} is not supported; this Patina supports schema {supported}.",
+                &[("found", found.into()), ("supported", supported.into())],
+            ),
             found > supported,
         ),
-        _ => return [
-            tr("This backup is damaged or incomplete. Choose another backup, or create a new backup on the original device."),
-            tr("Your current data and any previously scheduled restore have been kept."),
-        ].join("\n\n"),
+        _ => {
+            return [
+                tr(
+                    "This backup is damaged or incomplete. Choose another backup, \
+                     or create a new backup on the original device.",
+                ),
+                outcome,
+            ]
+            .join("\n\n");
+        }
     };
     let next = if newer {
         tr("Use a newer Patina version that supports this backup, or choose another backup.")
     } else {
         tr("Choose another backup, or use a Patina version that supports this backup.")
     };
-    [
-        detail.as_str(),
-        next,
-        tr("Your current data and any previously scheduled restore have been kept."),
-    ]
-    .join("\n\n")
+    [detail.as_str(), next, outcome].join("\n\n")
 }
 
 pub(crate) fn service_layer(ui: crate::Ui) -> impl nsh_core::prelude::IntoElement {
@@ -310,6 +338,10 @@ pub(crate) fn service_layer(ui: crate::Ui) -> impl nsh_core::prelude::IntoElemen
                     open.wizard.set_restore(restore);
                 }
             });
+            crate::wiring::navigation::set_restore_available(
+                ui.chrome,
+                crate::host::HAS_WORKERS && found.open,
+            );
         }
     })
 }

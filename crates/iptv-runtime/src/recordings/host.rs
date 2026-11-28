@@ -97,7 +97,7 @@ pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
                 .host
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some(Arc::new(Service::new(ports.clone())));
+                Some(Service::shared(ports.clone()));
             state
         })
         .clone()
@@ -139,7 +139,7 @@ impl State {
             && let Some(previous) = host.as_ref()
         {
             let ports = previous.accept().ports().clone();
-            *host = Some(Arc::new(Service::new(ports)));
+            *host = Some(Service::shared(ports));
         }
         let services = if let Some(host) = host.as_ref() {
             host.begin();
@@ -239,6 +239,16 @@ pub fn start_background_host(ports: crate::Ports) -> Result<(), Error> {
     }
     Ok(())
 }
+pub(crate) fn with_stopped_background_host<R>(
+    directory: &Path,
+    run: impl FnOnce() -> R,
+) -> Option<R> {
+    let _guard = ACTIVATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    stop_background_host(directory).then(run)
+}
+
 pub fn stop_background_host(directory: &Path) -> bool {
     let state = hosts()
         .lock()

@@ -113,3 +113,4 @@ pub(crate) use crate::shell::menu_view::{
     open_playlist_options, open_playlist_order, open_timeline_context,
 };
 pub(crate) use crate::shell::remote_editor::{media_toggle_override, open as open_remote_editor};
+pub(crate) use crate::shell::startup_view::set_restore_available;

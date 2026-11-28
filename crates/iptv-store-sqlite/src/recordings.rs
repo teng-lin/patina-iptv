@@ -359,7 +359,72 @@ impl Store {
             None => Store::open(from)?,
         };
         // A scheduled row with media is an interrupted capture resuming.
+        // Validate only the rows that `copy_rows` retains so decode errors in
+        // discarded zero-byte scheduled rows cannot abort adoption.
         const KEPT: &str = "status<>'scheduled' OR bytes>0";
+        let kept_job = format!("job_id IN (SELECT id FROM recording_jobs WHERE {KEPT})");
+        let kept_progress = kept_job.replace("job_id", "recording_id");
+        {
+            let mut jobs = host.conn.prepare(&format!(
+                "SELECT j.*, EXISTS(SELECT 1 FROM guide_revisions r WHERE r.source_id=j.source_id
+                    AND r.incarnation=j.source_incarnation),
+                    (SELECT MIN(rj.starts_at) FROM recording_rule_jobs rj JOIN recording_rules q ON q.id=rj.rule_id
+                     WHERE rj.job_id=j.id AND q.repeat='series')
+                 FROM recording_jobs j WHERE {KEPT}"
+            ))?;
+            for decoded in jobs.query_map([], row)? {
+                let _ = decoded?;
+            }
+        }
+        {
+            let mut progress = host.conn.prepare(&format!(
+                "SELECT recording_id,position_ms,duration_ms,completed
+                 FROM recording_playback_progress WHERE {kept_progress}"
+            ))?;
+            for decoded in progress.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, bool>(3)?,
+                ))
+            })? {
+                let _ = decoded?;
+            }
+        }
+        let _ = host.retired_recording_schedules()?;
+        let completions: Vec<(i64, String, String, i64, String, String)> = host
+            .conn
+            .prepare(&format!(
+                "SELECT job_id,source_incarnation,outcome,bytes,digest,message
+                 FROM recording_completions WHERE {kept_job}"
+            ))?
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        for (_, _, outcome, bytes, _, _) in &completions {
+            if !matches!(outcome.as_str(), "completed" | "partial" | "failed") || *bytes < 0 {
+                return Err(StoreError::InvalidData(
+                    "invalid recording completion row".into(),
+                ));
+            }
+        }
+        let _: Option<String> = host
+            .conn
+            .query_row(
+                "SELECT value FROM store_meta WHERE key='retired_recording_notice'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -378,13 +443,9 @@ impl Store {
             "DELETE FROM store_meta WHERE key='retired_recording_notice'",
             [],
         )?;
-        let kept_job = format!("job_id IN (SELECT id FROM recording_jobs WHERE {KEPT})");
         for (table, filter) in [
             ("recording_jobs", KEPT.to_owned()),
-            (
-                "recording_playback_progress",
-                kept_job.replace("job_id", "recording_id"),
-            ),
+            ("recording_playback_progress", kept_progress),
             ("recording_completions", kept_job),
             ("retired_recording_schedules", "1".to_owned()),
             ("store_meta", "key='retired_recording_notice'".to_owned()),

@@ -15,6 +15,7 @@
 iptv-runtime/src/error.rs	SettingsLocked
 iptv-runtime/src/error.rs	ProviderCapacity
 iptv-runtime/src/error.rs	Unavailable
+iptv-runtime/src/error.rs	KeyUnavailable
 iptv-runtime/src/error.rs	RestartRequired
 iptv-runtime/src/error.rs	SchemaTooNew
 iptv-runtime/src/error.rs	CorruptDatabase
@@ -24,6 +25,7 @@ iptv-runtime/src/error.rs	RecordingSpace
 iptv-runtime/src/error.rs	Storage
 iptv-runtime/src/error.rs	Sqlite
 iptv-runtime/src/error.rs	Migration
+iptv-runtime/src/error.rs	PrivateDocument
 iptv-runtime/src/error.rs	SourceNotFound
 iptv-runtime/src/error.rs	CustomGroupNotFound
 iptv-runtime/src/error.rs	InvalidData
@@ -224,7 +226,9 @@ iptv-app/src/host/native/platform_data.rs	Library/Application Support/iptv-rs
 iptv-app/src/host/native/platform_data.rs	Patina
 iptv-app/src/host/native/platform_data.rs	Storage path is not UTF-8
 iptv-runtime/src/backup/error.rs	{} (library: {class})
+iptv-runtime/src/credential_store.rs	cannot inspect existing database
 iptv-runtime/src/credential_store.rs	pending restore cannot be read
+iptv-runtime/src/credential_store.rs	secure random generator failed
 iptv-runtime/src/store_service/favorites_repo.rs	recent favorite edits are not saved
 iptv-runtime/src/favorites.rs	the favorites list changed during editing
 iptv-runtime/src/favorites.rs	the favorites order was not saved
