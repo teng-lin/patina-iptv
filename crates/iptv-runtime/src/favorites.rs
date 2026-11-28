@@ -20,6 +20,7 @@ use std::sync::mpsc::{self, Receiver};
 
 use crate::error::AdapterError as StoreError;
 use crate::store_service::FavoriteWrite;
+pub(crate) use crate::store_service::{Counted, UNSAVED_EDITS};
 use iptv_core::favorites::{Favorites, KeyIndex, Recent, diff};
 use iptv_core::guide::Schedule;
 use iptv_library::SourceId;
@@ -27,9 +28,6 @@ use iptv_library::SourceId;
 use iptv_providers::model::ContentKind;
 #[cfg(test)]
 use iptv_store_sqlite::Store;
-
-pub(crate) const UNSAVED_EDITS: StoreError =
-    StoreError::Unavailable("recent favorite edits are not saved");
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -559,21 +557,8 @@ fn send(owner: &super::Runtime, write: Write) {
         .send(services, write);
 }
 
-/// Keeps a write counted in [`unsaved`] until it ran or was dropped.
-pub(crate) struct Counted(std::sync::Arc<AtomicUsize>);
-
-impl Counted {
-    fn new(owner: &super::Runtime) -> Self {
-        let unsaved = unsaved(owner);
-        unsaved.fetch_add(1, Ordering::AcqRel);
-        Self(unsaved)
-    }
-}
-
-impl Drop for Counted {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
+fn counted(owner: &super::Runtime) -> Counted {
+    Counted::new(unsaved(owner))
 }
 
 /// A store open or an expired epoch can discard the job before its
@@ -636,7 +621,7 @@ fn queue_on_writer(owner: &super::Runtime, write: Write) {
             elapsed_ms,
         },
     };
-    let counted = Counted::new(owner);
+    let counted = counted(owner);
     let failure = ReportFailure(Some(failed));
     services
         .favorites()
@@ -890,7 +875,7 @@ pub(crate) async fn save_order(
         // after the writes queued before it (`queue_on_writer`), unless
         // one of them failed.
         let failed = cooperative_failure(owner);
-        let counted = Counted::new(owner);
+        let counted = counted(owner);
         owner
             .services()
             .favorites()
@@ -1615,7 +1600,7 @@ mod start_tests {
         let owner = crate::Runtime::default();
         let (writer, inbox) = mpsc::channel();
         owner.organization.favorites().borrow_mut().writer = Some(writer);
-        let pending = Counted::new(&owner);
+        let pending = counted(&owner);
         let previous_failure = cooperative_failure(&owner);
 
         reset(&owner);

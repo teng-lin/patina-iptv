@@ -15,7 +15,6 @@ pub fn source_authority(
 
 use iptv_guide::playback::PlaybackContext;
 use iptv_import::SourceMeta;
-use iptv_library::SourceId;
 use iptv_providers::model::SourceConfig;
 use iptv_providers::xtream::StreamFormat;
 
@@ -67,45 +66,10 @@ pub fn account_streams(meta: &SourceMeta) -> Option<u32> {
     }
 }
 
-use super::store_service::Services;
-
-const LAST_CHANNEL_FILE: &str = "last_channel";
-const COMBINED_CHANNEL_FILE: &str = "last_channel_combined";
-fn last_channel_path(services: &Services, source: Option<SourceId>) -> std::path::PathBuf {
-    services.directory().join(match source {
-        Some(id) => format!("{LAST_CHANNEL_FILE}-{}", id.0),
-        None => LAST_CHANNEL_FILE.to_owned(),
-    })
-}
-
-/// Queues the write: a zap never waits for the disk (`file_writer`).
-pub(crate) fn save_last_channel(services: &Services, source: Option<SourceId>, key: &str) {
-    drop(
-        services
-            .files()
-            .write(last_channel_path(services, source), key.as_bytes().to_vec()),
-    );
-}
-
-/// Includes a write still queued, so a zap is remembered at once.
-pub(crate) fn load_last_channel(services: &Services, source: Option<SourceId>) -> Option<String> {
-    let read = |path: std::path::PathBuf| {
-        let key = String::from_utf8(services.files().read(&path)?).ok()?;
-        let key = key.trim();
-        (!key.is_empty()).then(|| key.to_owned())
-    };
-    read(last_channel_path(services, source)).or_else(|| read(last_channel_path(services, None)))
-}
-
-/// Playlist `source` was deleted: its last channel goes too (after any
-/// write still queued for it).
-pub(crate) fn forget_source(services: &Services, source: SourceId) {
-    drop(
-        services
-            .files()
-            .remove(last_channel_path(services, Some(source))),
-    );
-}
+pub(crate) use super::store_service::{
+    forget_source, load_combined_channel, load_last_channel, save_combined_channel,
+    save_last_channel,
+};
 
 /// Reuse connections across Stalker zaps; settings changes replace the client.
 pub(crate) fn link_client(
@@ -129,21 +93,6 @@ pub(crate) fn link_client(
         *cached = Some((config, client.clone()));
         Ok(client)
     }
-}
-
-pub(crate) fn save_combined_channel(services: &Services, key: &str) {
-    drop(services.files().write(
-        services.directory().join(COMBINED_CHANNEL_FILE),
-        key.as_bytes().to_vec(),
-    ));
-}
-
-pub(crate) fn load_combined_channel(services: &Services) -> Option<String> {
-    let bytes = services
-        .files()
-        .read(&services.directory().join(COMBINED_CHANNEL_FILE))?;
-    let key = String::from_utf8(bytes).ok()?;
-    (!key.trim().is_empty()).then(|| key.trim().to_owned())
 }
 
 /// Common resolver clock for viewing and recording. `at` selects the local

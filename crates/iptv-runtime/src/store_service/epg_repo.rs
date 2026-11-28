@@ -1,13 +1,24 @@
 //! Typed EPG repository for guide configuration and read models.
 
-use super::{Services, StoreError};
+use super::{Services, StoreError, catalog_in};
+use crate::state::Matching;
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
 use iptv_import::EpgSourceConfig;
 use iptv_library::{Choice, Current, SourceId};
 use iptv_providers::ContentId;
+use iptv_providers::model::{Channel, Group};
 use iptv_search::{ChannelId, ProgramIndex, ProgramIndexBuilder};
 use iptv_store_sqlite::{EpgOverride, EpgWindow, GuideChannel, GuideSource, Store};
 use std::future::Future;
+
+pub(crate) struct RebuiltSchedule {
+    pub groups: Vec<Group>,
+    pub channels: Vec<Channel>,
+    pub guide: GuideStore,
+    pub now: i64,
+    pub source: SourceId,
+    pub resume: bool,
+}
 
 fn held_window(window: iptv_guide::pages::PagedWindow) -> EpgWindow<'static> {
     EpgWindow {
@@ -75,22 +86,21 @@ impl EpgRepo {
     pub(crate) async fn clear_guides(
         self,
         sources: Vec<SourceId>,
-    ) -> Result<(bool, Vec<crate::imports::Imported>), StoreError> {
+    ) -> Result<(bool, Vec<RebuiltSchedule>), StoreError> {
         self.services
             .call(move |store| {
                 let mut deleted = true;
-                let mut imports = Vec::new();
+                let mut rebuilt = Vec::new();
                 for source in sources {
                     if let Err(error) = store.delete_epg(source) {
                         log::warn!("iptv data: could not delete stored guide: {error}");
                         deleted = false;
                         continue;
                     }
-                    if let Ok((groups, channels)) = crate::stored::catalog_in(store, source) {
-                        imports.push(crate::imports::Imported {
+                    if let Ok((groups, channels)) = catalog_in(store, source) {
+                        rebuilt.push(RebuiltSchedule {
                             groups,
                             channels,
-                            playback: crate::imports::Streams::Current,
                             guide: GuideStore::default(),
                             now: crate::time::now_unix(),
                             source,
@@ -98,7 +108,7 @@ impl EpgRepo {
                         });
                     }
                 }
-                Ok((deleted, imports))
+                Ok((deleted, rebuilt))
             })
             .await
     }
@@ -107,7 +117,7 @@ impl EpgRepo {
         self,
         id: String,
         keep: u32,
-    ) -> Result<Option<Box<crate::imports::Imported>>, StoreError> {
+    ) -> Result<Option<Box<RebuiltSchedule>>, StoreError> {
         self.services
             .call(move |store| repair_publication_in(store, &id, keep))
             .await
@@ -144,8 +154,7 @@ impl EpgRepo {
         key: String,
         choice: Choice,
         keep_past_days: u32,
-    ) -> impl Future<Output = Result<Option<Box<crate::imports::Imported>>, StoreError>> + use<>
-    {
+    ) -> impl Future<Output = Result<Option<Box<RebuiltSchedule>>, StoreError>> + use<> {
         self.services
             .call(move |store| save_and_rebind(store, source, &key, &choice, keep_past_days))
     }
@@ -249,23 +258,23 @@ fn save_and_rebind(
     key: &str,
     choice: &Choice,
     keep_past_days: u32,
-) -> Result<Option<Box<crate::imports::Imported>>, StoreError> {
+) -> Result<Option<Box<RebuiltSchedule>>, StoreError> {
     let content = ContentId::from_stored(key);
     let overlay = choice_overlay(choice);
     store.set_epg_override(source, &content, overlay.as_ref())?;
-    let rebound = (|| -> Result<Option<Box<crate::imports::Imported>>, StoreError> {
+    let rebound = (|| -> Result<Option<Box<RebuiltSchedule>>, StoreError> {
         let to = match choice {
             Choice::Automatic => return Ok(None),
             Choice::NoGuide => None,
             Choice::Channel { feed, epg_channel } => Some((*feed, epg_channel.clone())),
         };
-        let (groups, channels) = crate::stored::catalog_in(store, source)?;
+        let (groups, channels) = catalog_in(store, source)?;
         let overrides = store
             .epg_overrides(source)?
             .into_iter()
             .map(|(id, epg)| (ChannelKey::new(id.as_str()), epg.to_override()))
             .collect();
-        let matching = crate::stored::Matching {
+        let matching = Matching {
             channels: &channels,
             overrides: &overrides,
         };
@@ -283,18 +292,17 @@ fn save_and_rebind(
         let now = crate::time::now_unix();
         let window = crate::paging::window(now, keep_past_days);
         let epg_window = held_window(window);
-        Ok(Some(Box::new(crate::imports::Imported {
+        Ok(Some(Box::new(RebuiltSchedule {
             guide: store.load_epg(source, &epg_window)?,
             groups,
             channels,
-            playback: crate::imports::Streams::Current,
             now,
             source,
             resume: false,
         })))
     })();
     match rebound {
-        Ok(imported) => Ok(imported),
+        Ok(rebuilt) => Ok(rebuilt),
         Err(error) => {
             log::warn!("iptv data: guide choice saved; cached guide could not be updated: {error}");
             Ok(None)
@@ -306,11 +314,7 @@ fn repair_publication_in(
     store: &mut Store,
     id: &str,
     keep: u32,
-) -> Result<Option<Box<crate::imports::Imported>>, StoreError> {
-    use crate::imports::Streams;
-    use crate::stored::Matching;
-    use iptv_epg::ChannelKey;
-
+) -> Result<Option<Box<RebuiltSchedule>>, StoreError> {
     let Some(iptv_store_sqlite::RepairPublication {
         commit,
         choices,
@@ -344,7 +348,7 @@ fn repair_publication_in(
     let cached = store
         .epg_guide(commit.source)?
         .is_some_and(|guide| guide.replaced_at.is_some());
-    let (groups, channels) = crate::stored::catalog_in(store, commit.source)?;
+    let (groups, channels) = catalog_in(store, commit.source)?;
     let overrides = store
         .epg_overrides(commit.source)?
         .into_iter()
@@ -376,14 +380,13 @@ fn repair_publication_in(
         return Ok(None);
     }
     let now = crate::time::now_unix();
-    Ok(Some(Box::new(crate::imports::Imported {
+    Ok(Some(Box::new(RebuiltSchedule {
         guide: store.load_epg(
             commit.source,
             &held_window(crate::paging::window(now, keep)),
         )?,
         groups,
         channels,
-        playback: Streams::Current,
         now,
         source: commit.source,
         resume: false,

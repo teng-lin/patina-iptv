@@ -2,40 +2,20 @@
 use crate::Runtime;
 use crate::data::Update;
 use iptv_core::add_playlist::{FailureKind, ImportFailure, ImportId};
-use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
 
-/// Parental policy verified against committed storage for external playback.
-#[derive(Clone)]
-pub struct ExternalPlaybackAuthorization {
-    access: crate::parental::Snapshot,
-    target: Target,
-    grants: Vec<Target>,
-}
-
-impl ExternalPlaybackAuthorization {
-    pub(crate) fn new(
-        access: crate::parental::Snapshot,
-        target: Target,
-        grants: Vec<Target>,
-    ) -> Self {
-        Self {
-            access,
-            target,
-            grants,
-        }
-    }
-
-    /// Check immediately before granting the relay admission, without yielding.
-    pub fn is_current(&self) -> bool {
-        self.access.playback_current(&self.target, &self.grants)
-    }
-}
+pub use crate::parental::gate::ExternalPlaybackAuthorization;
 
 impl Runtime {
+    /// Observe store contention without opening connections or starting workers.
+    /// Counts are instantaneous per lane; this does not acquire a database lock.
+    pub fn store_queue_stats(&self) -> [crate::StoreQueueStats; 3] {
+        self.store.queue_stats()
+    }
+
     /// Starts a wizard import with a runtime-owned identity and the storage
     /// epoch that accepted the work before constructing its callback.
     pub fn start_wizard_import(

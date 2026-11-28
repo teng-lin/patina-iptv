@@ -31,9 +31,14 @@ mod recording_repo;
 mod system_repo;
 mod vod_repo;
 
-pub(crate) use catalog_repo::CatalogRepo;
-pub(crate) use epg_repo::EpgRepo;
-pub(crate) use favorites_repo::{FavoriteWrite, FavoritesRepo};
+pub(crate) use catalog_repo::{
+    CatalogRepo, catalog_in, forget_source, load_combined_channel, load_last_channel,
+    save_combined_channel, save_last_channel,
+};
+#[cfg(test)]
+pub(crate) use catalog_repo::guide_snapshot;
+pub(crate) use epg_repo::{EpgRepo, RebuiltSchedule};
+pub(crate) use favorites_repo::{Counted, FavoriteWrite, FavoritesRepo, UNSAVED_EDITS};
 pub(crate) use parental_repo::ParentalRepo;
 #[cfg(feature = "native")]
 pub(crate) use recording_repo::RecordingRepo;
@@ -138,14 +143,14 @@ impl Drop for QueueTicket {
     }
 }
 
-impl crate::Runtime {
+impl Service {
     /// Observe store contention without opening connections or starting workers.
     /// Counts are instantaneous per lane; this does not acquire a database lock.
-    pub fn store_queue_stats(&self) -> [StoreQueueStats; 3] {
+    pub(crate) fn queue_stats(&self) -> [StoreQueueStats; 3] {
         [
-            self.store.writer.stats("writer"),
-            self.store.reader.stats("reader"),
-            self.store.analysis.stats("analysis"),
+            self.writer.stats("writer"),
+            self.reader.stats("reader"),
+            self.analysis.stats("analysis"),
         ]
     }
 }

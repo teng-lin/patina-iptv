@@ -6,14 +6,16 @@ use super::store_service::Services;
 use iptv_epg::{ChannelKey, DAY, GuideStore, Overrides, UnixTime};
 use iptv_import::{
     CancelToken, Decision, EpgSourceConfig, ImportError, NoProgress, RefreshPolicy, Trigger,
-    decide, matching_fingerprint, store_options,
+    decide, store_options,
 };
+#[cfg(test)]
+use iptv_import::matching_fingerprint;
 use iptv_providers::SecretUrl;
-use iptv_providers::model::{Channel, ContentKind, Group};
+use iptv_providers::model::{Channel, Group};
 use iptv_settings::{Settings, Target};
 use iptv_store_sqlite::{
-    ChannelOrder, ChannelQuery, EpgCounts, EpgFeedMeta, EpgWindow, GuideSource, ImportErrorKind,
-    SourceId, Store, StoreError, StoredGuide,
+    EpgCounts, EpgFeedMeta, EpgWindow, GuideSource, ImportErrorKind, SourceId, Store, StoreError,
+    StoredGuide,
 };
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
@@ -45,31 +47,17 @@ pub fn with_storage(mut configs: Vec<EpgSourceConfig>) -> Vec<EpgSourceConfig> {
     configs
 }
 
+pub(crate) use super::store_service::catalog_in;
+#[cfg(test)]
+use super::store_service::guide_snapshot;
+pub use crate::state::Matching;
+
 /// A stored source's live groups and channels, in provider order.
 pub(crate) fn catalog(
     services: &Services,
     source: SourceId,
 ) -> Result<(Vec<Group>, Vec<Channel>), StoreError> {
     services.blocking_read(move |store| catalog_in(store, source))
-}
-
-/// [`catalog`] from an open store.
-pub(crate) fn catalog_in(
-    store: &Store,
-    source: SourceId,
-) -> Result<(Vec<Group>, Vec<Channel>), StoreError> {
-    let groups = store.groups(source, Some(ContentKind::Live))?;
-    let query = ChannelQuery {
-        include_hidden: true,
-        order: ChannelOrder::Provider,
-        ..ChannelQuery::default()
-    };
-    let channels = store
-        .load_channels(source, &query)?
-        .into_iter()
-        .map(|row| row.channel)
-        .collect();
-    Ok((groups, channels))
 }
 
 /// What is stored about `source`'s guide.
@@ -266,18 +254,6 @@ pub(crate) fn overrides_in(store: &Store, source: SourceId) -> Result<Overrides,
         .into_iter()
         .map(|(id, epg)| (ChannelKey::new(id.as_str()), epg.to_override()))
         .collect())
-}
-
-#[derive(Clone, Copy)]
-pub struct Matching<'a> {
-    pub channels: &'a [Channel],
-    pub overrides: &'a Overrides,
-}
-
-impl Matching<'_> {
-    pub fn fingerprint(&self) -> u64 {
-        matching_fingerprint(self.channels, self.overrides)
-    }
 }
 
 /// Whether to download the guide again (the `epg.update_*` settings).
@@ -862,17 +838,6 @@ pub fn cached_guide_state(
             .get(&source)
             .map(|guide| guide.summary.clone())
     })
-}
-
-/// What the views see of a stored guide: how its last update went, without
-/// its feeds or their configuration.
-pub(crate) fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
-    iptv_library::GuideSnapshot {
-        replaced_at: guide.replaced_at,
-        attempted_at: guide.attempted_at,
-        last_error: guide.last_error,
-        bound_channels: guide.bound_channels,
-    }
 }
 
 pub(crate) fn guide_edit_revision(owner: &super::Runtime, source: SourceId) -> u64 {

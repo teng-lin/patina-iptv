@@ -574,6 +574,143 @@ fn only_native_modules_name_the_native_adapter_or_start_threads() {
     }
 }
 
+/// Shipped `store_service/**` modules may name only infrastructure modules,
+/// dependency-free data modules, and the leaf `parental::gate` submodule.
+/// Exact, shrink-only list.
+const STORE_SERVICE_MAY_NAME: &[&str] = &[
+    // Crate root re-exports of infrastructure ports and test gates.
+    "MaybeSend",
+    "Ports",
+    "TestGate",
+    // Infrastructure modules.
+    "credential_store",
+    "execution",
+    "file_writer",
+    "guide_checks",
+    "network",
+    "settings",
+    "testing",
+    "time",
+    "workers",
+    // Dependency-free data and leaf gate modules.
+    "model",
+    "paging",
+    "parental::gate",
+    "ports",
+    "state",
+];
+
+fn expand_group(group: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut depth = 0usize;
+    let mut item = String::new();
+    for ch in group.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' if depth == 0 => break,
+            '}' => depth -= 1,
+            ',' if depth == 0 => {
+                items.push(std::mem::take(&mut item));
+                continue;
+            }
+            _ => {}
+        }
+        item.push(ch);
+    }
+    items.push(item);
+    items
+}
+
+fn first_segment(text: &str) -> (&str, &str) {
+    let text = text.trim_start();
+    let end = text
+        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .unwrap_or(text.len());
+    (&text[..end], &text[end..])
+}
+
+fn push_crate_item(item: &str, found: &mut BTreeSet<String>) {
+    let (first, rest) = first_segment(item);
+    if first.is_empty() {
+        return;
+    }
+    if matches!(first, "parental" | "cast")
+        && let Some(after) = rest.trim_start().strip_prefix("::")
+    {
+        let after = after.trim_start();
+        if let Some(group) = after.strip_prefix('{') {
+            for sub in expand_group(group) {
+                let (second, _) = first_segment(&sub);
+                if !second.is_empty() {
+                    found.insert(format!("{first}::{second}"));
+                }
+            }
+        } else {
+            let (second, _) = first_segment(after);
+            if !second.is_empty() {
+                found.insert(format!("{first}::{second}"));
+            } else {
+                found.insert(first.to_owned());
+            }
+        }
+        return;
+    }
+    found.insert(first.to_owned());
+}
+
+/// First `crate::` segments named in `code` (expanding `{a, b::c}` groups and
+/// matching `parental::*` / `cast::*` at two segments). When `super_is_crate`
+/// is true (e.g. a top-level `foo/mod.rs`), `super::` is treated as `crate::`.
+fn crate_named(code: &str, super_is_crate: bool) -> BTreeSet<String> {
+    let word = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
+    let prefixes: &[&str] = if super_is_crate {
+        &["crate::", "super::"]
+    } else {
+        &["crate::"]
+    };
+    let mut found = BTreeSet::new();
+    for prefix in prefixes {
+        for (at, _) in code.match_indices(prefix) {
+            let before = &code[..at];
+            if before.chars().next_back().is_some_and(word) || before.ends_with("::") {
+                continue;
+            }
+            let rest = &code[at + prefix.len()..];
+            if let Some(group) = rest.strip_prefix('{') {
+                for item in expand_group(group) {
+                    push_crate_item(&item, &mut found);
+                }
+            } else {
+                push_crate_item(rest, &mut found);
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn store_service_names_only_infrastructure() {
+    let sources = runtime_sources();
+    let tests = test_modules(&sources);
+    let mut found = BTreeSet::new();
+    for (name, code) in &sources {
+        if !name.starts_with("store_service/") || tests.contains(name) {
+            continue;
+        }
+        let code = shipped(code);
+        let super_is_crate = name == "store_service/mod.rs";
+        for item in crate_named(&code, super_is_crate) {
+            assert!(
+                STORE_SERVICE_MAY_NAME.contains(&item.as_str()),
+                "{name} names crate::{item}; store_service may name only listed infrastructure \
+                 and leaf data modules"
+            );
+            found.insert(item);
+        }
+    }
+    exact(&found, STORE_SERVICE_MAY_NAME, "store_service dependency");
+}
+
 #[test]
 fn declarations_include_local_statics_but_not_lifetimes() {
     assert_eq!(statics("fn f() { static mut local: u32 = 0; }"), ["local"]);
