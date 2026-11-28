@@ -26,6 +26,9 @@ pub enum AirPlayMode {
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
 pub trait Port: Send + Sync {
     fn configure_airplay(&self, _mode: AirPlayMode) {}
+    fn last_peer_ip(&self) -> Option<String> {
+        None
+    }
     fn discover(&self) -> Task<'_, Vec<Receiver>>;
     fn forget(&self, _receiver: Receiver) -> Task<'_, ()> {
         Box::pin(std::future::ready(Err(Error::Unsupported)))
@@ -233,6 +236,13 @@ impl Runtime {
         self.spawn_network(async move { port.discover().await })
             .await
             .map_err(|_| Error::Unavailable)?
+    }
+    pub fn cast_last_peer_ip(&self) -> Option<String> {
+        self.services()
+            .ports()
+            .cast
+            .as_ref()
+            .and_then(|port| port.last_peer_ip())
     }
     pub fn cast_target(&self) -> Option<(Target, String)> {
         self.cast

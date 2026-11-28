@@ -353,6 +353,30 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 crate::screens::cast_pairing::offer_forget(ui, ticket, receiver, e);
             } else if !returning_local {
                 report(e);
+                if crate::host::LINUX
+                    && current()
+                    && let Some(peer_ip) = owner.cast_last_peer_ip()
+                {
+                    match e {
+                        Error::NoRequest { relay_port } => {
+                            crate::screens::cast_pairing::show_firewall_blocked(
+                                ui,
+                                peer_ip,
+                                Some(relay_port),
+                                None,
+                            );
+                        }
+                        Error::AirPlayTiming { port } => {
+                            crate::screens::cast_pairing::show_firewall_blocked(
+                                ui,
+                                peer_ip,
+                                None,
+                                Some(port),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             if retired && pending_stop_current(ui) {

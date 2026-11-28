@@ -298,9 +298,11 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                 && (!crate::wiring::runtime_owner::runtime().parental_has_pin()
                     || !crate::wiring::runtime_owner::runtime().parental_settings_allowed())
             {
-                crate::screens::parental_view::protected_settings(ui, move || store(key, value));
+                crate::screens::parental_view::protected_settings(ui, move || {
+                    store(ui, key, value)
+                });
             } else {
-                store(key, value);
+                store(ui, key, value);
             }
         }
         // Playlist rows act on the settings as the commands do: behind the
@@ -319,14 +321,14 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
     }
 }
 
-fn store(key: &'static str, value: Value) {
+fn store(ui: Ui, key: &'static str, value: Value) {
     let enabling_linux_airplay = crate::host::LINUX
         && key == iptv_settings::keys::AIRPLAY_CASTING.as_str()
         && value == Value::Bool(true);
     match save_setting(key, value) {
-        Ok(()) if enabling_linux_airplay => notify(tr(
-            "AirPlay enabled. If a firewall like UFW is active, allow TCP 49152 and UDP 49153 from your receiver.",
-        )),
+        Ok(()) if enabling_linux_airplay => {
+            crate::screens::cast_pairing::show_linux_airplay_setup(ui);
+        }
         Ok(()) => {}
         Err(error) => notify_setting_error(error),
     }

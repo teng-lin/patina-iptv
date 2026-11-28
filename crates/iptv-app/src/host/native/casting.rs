@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     num::NonZeroU16,
     path::Path,
     sync::{Arc, Mutex, OnceLock},
@@ -42,6 +42,7 @@ mod android_events;
 pub(super) struct Sender {
     client: tokio::sync::Mutex<Option<Client>>,
     routes: Mutex<Routes>,
+    last_peer: Mutex<Option<IpAddr>>,
     #[cfg(feature = "test-support")]
     loopback: Option<SocketAddr>,
     #[cfg(any(target_os = "linux", windows))]
@@ -117,6 +118,7 @@ impl Sender {
         Self {
             client: tokio::sync::Mutex::new(None),
             routes: Mutex::default(),
+            last_peer: Mutex::default(),
             loopback: Some(address),
             #[cfg(any(target_os = "linux", windows))]
             airplay: airplay::Configuration::new(Path::new("."), String::new()),
@@ -131,6 +133,7 @@ impl Sender {
         Self {
             client: tokio::sync::Mutex::new(None),
             routes: Mutex::default(),
+            last_peer: Mutex::default(),
             #[cfg(feature = "test-support")]
             loopback: None,
             #[cfg(any(target_os = "linux", windows))]
@@ -224,6 +227,13 @@ impl Port for Sender {
             .store(mode == AirPlayMode::Enabled, Ordering::Release);
         #[cfg(not(any(target_os = "linux", windows)))]
         let _ = mode;
+    }
+
+    fn last_peer_ip(&self) -> Option<String> {
+        self.last_peer
+            .lock()
+            .ok()
+            .and_then(|peer| peer.map(|ip| ip.to_string()))
     }
 
     fn forget(&self, receiver: Receiver) -> Task<'_, ()> {
@@ -385,6 +395,9 @@ impl Port for Sender {
                 return Err(Error::PairingIdentityChanged);
             }
             let (local, remote) = connection.control_addrs().ok_or(Error::Unavailable)?;
+            if let Ok(mut peer) = self.last_peer.lock() {
+                *peer = Some(remote.ip());
+            }
             let listen = match relay_listen_addr(local, relay_port) {
                 Ok(listen) => listen,
                 Err(error) => {
