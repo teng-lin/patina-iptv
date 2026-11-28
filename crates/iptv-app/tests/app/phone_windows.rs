@@ -292,11 +292,11 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                 left_gap >= -0.5 && right_gap >= -0.5 && (left_gap - right_gap).abs() <= 0.5,
                 "Ch± ({prev_ch:?}, {next_ch:?}) symmetrically flank play/pause ({pause:?}): {what}"
             );
-            // Live playback uses the slim two-row bar with a top hairline and
-            // no interactive timeline row.
+            // Live playback uses the slim two-row bar without a timeline or
+            // top hairline progress cue.
             assert!(
-                bounds(app, "live-progress-hairline").is_some(),
-                "live playback shows the top hairline progress cue: {what}"
+                bounds(app, "live-progress-hairline").is_none(),
+                "live playback omits the top hairline progress cue: {what}"
             );
             assert!(
                 bounds(app, "play-bar-time-line").is_none(),

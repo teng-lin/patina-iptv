@@ -1128,8 +1128,8 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         "the slim play bar leaves the synopsis to Program details"
     );
     assert!(
-        seen(&app, "id:live-progress-hairline"),
-        "live playback shows the top hairline progress indicator"
+        !seen(&app, "id:live-progress-hairline"),
+        "live playback omits the top hairline progress indicator"
     );
     assert!(
         !app.screen().matches("id:play-bar-time-line").unwrap(),

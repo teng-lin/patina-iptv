@@ -10,9 +10,8 @@
 //! navigation sit left of transport. Favorite, picture in picture, multiview
 //! and display sit to its right. More holds the available actions that do not
 //! fit, plus Record now on Android handhelds and multiview on Android phones.
-//! Live playback shows a thin hairline progress indicator at the top of the
-//! panel and omits the timeline row; catch-up and on-demand playback show the
-//! interactive timeline below the controls.
+//! Live playback omits the timeline row; catch-up and on-demand playback show
+//! the interactive timeline below the controls.
 //! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -160,8 +159,6 @@ pub fn height(ui: Ui) -> f32 {
     let row = target();
     let extra = if show_timeline(ui) {
         PANEL_GAP + progress::TIMELINE_HEIGHT
-    } else if ui.playback.playing.get().is_some() {
-        PANEL_GAP + progress::HAIRLINE_HEIGHT
     } else {
         0.0
     };
@@ -591,10 +588,6 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                 .bg(panel)
                 .on_mouse_enter(move |_: &MouseEvent| hover(ui, true))
                 .on_mouse_leave(move |_: &MouseEvent| hover(ui, false))
-                .child(when(
-                    move || !show_timeline(ui) && ui.playback.playing.get().is_some(),
-                    move || progress::live_hairline(ui),
-                ))
                 .child(info::header(ui))
                 .child(
                     view()
