@@ -41,9 +41,9 @@ nsh-base = { path = "../../../nsh-patina/crates/nsh-base" }
 
 # The TV build (build.sh uses it; every size and timing on the TV comes
 # from it). opt-level z: a third less code than 3 and a third less
-# compile time on a 2020 set, and the one whose compiled module caches
-# (docs/plans/2026-11-21-browser-tv-architecture.md, "Module size and
-# launch").
+# compile time on a 2020 set, and the one whose compiled module caches.
+# The measurements ("Module size and launch"):
+# https://github.com/teng-lin/patina-iptv/blob/5db8843cd3b4f82a4b7821e7ef2b52a74c73c3d4/docs/plans/2026-11-21-browser-tv-architecture.md
 [profile.tizen]
 inherits = "release"
 opt-level = "z"

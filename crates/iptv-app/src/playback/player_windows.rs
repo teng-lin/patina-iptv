@@ -205,7 +205,7 @@ fn player_window(ui: Ui, surface: usize, back_action: fn(Ui) -> bool) -> impl In
                 .map(crate::channel_name)
                 .unwrap_or_default();
             // Which window has the sound shows in its title, where the
-            // taskbar and window switcher show it too (`docs/desktop.md`).
+            // taskbar and window switcher show it too (`docs/interaction.md`).
             if audible(ui.playback, id) {
                 channel
             } else {

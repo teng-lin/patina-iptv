@@ -196,7 +196,7 @@ mod tests {
             let yn = |value| if value { "Yes" } else { "No" };
             let row = format!("| {name} | {slots} | {} |", yn(background));
             assert!(
-                include_str!("../../../docs/capabilities.md").contains(&row),
+                include_str!("../../../docs/platform-support.md").contains(&row),
                 "documented profile drifted: {row}"
             );
         }

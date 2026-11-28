@@ -19,7 +19,7 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 | Tablet/TV playback, lifecycle and remote-input smoke | UI/Android/runtime/player/input/network changes | Both forms | Both forms for candidate code |
 | Installers and APK/AAB | Desktop installers for packaging scripts, resources and bundled runtime changes; one x86_64 debug APK for selected emulator smoke | Desktop preview formats; ARM compilation and emulator smoke | Unsigned release ARM APK/AAB and desktop installers, built once and retained |
 | Coverage and floors | Rust source changes and coverage/validation infrastructure changes (deferred on drafts); manual run available | Full workspace | Full report for this candidate SHA |
-| Fuzz | Affected targets, 30 seconds each; common dependency changes select all | All targets, 300 seconds each | All targets, 30 seconds each and retained corpus |
+| Fuzz | Affected targets, 30 seconds each; common dependency changes select all | All targets, 300 seconds each | All targets, 30 seconds each from the restored corpus (only nightly saves it) |
 | Allocation and large EPG/catalog budgets | Storage/import/EPG and their parser, schedule and model dependencies; small functional regressions stay in Linux tests | Full release-mode fixture, including ignored million-program EPG case | Full release-mode fixture |
 
 Ordinary PR correctness tests still cover the whole Linux workspace. Only the
@@ -123,72 +123,49 @@ Unrecognised or missing local workflow references keep broad validation. Composi
 actions remain shared CI inputs. Workflow/action edits also run pinned actionlint over all workflow consumers.
 
 Markdown at any depth is documentation unless it is embedded or packaged.
-`docs/capabilities.md` keeps host checks; font provenance, vendored Markdown and
+`docs/platform-support.md` keeps host checks; font provenance, vendored Markdown and
 `tools/mpv-runtime*/**` keep their build/package consumers. Repository issue/PR
 templates, CODEOWNERS and Dependabot configuration run helper checks. Unknown
 non-documentation inputs and `.gitattributes` retain native validation. A scanner
 regression checks Rust `include_str!`/`include_bytes!` Markdown consumers so adding
 an embedded document requires an explicit planner exception.
 
-## Required checks and migration
+## Windows and Linux-only checks
+
+The planner and parity tests enforce more than crate names: features, target
+selection, exact ignored filters, output flags, wrapper delegation and failure
+propagation. Windows retains its Win32 chrome/pointer and executable-icon checks.
+Linux's EGL/decode unit tests and GTK native-player harness are Linux-only;
+the Xvfb/GTK coverage and performance lanes do not establish Windows or macOS
+real-decoder coverage. `IPTV_REQUIRE_PLAYER_TESTS` does not enable those tests
+on Windows. A Windows native decoder/GUI test is outside this shared plan.
+
+The Windows setup action uses the same Rust build cache as the other hosts;
+only master saves it. Formatting, shell/Python/Kotlin tooling and workspace-wide
+`cargo deny` remain additional Linux/macOS wrapper checks. The untargeted deny
+audit includes Windows dependencies; `audit-runners.sh` additionally audits the
+graph the Windows executable ships, for its own target.
+
+## Required checks
 
 The `validation` job runs even when selection or another lane fails. For master
 and manual candidates it also requires the selected unsigned shipping build;
-a failed package cannot leave the aggregate or protected aliases green. It accepts
+a failed package cannot leave the aggregate green. It accepts
 only successful selected jobs and deliberate skips, and rejects canceled,
 missing and unexpectedly skipped selected jobs. It also requires helper tests
-and successful change detection. This closes the previous gap where the actual
-source-only `android-check` or Windows lane could fail without blocking merge.
+and successful change detection.
 
-The current protected contexts are `test (ubuntu-24.04)`, `test (macos-15)` and
-`android`. Temporary compatibility jobs retain those exact names and each
-mirrors the whole aggregate. Reusable host jobs have distinct prefixed check
-names; the old independent event subscriptions are removed to avoid ambiguous
-or duplicate protected checks.
+`validation` is the required check on `master`. The `protected-contexts` jobs,
+named `test (ubuntu-24.04)`, `test (macos-15)` and `android`, each mirror the
+aggregate and are skipped while the repository variable
+`PATINA_REQUIRE_AGGREGATE_ONLY` is `true`. Changing branch protection or that
+variable requires explicit repository-owner approval.
 
-Issue [#338](https://github.com/teng-lin/patina-iptv/issues/338) tracks a separate
-admin cutover and follow-up measurements. The routing PR implements tasks 2–5;
-it does not authorize or perform settings changes. Live branch protection and
-repository-variable writes require explicit repository-owner approval.
-
-The read-only preflight on November 25, 2026 found the three legacy requirements,
-all bound to GitHub Actions (`app_id: 15368`), `strict: false`, and no
-`PATINA_REQUIRE_AGGREGATE_ONLY` variable. Re-read those settings at execution time
-and preserve the current configuration, including unrelated protection rules.
-With owner approval, execute in this safe order:
-
-1. Retain all aliases and leave the variable absent/false. Verify `validation`
-   reports the exact PR head and merge-queue revision, including a documentation
-   selection and a selected-lane failure that makes the aggregate fail.
-2. Add `validation` as a required check with the existing GitHub Actions app
-   binding **while all three legacy checks remain required**. Read branch
-   protection back and verify the new requirement is effective.
-3. Remove only the three legacy required contexts, preserving `validation`, its
-   app binding, strictness, and all unrelated protection settings. Read back and
-   verify `validation` remains required before proceeding.
-4. Only then set `PATINA_REQUIRE_AGGREGATE_ONLY=true`. Confirm a new exact-head PR
-   run reports `validation`, skips the aliases, and satisfies required checks.
-   Master pushes and scheduled runs already use the aggregate directly.
-
-Never set the variable before removing legacy requirements: skipped aliases
-cannot satisfy those required checks. The operations are ordered, not atomic;
-stop and inspect after any failed write/readback, keeping a required aggregate
-or the still-running legacy aliases throughout.
-
-For rollback, first remove or set the variable false, start a fresh PR validation
-run, and verify all three aggregate-mirroring aliases report. Restore the saved
-legacy requirements and verify them before optionally removing the aggregate
-requirement. Restoring legacy requirements while aliases are disabled blocks PRs.
-
-After the owner cutover, collect at least 20 successful docs-only PR runs and
-at least 20 successful PR runs for the gate-to-end comparison. Record run IDs,
-head SHAs, attempts, UTC cutover time, routing plans, queue-inclusive wall time
-(`created_at` to completion), and elapsed time from the `validation` job's
-start to run completion. Keep reruns and non-doc plans identifiable. Report the
-nearest-rank p90 for each cohort against the issue's 26-minute docs-only and
-9.7-minute gate-to-end baselines. The routing change alone is not evidence that
-queue delays improved; retain `Refs #338` until the settings step and measured
-cohorts are complete.
+To roll back to the legacy requirements, first set the variable to false or
+remove it, start a fresh PR validation run and verify all three alias jobs
+report. Then restore the legacy requirements and verify them before optionally
+removing the `validation` requirement. Requiring them while the aliases are
+skipped blocks PRs.
 
 ## Release artifacts
 
@@ -291,6 +268,39 @@ timing reports, coverage and performance reports. Compare critical-path duration
 and total runner-minutes after master caches warm; cold runs and queue time are
 not steady-state measurements.
 
+## Measuring CI changes
+
+`tools/ci/validation-timeline.py report` analyzes downloaded run, job and log
+snapshots of successful PR runs offline, and `compare` compares two reports (see
+`--help`). A speedup claim needs actual before and after cohorts of at least 20
+comparable runs each, captured with their query; replays and models are not
+after measurements. Keep raw snapshots outside the repository.
+
+Any change that overlaps the Android smoke build with its emulator jobs, or
+reuses an APK, must bind the APK bytes to the checked-out commit, producer run,
+attempt and digest, handle failed-job reruns, fail closed on stale inputs,
+cancel promptly when the producer fails, keep cold-build deadlines and exercise
+both tablet and TV lanes.
+
+### Candidate handoff pilot
+
+[`candidate-handoff-pilot.yml`](../.github/workflows/candidate-handoff-pilot.yml)
+is an experiment, not a production lane
+([#336](https://github.com/teng-lin/patina-iptv/issues/336)). It builds a Windows
+release executable on one runner and packages it on another, beside a cold
+control. Its jobs run only on the `ci/candidate-artifact-handoff-336` branch, by
+push or manual dispatch, with read-only permissions and no secrets, publication
+or callers; artifacts are prefixed `pilot336-`.
+
+The consumer takes expected digests from trusted `needs` outputs, verifies the
+producer job, attempt and artifact through the API, and independently
+fingerprints source, locks, recipe, toolchain, native inputs and runtime. Only
+an explicit `cold` request or a proven absent or expired artifact falls back to
+a local build; every mismatch, unsafe archive or API error fails. The one
+normalization is the line order of Rustup's `lib/rustlib/components` receipt.
+`tools/ci/candidate-handoff.py` implements this contract. Adopting it needs a
+separate change and measurements of the integrated critical path.
+
 
 ## Runner setup and re-runs
 
@@ -334,10 +344,6 @@ versions, ABI, and profile. The generic pinned NSH runtime has a separate cache.
 The development APK disables LTO and records Cargo timings. A manual Android
 smoke run can select ThinLTO for comparison.
 
-The `android-check` loss attributed to post-run cleanup on #143 (run 44780222843,
-attempt 1) was in fact this download: its setup step spent 40 minutes fetching
-193 MB from the mirror, and its post steps took about one second.
-
 When a hosted runner or mirror still stalls, re-run only the failed jobs:
 
 ```bash
@@ -349,8 +355,8 @@ jobs** button in the Actions UI, never **Re-run all jobs**.
 
 ## Executable inputs and production-only behavior
 
-`docs/capabilities.md` is consumed by a core test and selects host validation;
-`docs/contributing.md` is consumed by helper tests and selects those tests. Changes
+`docs/platform-support.md` is consumed by a core test and selects host validation;
+`docs/development.md` is consumed by helper tests and selects those tests. Changes
 to lint and line-length wrappers execute the wrappers in the host lane. Other
 prose-only changes retain inexpensive planner validation. Every workspace crate
 has a Linux line coverage floor. SQLCipher coverage includes its initializer
@@ -360,18 +366,12 @@ Linux also builds workspace rustdoc with warnings denied, keeping API links vali
 The iOS lane prepares the checksum-pinned MPVKit frameworks and checks both device
 and simulator Rust targets without signing credentials. It builds the simulator
 library and checks it carries the Keychain entitlements the simulator needs
-([iOS simulator validation](ios-validation.md#entitlements)). It establishes
+([iOS simulator validation](testing.md#entitlements)). It establishes
 compilation, not simulator execution, signing or iPad playback. Linux production credential
 validation compiles without test-support, checks that the exact ignored broker test
 exists, then runs it inside a fresh D-Bus session and disposable Secret Service home.
 It never inherits the login bus, display or keyring. Package window startup remains
 separate from persistence/reopen evidence.
-
-Standalone host and Android jobs now have distinct display names; compatibility
-contexts continue to mirror the aggregate. Migration to the unique `validation`
-check remains a separate hosted setting change. Test a prose-only PR and a failing
-selected lane before removing old required contexts, and keep the previous
-protection configuration available for rollback.
 
 Full nightly validation selects native, portable and behavior lanes plus desktop
 preview packaging. Master/release candidates replace preview packaging and ARM
@@ -381,21 +381,19 @@ remain visible in Actions; maintainers should enable GitHub workflow-failure
 notifications and inspect the full nightly result before release preparation.
 The [nightly observer](#nightly-failure-signal-and-bounded-infrastructure-retry)
 maintains a tracking issue for scheduled failures. Account notification settings
-remain the maintainer’s choice.
+remain the maintainer's choice.
 
 ## Dependency update candidates
 
-Read-only inspection on November 17, 2026 confirmed Cargo Dependabot run
-43337334688 failed while fetching the sibling `../nsh` manifests; this was a
-file-fetch error, not a guessed resolver failure. The native Cargo Dependabot
-version-update entry is replaced by the weekly/manual `dependency-candidate.yml`.
-It checks out the pinned sibling, updates Cargo.lock, checks dependency policy and
+Cargo has no Dependabot version-update entry, because Dependabot cannot fetch the
+sibling NSH manifests. The weekly and manual
+[`dependency-candidate.yml`](../.github/workflows/dependency-candidate.yml)
+checks out the pinned sibling, updates Cargo.lock, checks dependency policy and
 runs the host PR plan, then retains the candidate lockfile and patch even on failure.
 It has read-only permissions and never pushes, posts or opens a PR. Maintainers
 review the diff, reconcile generated shipping-runner locks and submit it through
 normal PR/native/package gates before adoption. Actions and Gradle updates remain
-on Dependabot. A workflow definition is not evidence its first scheduled run passed.
-
+on Dependabot. A workflow definition is not evidence its scheduled run passed.
 
 ## Nightly failure signal and bounded infrastructure retry
 
@@ -432,44 +430,3 @@ ambiguous or rejected, the claim remains visible and no automatic second request
 is made; investigate and retry manually if appropriate. A second Validation
 attempt never qualifies for another automatic retry. Alert API failure leaves
 the observer red and requires normal Actions monitoring.
-
-### November 18–25, 2026 triage
-
-Run creation was 8–10 hours after the existing 03:17 UTC cron. This is schedule
-delivery delay, separate from job runner acquisition or product failures. No
-cron change is justified as a measured fix by this historical sample alone.
-
-| Date / scheduled run | Distinct evidence | Disposition |
-|---|---|---|
-| Nov 18 / [44298766906](https://github.com/teng-lin/patina-iptv/actions/runs/44298766906) | `stress / memory` job 134782738674 cancelled with a 30-minute execution-time annotation while apt setup was downloading; iOS compile job 134782738404 never acquired a hosted runner | Setup timeout belongs to #159; runner capacity is separate. Mixed failure does not qualify for automatic retry |
-| Nov 19 / [44518418478](https://github.com/teng-lin/patina-iptv/actions/runs/44518418478) | iOS and macOS packaging never acquired runners; credential broker hit its 45-minute timeout; smoke build and Linux host setup failed apt with exit 100; AppImage Docker smoke failed apt installation with exit 100 | Setup/mirror history belongs to #159. Missing performance artifact followed failed setup, not a separate product defect |
-| Nov 20 / [44730991426](https://github.com/teng-lin/patina-iptv/actions/runs/44730991426) | macOS `personalization_groups` timed out waiting for `Content blocked` at line 278; Windows `tv_shared_controls` timed out waiting for `Manage favourites…` at line 534 | macOS already tracked by #152 and related #333. Windows failure tracked by #340 with current-head reproduction unverified; no runner-loss retry |
-| Nov 21 / [44898563431](https://github.com/teng-lin/patina-iptv/actions/runs/44898563431) | macOS isolated guide-input budget test reported 56.83475 ms against 50 ms at `store_latency.rs:156` | Already tracked by #204 and related #333; later #265 replaced the shared-runner wall-clock gate |
-| Nov 22 / [45018228691](https://github.com/teng-lin/patina-iptv/actions/runs/45018228691) | Linux host and both package jobs rejected `url 2.5.8` with RUSTSEC-2026-0592; Windows `desktop_workflows.rs:433` found identical recording rows before/after wheel input | Audit failure is distinct from a package smoke execution failure; master now pins `url 2.5.9` in both lockfiles. Windows wheel evidence relates to #333; do not duplicate the existing test-family tracking |
-| Nov 23 / [45180533817](https://github.com/teng-lin/patina-iptv/actions/runs/45180533817) | Linux host and both package jobs rejected `cookie 0.18.2` with RUSTSEC-2026-0594; Android and smoke setup exited 124 after bounded apt retries; macOS guide budget reported 91.83625 ms | Master now pins `cookie 0.18.3` in both lockfiles. Setup belongs to #159, guide budget to #204/#333; these are separate causes |
-| Nov 24 / [45408172559](https://github.com/teng-lin/patina-iptv/actions/runs/45408172559) | macOS package job 138494731938 cancelled after 15m01s with no steps and explicit runner-acquisition failure annotation; aggregate gate failed | Hosted runner capacity/acquisition failure, not the package job's 120-minute execution timeout |
-| Nov 25 / [45620516253](https://github.com/teng-lin/patina-iptv/actions/runs/45620516253) | macOS package job 139227313677 cancelled after 16m27s with the same acquisition annotation and no steps; aggregate gate failed | Same infrastructure failure as Nov 24, with no product-lane failure |
-
-The cancelled macOS jobs also have GitHub's notice about macOS arm64 runner
-capacity. An unavailable log is not the basis for classification: check-run
-annotations provide the positive evidence. The older setup and audit failures
-must not be turned green by infrastructure retry policy.
-
-An authorized maintainer-token API check on November 25 used fresh run and
-check data: the classifier accepted run 45620516253 attempt 1, and GitHub
-accepted one `rerun-failed-jobs` request. [Attempt 2](https://github.com/teng-lin/patina-iptv/actions/runs/45620516253/attempts/2)
-queued macOS package job 139258097505 while carrying the other successful
-selected lanes forward. At that observation, the dependent aggregate gate was
-still pending the package job; its success was not yet established. This checks
-the backend retry path with a maintainer token. The deployed observer's
-`GITHUB_TOKEN` permissions and delivery of the API retry's `workflow_run`
-completion still require live verification; the next scheduled completion also
-reconciles recent attempts. Do not request another retry for this run: attempt 2
-is the automatic retry cap.
-
-Measured creation delays in minutes were 516, 513, 514, 482, 500, 588, 636 and
-591 respectively (Nov 18–25): p50 515 minutes, range 482–636. Refs #337 retains
-follow-up measurement of delivery delay and the first deployed observer/retry.
-Changing the schedule or moving its trigger remains a separate evidence-based
-decision. No live branch-protection, repository-variable or PR #330 hold change
-is part of the observer.

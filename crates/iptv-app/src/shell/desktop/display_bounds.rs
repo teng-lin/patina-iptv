@@ -11,7 +11,7 @@ pub const GRAB_WIDTH: f32 = 96.0;
 
 /// Where a window must go so the viewer can reach it again, after a
 /// display it was on went away or the displays were arranged anew
-/// (`docs/desktop.md`, "Displays"): `None` when enough of its top edge
+/// (`docs/interaction.md`, "Displays"): `None` when enough of its top edge
 /// is still on one of `areas` (the displays' usable areas), or when the
 /// host reports no display to measure against. Otherwise the window
 /// moves onto the area nearest to it, the first (primary) one on a tie,

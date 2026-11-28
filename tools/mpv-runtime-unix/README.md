@@ -2,19 +2,19 @@
 
 This directory builds the libmpv that Patina's AppImage (Linux x86_64) and
 macOS disk image (Apple silicon) bundle, from the same pinned sources as the
-Windows runtime in [`../mpv-runtime`](../mpv-runtime/README.md). It replaces
-Ubuntu's and Homebrew's libmpv/FFmpeg, whose versions, licenses and minimum
-OS changed with whatever the build machine had installed.
+Windows runtime in [`../mpv-runtime`](../mpv-runtime/README.md), so packages do
+not depend on the versions, licenses or minimum OS of Ubuntu's or Homebrew's
+libmpv/FFmpeg.
 
-Nothing here is an input of the Windows runtime: the Windows recipe digest,
-source bundle and DLL are unchanged. This directory reuses the Windows
-pipeline's `prepare.py` (verified downloads, safe extraction, license checks,
-offline restore) and `smoke.py` (synthetic MPEG-TS/HLS playback).
+Nothing here is an input of the Windows runtime. This directory reuses the
+Windows pipeline's `prepare.py` (verified downloads, safe extraction, license checks,
+offline restore), `smoke.py` (synthetic MPEG-TS/HLS playback), the
+[relay guard patches](../mpv-runtime/patches/README.md) and `relay_guard.py`.
 
 | File | Purpose |
 | --- | --- |
 | `sources.json` | Which components of `../mpv-runtime/sources.lock.json` each platform uses, plus the platform's own SHA-256-pinned sources. Shared entries are copied verbatim, so a version changes in one place. |
-| `runtime.py` | `lock` (resolve the platform lock), `verify` (feature and license checks of the configure headers), `package` (validate the build evidence, write the archives and manifest), `fetch` (download, verify and unpack a pinned runtime for app packaging). |
+| `runtime.py` | `lock` (resolve the platform lock), `verify` (feature and license checks of the configure headers), `package` (validate the build evidence, write the archives and manifest), `fetch` (download, verify and unpack a pinned runtime for app packaging), `notices` and `check-bundle` (copy the runtime's notices into a package and check its bundled libraries). |
 | `linux/Dockerfile`, `linux/build.sh` | The Linux build: the Windows builder's pinned Ubuntu 24.04 image and package snapshot, plus the headers of the host libraries libmpv links dynamically. Compiles with networking disabled. |
 | `macos/build.sh`, `macos/xcode-version` | The macOS build on an Apple silicon runner with the pinned Xcode; no Docker, so the script isolates itself (see below). |
 | `smoke.py` | Plays generated MPEG-TS and local HLS through the exact library. |
@@ -39,10 +39,9 @@ that (`CONFIG_GPL 0`, `CONFIG_VERSION3 0`, `CONFIG_NONFREE 0`, `HAVE_GPL 0`).
 | HTTPS | OpenSSL 3 (host) | Secure Transport |
 | Subtitle fonts | fontconfig (host) | Core Text |
 | Host libraries | glibc, libstdc++, libpipewire, libpulse, libasound, libva, libva-drm, libssl, libcrypto, libfontconfig; `runtime.py` refuses any other `NEEDED` entry | `/usr/lib` and system frameworks only; `runtime.py` refuses any other load command |
-| Minimum OS | glibc 2.39 (Ubuntu 24.04), the same as the app's Linux packages; checked against `objdump -T` | macOS 14.0, the app's declared minimum; checked against `LC_BUILD_VERSION` |
+| Minimum OS | at most glibc 2.39 (Ubuntu 24.04), the app's Linux package baseline; checked against `objdump -T` | macOS 14.0, the app's declared minimum; checked against `LC_BUILD_VERSION` |
 
-The app's AppImage deploys the Linux host libraries from Ubuntu 24.04 as
-before; their notices and sources still come from
+The app's AppImage deploys the Linux host libraries from Ubuntu 24.04; their notices and sources still come from
 `tools/ci/linux-native-notices.py` and `tools/ci/native-sources.py`.
 
 ## Build locally (Linux)
@@ -114,20 +113,18 @@ package step then rejects any load command outside `/usr/lib` and
 `/System/Library/Frameworks`, any `LC_RPATH`, any export beyond `_mpv_*` and
 a minimum macOS above 14.0.
 
-The macOS pipeline has not run yet: it was written without access to a Mac
-and is verified only by the unit tests and its first CI run.
-
 ## Publish and update
 
 Dispatch **Build retained libmpv dependencies** (`mpv-runtime.yml`) with the
-platform. It builds, packages, smoke-tests the exact archive on that platform,
-and only then publishes the dependency release `mpv-runtime-<platform>-<digest>`
+platform. It builds, packages, smoke-tests the exact archive and the relay
+guard on that platform, and only then (from master, with `publish` enabled)
+publishes the dependency release `mpv-runtime-<platform>-<digest>`
 with the runtime, `mpv-runtime-<platform>-sources.tar.gz` (the exact
 corresponding sources, licenses and build scripts, restorable offline with
 `prepare.py prepare --source-bundle`), `runtime-<platform>.json` and
 `SHA256SUMS`. The digest covers the platform lock, this directory's scripts
-for that platform and the shared `prepare.py`/`smoke.py`. Existing releases are
-never overwritten.
+for that platform, and the shared `prepare.py`, `smoke.py`, relay guard check
+and patches. Existing releases are never overwritten.
 
 Review the release, then commit its `runtime-<platform>.json` here. App
 packaging (`tools/ci/package-linux.sh`, `tools/package-macos.sh`) fetches the
@@ -139,10 +136,11 @@ every distributed AppImage and disk image names its runtime's source archive
 in `notices/mpv-runtime/SOURCE.txt`. Fix a bad release by changing the inputs
 and publishing a new digest.
 
-The relay guard update uses immutable Actions candidates for pre-merge checks.
-`tools/ci/promote-native-candidates.py` verifies the successful platform workflow,
+Before a new pin's release exists, pre-merge checks fetch the immutable Actions
+candidate recorded in `../ci/native-candidates.json` (build it with `publish`
+disabled). `tools/ci/promote-native-candidates.py` verifies the successful platform workflow,
 recipe digest, artifact ownership, committed manifest and all release checksums.
 Its dry run publishes nothing. `.github/workflows/promote-native.yml` publishes
-those exact assets only on a trusted master push, after merge, and refuses to
+those exact assets only on a master push, after merge, and refuses to
 overwrite an existing dependency release. The same guarded Linux library ships
 in a private directory in DEB, RPM and pacman packages as well as the AppImage.

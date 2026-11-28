@@ -4,13 +4,34 @@ This is a map of the code for someone about to change it, and the rules that
 decide where a change goes. [AGENTS.md](../AGENTS.md) has the short form of
 the rules; the storage and transport security model is in
 [security.md](security.md). The declared native application service boundary
-and compatibility policy are in [runtime-api-v1.md](runtime-api-v1.md).
+and compatibility policy are in the
+[service contract](#internal-application-service-contract-v1).
 For task-to-owner links and targeted checks, use the
-[contributor map](contributing.md).
+[contributor map](development.md).
 
 The layers below are the rule for every change. The code does not follow all
 of it yet: [Where the code departs from the rules](#where-the-code-departs-from-the-rules)
 lists each difference and where the piece goes.
+
+## Contents
+
+- [Terms](#terms)
+- [Layers](#layers)
+- [Dependency rules](#dependency-rules)
+- [Where a piece of code belongs](#where-a-piece-of-code-belongs)
+- [Portability](#portability)
+- [Crates](#crates)
+- [Where the code departs from the rules](#where-the-code-departs-from-the-rules)
+- [How the boundaries are checked](#how-the-boundaries-are-checked)
+- [Sans-IO ports](#sans-io-ports)
+- [State, views and actions](#state-views-and-actions)
+- [Recording, parental access and on-demand](#recording-parental-access-and-on-demand)
+- [The video layer](#the-video-layer)
+- [Shared live inputs](#shared-live-inputs)
+- [Import, staging and publish](#import-staging-and-publish)
+- [Application runtime and commands](#application-runtime-and-commands)
+- [Internal application service contract v1](#internal-application-service-contract-v1)
+- [The NSH boundary](#the-nsh-boundary)
 
 ## Terms
 
@@ -57,7 +78,7 @@ header's type sizes and the translations.
 | Layer | The question it answers | Crates |
 | --- | --- | --- |
 | Domain | What is true about the content and the viewer's data, and what do the rules allow? | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-search`, `iptv-settings` |
-| Adapters | How does one technology do the I/O that a port describes? | `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init`, `iptv-player-mpv`, the browser adapters of `iptv-web` |
+| Adapters | How does one technology do the I/O that a port describes? | `iptv-cast`, `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init`, `iptv-player-mpv`, the browser adapters of `iptv-web` |
 | Application | Which operation runs, in what order, and who owns the result? | `iptv-runtime` |
 | Presentation state | While a person operates a feature: what did they ask for, where are they in it, and what is shown? | `iptv-nav`, `iptv-presentation` |
 | View | How is that laid out and drawn on this toolkit, which features are open, and who carries out the effects? | `iptv-app` (NSH), the bridge of `iptv-web` |
@@ -76,7 +97,7 @@ Application's operations.
                         │                                   ▼
                         │                 Adapters      iptv-net  iptv-store-sqlite
                         │                               iptv-sqlcipher-init  iptv-player-mpv
-                        │                               iptv-web (browser adapters)
+                        │                               iptv-cast  iptv-web (browser adapters)
                         ▼                                   ▼
   Domain              iptv-core  iptv-providers  iptv-epg  iptv-guide
                       iptv-import  iptv-library  iptv-search  iptv-settings
@@ -108,8 +129,10 @@ What each layer holds:
   each around its state holder, with the functions that compute its display
   data, and the localization those functions use: the message catalog,
   plural rules, calendar names and the clock's labels. Both front ends
-  share these decisions as described in the
-  [shared interaction plan](plans/2026-11-22-shared-interaction-layer.md).
+  share these decisions: `iptv-nav` says what the viewer asked for, and
+  `iptv-presentation` what that does to a feature's state. Each front end
+  keeps its own routing; the bridge lists its deliberate
+  [differences](../hosts/tizen/README.md#differences-from-the-android-tv-app).
 - **View.** Views, geometry, type and color on one toolkit. A front end
   turns platform input into keys, keeps the navigation (each front end has
   its own set of features), routes each action to the holder on top, and
@@ -145,7 +168,7 @@ The same shape elsewhere:
 | Application | Domain, Adapters | All I/O through `Ports`. Its default `native` feature holds the native ports (`iptv-net`, threads and Tokio) and the native-only services (recording, the playback relay); without it the crate builds for wasm32. Host JNI and credential brokers stay in the shell. | Presentation state, View, a toolkit |
 | Presentation state | Domain | Plain Rust. Time and the language arrive as arguments. | I/O, a clock, Adapters, Application, a toolkit, points |
 | Hosts | View and what it composes | A platform's own language and packaging. `iptv-tui` seeds a store for its synthetic playlist. | |
-| View | every layer | `iptv-app`: NSH, the runtime and the player wire contract; platform APIs and adapters in `src/host` (`host/native`, `host/web`), with five files outside it still holding a platform `cfg` (listed in `tests/app/architecture.rs`). The bridge: a JavaScript host; no NSH, no Tokio, no native adapters. | |
+| View | every layer | `iptv-app`: NSH, the runtime and the player wire contract; platform APIs and adapters in `src/host` (`host/native`, `host/web`), with only `main.rs` outside it still holding a platform `cfg` (listed in `tests/app/architecture.rs`). The bridge: a JavaScript host; no NSH, no Tokio, no native adapters. | |
 
 Rules that follow:
 
@@ -246,13 +269,21 @@ Portability is a build constraint, not a layer. Domain and presentation
 state crates must not depend on NSH or platform APIs, must not block, and
 must build for `wasm32-unknown-unknown`.
 
-`tools/check.sh` builds every portable crate for `wasm32-unknown-unknown`
-(the `PORTABLE` list in `tools/ci/check-plan.py`). That build is what keeps
-platform code out of them. For the browser build of the application stack
-([browser TV plan](plans/2026-11-21-browser-tv-architecture.md)) it also
+On Linux, `tools/check.sh` builds every portable crate for
+`wasm32-unknown-unknown` (the `PORTABLE` list in `tools/ci/check-plan.py`).
+That build is what keeps platform code out of them. For the browser build of
+the application stack ([Tizen NSH host](../hosts/tizen-nsh/README.md)) it also
 runs the runtime's unit tests without its `native` feature and lints for
-wasm32 the runtime without it, the shell with its web host, and iptv-web's
-adapters.
+wasm32 the runtime without it, the shell with its web host, iptv-web's
+adapters and the Tizen runner.
+
+A browser TV runs the same shell and runtime as every other platform: the
+application stack is built for the browser, not rewritten for it. A port is
+added only where two implementations exist. Adapters execute and do not
+decide: refresh timing, list building, admission and retry policy stay in the
+portable crates or the runtime. In either Tizen package, JavaScript draws and
+performs platform I/O; the bridge's page also handles setup, the keyboard and
+the app lifecycle.
 
 ## Crates
 
@@ -270,7 +301,7 @@ The workspace has nineteen crates under `crates/` and the vendored
 | `iptv-import` | Domain | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-settings`, `iptv-library` |
 | `iptv-nav` | Presentation state | none |
 | `iptv-presentation` | Presentation state | `iptv-core`, `iptv-epg`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`; `iptv-guide` for tests |
-| `iptv-cast` | Adapters | Native Cast discovery and control protocol |
+| `iptv-cast` | Adapters | none |
 | `iptv-net` | Adapters | `iptv-providers`, `iptv-import` |
 | `iptv-store-sqlite` | Adapters | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library`, `iptv-sqlcipher-init` (native only) |
 | `iptv-sqlcipher-init` | Adapters | none |
@@ -313,8 +344,10 @@ What each crate owns:
   on-demand, parental entry, settings. Also their display data and the
   localization: interface languages, the message catalog, plural rules,
   calendar names and the clock's labels.
-- `iptv-net`: the native network client (reqwest with rustls) and the
-  loopback playback relay.
+- `iptv-cast`: native discovery and control of Google Cast and AirPlay
+  receivers.
+- `iptv-net`: the native network client (reqwest with rustls), the loopback
+  playback relay and recording capture.
 - `iptv-store-sqlite`: the encrypted catalog, guide and user data, staging
   and publishing.
 - `iptv-player-mpv`: the `tv.player` contract and its libmpv implementation.
@@ -330,8 +363,8 @@ executor, and the browser store on IndexedDB chunks in `host/web/store.rs`,
 the one shell file that names the store adapter). `hosts/tizen-nsh` builds
 the shell for Samsung TVs on the external NSH platform nsh-platform-tizen
 (its own workspace and lockfile, built by its `build.sh`). Screens ask the host's facade (`crate::host`) for platform facts
-instead of using `cfg`; `iptv-app/tests/app/architecture.rs` keeps the short
-list of files that still have one. `iptv-tui` runs the same shell in a
+instead of using `cfg`; `iptv-app/tests/app/architecture.rs` lists the files
+that still have one. `iptv-tui` runs the same shell in a
 terminal on nsh-platform-tui; it is built in CI and not packaged.
 
 `iptv-web`'s bridge is the app for TV web runtimes, where NSH's web
@@ -350,13 +383,13 @@ library. It completes SQLite core initialization, invokes SQLCipher's idempotent
 extra hook, then probes a fresh connection for the export auto-extension before
 allowing store connections. Failed initialization stays an error; only successful
 process readiness is cached, with no key, storage path or application owner.
-The store crate remains `forbid(unsafe_code)`. Readers, staging databases, private
-files and legacy snapshot conversion use the same initialization boundary.
+The store crate denies unsafe code outside its browser VFS (`browser.rs`). Readers,
+staging databases, private files and legacy snapshot conversion use the same
+initialization boundary.
 
 ## Where the code departs from the rules
 
-The [layer boundaries plan](plans/2026-11-22-layer-boundaries.md) records
-the migration to `iptv-presentation`. These departures remain.
+These departures remain.
 
 | What | Where it is today | Rule | Where it goes |
 | --- | --- | --- | --- |
@@ -448,8 +481,8 @@ send actions.
    and `Keymap::resolve` maps it to an `Action` for the current `Context`
    (guide, full screen, a menu, an editor).
 2. **State.** `input::apply` applies the action to the app state. That state is
-   the `Ui` struct in `iptv-app/src/lib.rs`: a set of NSH signals, most of them
-   holding a state holder (`Focus`, `ChannelList`, `Panels`, `Menu`, and so
+   the `Ui` struct in `iptv-app/src/ui.rs`: NSH signals grouped by area, many of
+   them holding a state holder (`Focus`, `ChannelList`, `Panels`, `Menu`, and so
    on). The transition itself is a method of the holder, so it is tested
    without a UI.
 3. **Effects.** A holder answers with an outcome or an effect as a value
@@ -469,10 +502,8 @@ saved the same way, by its content key.
 
 The scenario tests in `crates/iptv-app/tests/app/` run this whole loop
 headless, with the synthetic fixtures, each in its own process.
-The [runtime recovery validation matrix](runtime-recovery-validation.md) maps
-service failure/restart scenarios and distinguishes headless, decoder and device evidence.
 
-## The video layer
+## Recording, parental access and on-demand
 
 Recording jobs live in `iptv_core::recording`, with the repeating rules of
 earlier versions, kept only so they can be read, listed and retired. The remote and
@@ -486,8 +517,9 @@ never downloaded, so the restored app fetches the guide at its first start.
 Recorders write MPEG-TS independently of rendered players, using the playback
 relay for every upstream request and adaptive child. The runtime reserves
 connections before recording or changing a viewing surface, retaining an
-active lease's account identity across playlist edits. Unknown M3U account
-associations share a conservative budget. Retries retain a surface's existing
+active lease's account identity across playlist edits
+([shared live inputs](#shared-live-inputs) covers sharing a connection and the
+budget for unknown account associations). Retries retain a surface's existing
 reservation; desktop PiP reserves no additional provider connection.
 
 Media is private but unencrypted in a `-recordings` sibling of the catalog
@@ -524,7 +556,10 @@ The on-demand catalog renders source/content identities, provider details,
 seasons/episodes and persisted progress. Temporary provider links are resolved
 again on retry; source-incarnation checks reject stale detail/progress work
 following source deletion and recreation. These native recording, parental
-and VOD APIs remain experimental outside runtime contract v1.
+and VOD APIs remain experimental outside
+[runtime contract v1](#capability-and-compatibility-policy).
+
+## The video layer
 
 There is one persistent player surface under the UI
 (`iptv-app/src/playback/video.rs`). It is a native component named `tv.player`:
@@ -567,8 +602,144 @@ and its HLS or DASH subresources, and scopes identity headers to the stream's
 origin. Android reaches the same relay through JNI (`android_transport.rs`).
 
 `player.rs` drives playback: it resolves a channel to a stream, feeds it to a
-surface, and runs the health machine, `playback::Health` (retry with backoff, stall
-detection, the error and waiting overlays).
+surface, and runs the health machine, `iptv_presentation::playback_health::Health`
+(retry with backoff, stall detection, the error and waiting overlays).
+
+## Shared live inputs
+
+Patina can watch and record a direct MPEG-TS stream or an unencrypted
+MPEG-TS HLS **media playlist** through one incoming owner. Provider requests
+come from one ingestor; HLS manifest reloads and segments are fetched sequentially,
+without a second playback/capture downloader.
+
+Adaptive/master HLS playlists retain native variant selection. Encrypted HLS,
+fMP4, DASH and external audio/subtitle renditions retain native playback through
+an owned HTTP passthrough relay. The relay preserves all variant choices and
+request policy; it does not make these transports shareable with capture.
+Recording uses its existing independent transport when a separate connection
+is permitted. A preparation probe closes and acknowledges upstream retirement
+before native fallback opens. HTTP VOD and catch-up playback use the same owned
+passthrough lifetime, so a later live probe cannot overlap their retired owner.
+
+Non-HTTP native transports retain their original player path. While handing off
+from such an unowned provider transport, Patina avoids speculative shared-input
+probing and publishes the independent path after ordinary admission. A saved
+local recording is not a provider transport and does not suppress a live probe.
+
+```mermaid
+flowchart LR
+  P[Provider] --> R[Policy and header relay]
+  R --> I[Owned TS or media-HLS ingestor]
+  I --> B[Bounded TS buffer]
+  B --> L[Private loopback TS endpoint]
+  L --> N[Existing native relay and persistent player]
+  B --> C[Capture reader and private recording spool]
+```
+
+### Ownership and admission
+
+Portable `iptv-core::live` values define source incarnation/channel identity and
+count unique incoming connection IDs. Runtime admission additionally checks the
+source configuration, final resolved URL and headers, and complete transport
+trust policy. Numeric source IDs, matching channel text, or matching addresses
+alone grant no sharing authority. Imported schedules retain an opaque,
+nonserializable source incarnation/configuration snapshot. Resolution binds the
+original channel before portal I/O. Preparation compares that origin after the
+surface gate and again before publication; edits reject stale results instead
+of rebinding credentials or account budgets. Selection searches all ready
+owners using the complete resolved URL, headers and trust policy.
+Viewing and capture use the same
+local-offset clock helper. Naturally rotating live URL templates, refreshed
+links, changed authentication/format context or changed trust policy may no
+longer match an existing input; those cases require the permitted independent
+fallback rather than weakening URL/header equality.
+
+The runtime registers an incoming ID with its original account lease before
+starting provider I/O. Pending preparation, playback and capture references use
+that same ID. Registered owners remain budgeted through cancellation and
+acknowledged upstream closure, even if a surface switches to another account,
+a recording finishes, a claim fails, or its UI disappears. A closing owner cannot
+acquire new consumers. Replacement may plan to retire its sole old viewer owner;
+actual replacement I/O waits for that retirement. Rejected selections do not
+cancel or revise an already admitted preparation.
+
+A recording retains its own reader and incoming lease. Stopping playback or
+zapping releases only viewing ownership. Returning to a still-recorded channel
+can reuse that incoming owner. Other channels and unsupported transports require
+their own permitted connections. Streams with unknown account association, M3U
+ones included, conservatively share a budget while they own a connection. An
+idle M3U playlist does not lower a known account's allowance merely by being
+stored in the library.
+
+Android/background-capable hosts run preparation and ingestion on the recording
+host executor. UI-engine teardown cannot destroy that executor or its capture.
+Suspended native players retain an incoming owner only while a capture needs it;
+retained suspended owners remain counted. A native resume whose old local
+capability retired uses the normal playback retry path.
+
+### Bounded media behavior
+
+The ingestor aligns output to complete 188-byte TS packets. Its shared rewind
+buffer is bounded to 4 MiB; one HLS segment uses the existing recorder's 32 MiB
+validation limit. A segment's packets reach consumers as they arrive, so the
+input is ready, and the player opens, with the live edge's first packets rather
+than after its whole segment. The segment's body is always read to its end into
+a queue bounded by that limit, so consumers that pause cannot leave the
+provider's response open until its read timeout. Consequently a segment that
+fails validation partway (lost sync, a torn final packet, over the limit, a
+dropped connection) may already have delivered some of its earlier whole packets
+to every consumer, shared captures included, before the input ends; packets
+still queued when it fails are dropped. A capture that owns its connection
+still writes whole segments only. When a stream's first segment fails that way
+after the player opened its first packets, the failure is recorded before the
+player sees the input end, keyed by source, source incarnation and channel (not
+the provider URL, whose token may change on every resolve). One segment over
+the limit, or two that failed their checks (a single torn final packet may be a
+connection cut short), send the stream to its provider's own transport for
+30 minutes from the failure: the player's retry plays it that way, as a stream
+refused before its first packets does at once. A first segment that validates
+clears the stream's earlier strikes, and network failures never count; a changed source
+incarnation or configuration forgets its streams, and at most 256 are kept,
+the oldest forgotten first.
+
+The most advanced consumer governs read-ahead: ingestion pauses once its unread
+window reaches 2 MiB. Advancing capture continues while playback
+is paused, and advancing playback continues when a capture stalls. If every
+consumer stalls, ingestion pauses. A consumer behind the retained window receives
+an explicit gap; bytes are never silently skipped. Live provider pacing is preserved. Synthetic
+finite inputs used for native validation are throttled at their upstream server.
+
+A late capture starts at the current cursor, with at most 512 KiB of exact TS
+pre-roll from the most recently received PAT start. That interval is used only
+when its PAT arrived within two seconds of attachment; it can contain a short
+pre-attachment program interval. It preserves packet ordering and section
+continuations. A multi-section PAT/PMT may finish only as live input continues;
+Patina does not synthesize tables or claim readiness from a PAT alone. If no
+bounded recent interval exists, the reader continues at the live edge and receives
+subsequent program tables naturally.
+
+Starting or stopping capture never changes the player's source, load token,
+view placement or native surface. Capture uses the existing secure spool writer
+and recording finalization path. Synchronous writes cannot race finalization
+when capture is canceled. A shared stream ending or skipping before its stop
+or deadline finalizes retained complete packets as Partial (or Failed with no
+media). It does not silently switch to an independent capture that would consume
+the viewer's only connection; playback can retry a fresh shared input.
+
+### Synthetic verification
+
+The transport tests cover authenticated generated TS/HLS request and active
+connection counters, capture ownership after playback drop, capture stop,
+bounded lag, paused-playback capture progress, reader lifetime, preparation
+cancellation, unsupported-probe retirement, and bounded current PAT intervals.
+
+Runtime tests cover immediate replacement peak connection count, distinct-account
+pending cancellation, source reincarnation, auth-context mismatch, capture stop,
+shared failure followed by fresh playback, suspended sharing, UI executor teardown,
+and native master-playlist fallback with independent capture admission. Native
+validation must additionally exercise the unchanged Apple, Android and desktop
+player adapters and their persistent surfaces. Only generated local media and
+isolated application data are used.
 
 ## Import, staging and publish
 
@@ -638,6 +809,20 @@ through a `HostHandle` the application root registered in the shell; it
 does not keep the owner alive. Teardown drains accepted writes, rejects
 later work and cancels imports and link resolves.
 
+Closing has two phases. An epoch-bound token first closes admission, so
+owner-bound queries see the closure at once. Writer jobs already accepted keep
+their epoch until the writer's FIFO barrier closes it, so a dropped reply does
+not discard accepted persistence. A restart installs a new token and epoch;
+old handles stay closed. Hosts drain explicitly (`Runtime::drain_services`).
+Dropping a runtime that was not drained attempts the same for its own lanes,
+within one ten-second deadline, and then waits up to two seconds for accepted
+small-file writes, so that SQLCipher's process cleanup does not run under an
+open connection. An explicit attempt spends that budget once, even if it timed
+out. A timed-out or noncooperative worker is not guaranteed closed, and the
+failure is logged without paths or credentials. The recording host keeps its
+own services and continues after the UI owner is gone; an explicit desktop
+Quit closes the window only after the recording host has shut down.
+
 The private store service owns two long-lived connections to the encrypted
 catalog. The writer serializes mutations, staging and reads that must
 follow queued writes. The read-only connection serves guide, search and
@@ -699,6 +884,261 @@ thread.
 Scenario processes stay isolated because NSH and the player have their own
 platform globals.
 
+## Internal application service contract v1
+
+Status: **stable internal service contract v1**. This section versions
+application semantics independently of the package version. It describes the
+boundary used by Patina's UI and an independent native test consumer. It
+establishes no binary ABI, external SDK or MCP wire-schema promise.
+
+### Public boundary and ownership
+
+The supported foundation boundary consists of `iptv_runtime::Runtime`'s query,
+inspection and repair methods listed below, portable value/error types in
+`iptv_library::inspection` and `iptv_library::guide_repair`, and the runtime's
+inspection request/control types. Native hosts construct an owner using `Ports`,
+start its services, supply task/event ports where orchestration requires them,
+and drain/retire that owner on shutdown. The credential port's
+[`DatabaseKey`](#application-runtime-and-commands) is an explicit construction
+input; it is not a query record.
+
+The application shell imports `InspectionControl`, `ProbeRequest`, `ProbeTarget`
+and `ProbeLease` through `iptv_runtime::model`. Their existing
+`iptv_runtime::inspection` paths remain supported by the v1 contract.
+
+The Android recorder installs a callback through `Ports::recording_failed`.
+It receives only the `RecordingFailure` category for a capture belonging to
+that runtime.
+
+Keep the owner on its application thread. Local futures and `Rc` state have no
+general `Send` guarantee. Work that leaves the thread carries captured services
+for its accepting owner/epoch
+([Application runtime and commands](#application-runtime-and-commands)). A new
+owner cannot redirect old work to its storage, keys, settings or callbacks. Tests invoke these services without an
+NSH root, view, player, endpoint or daemon.
+
+Store adapters, SQL rows/connections, staging databases, task executors and
+presentation indices are implementation details. Existing helpers outside the
+listed boundary remain experimental. A public type alias or inferred return
+type does not permit a store record to cross the declared boundary. Views
+use the boundary as [State, views and actions](#state-views-and-actions)
+describes.
+
+### Queries and EPG inspection
+
+| Runtime method | Result and meaning |
+|---|---|
+| `inspect_channel` | One source-scoped channel or a typed missing/access/storage outcome |
+| `query_channels` | Bounded semantic page matching explicit source scope and text/visibility filters |
+| `query_programs` | Bounded program page in a supplied UTC interval, optionally for one channel |
+| `epg_audit` | Coverage/diagnosis over an explicit interval; schedule coverage never proves broadcast identity |
+| `epg_candidates` | Configured-feed alternatives and matching evidence without mutating automatic choices |
+| `probe_feed` | Bounded inspection of a configured or supplied feed into disposable private staging |
+| `probe_candidates` | A bounded page from the exact staged channel index |
+| `probe_schedule` | Bounded program samples from the exact retained snapshot for a candidate |
+
+Requests select one source, selected sources, or all enabled sources explicitly.
+There is no implicit shown-source fallback. Reading another source changes no
+shown schedule, browsing focus, playback session or player surface. Disabled
+explicit sources fail distinctly; all-enabled scopes omit disabled sources.
+Hidden content is a visibility preference. Blocked content follows runtime
+access policy and cannot be reached by bypassing search with a known ID.
+Native PIN/unlock behavior is implemented by the parental service. Direct-ID
+playback queries enforce its current policy and source membership; grants are
+revoked on lock and owner retirement. The administrative parental API remains
+experimental outside this versioned query/repair contract.
+
+Channel identity is `(SourceId, ContentId)` within its current catalog context.
+Names, list positions and physical row IDs are not identities. Source deletion,
+recreation and restore invalidate retained authority; IDs alone do not promise
+continuity across those events. Source/feed incarnations distinguish reused
+numeric IDs. Program references preserve channel/feed provenance, source
+incarnation, evidence revision and observed interval; provider event IDs are
+optional and scoped evidence rather than global identity.
+
+Supplied-link candidates are scoped to the exact `ProbeEvidence` whose feed is
+`None`. Their candidate feed field is a probe-local placeholder, with no
+durability or allocation authority. Keep it paired with that evidence for
+samples and use `Target::Staged` for repair, never `Target::Configured`.
+Atomic apply allocates any new durable feed identity.
+
+All timestamps use Unix seconds. Query intervals are half-open `[from, to)` in
+UTC: a program ending exactly at `from`, or starting exactly at `to`, is out.
+Parse supplied XMLTV offsets and apply configured shifts once. Display timezone
+changes cannot move stored instants. A shifted edition is distinct from a
+feed-wide timing problem. Missing/contradictory evidence is reported.
+
+Catalog ordering is deterministic by semantic identity; program continuation
+also includes its semantic time key. Cursors bind owner, scope, filter, ordering
+and relevant semantic evidence. Unchanged physical reimport preserves valid
+continuation; unsafe input/data changes return `StaleCursor`. Staged continuation
+is bound to the exact evidence and filter. Immutable repair-preview offsets are
+positions within one fixed, digest-bound plan, not physical catalog row IDs.
+
+An empty successful page is different from an unreadable store, missing/disabled
+source, blocked channel, invalid request, stale evidence or owner retirement.
+Domain errors contain no raw SQL, response body, credential or secret-bearing
+location. Error classification is part of compatibility, not just formatting.
+
+### Bounds and cancellation
+
+The current foundation limits are:
+
+| Work | Limit |
+|---|---|
+| Query page / preview page | 200 returned items per page |
+| Query text | 256 UTF-8 bytes |
+| Explicit query source set | 64 sources |
+| Program/audit window | Positive interval, at most 31 days |
+| Query deadline | At most 3 seconds end to end, including admission/queue time |
+| Probe request | At most 60 seconds, 3 redirects, 32 MiB input, 256 MiB expanded |
+| Probe XML | Finite record/text/nesting and item limits; external entities disabled |
+| Staging | At most 512 MiB aggregate, including reserved work and indexes |
+| Evidence / uncommitted plan lifetime | At most 24 hours; plans cannot outlive prerequisite stages |
+| Repair matching metadata | At most 100k playlist rows and 100k listed guide rows; 64 MiB checked playlist matching text and 64 MiB listed guide-index text |
+| Repair batch | At most 500 explicit mappings and 64 feed changes/additions |
+| Live preview / transient operation state | At most 32 previews, 200k total preview items and 128 operation/admitted-command identities per owner |
+| Legacy feed-identity history bootstrap | At most 4096 eligible receipts, 32 MiB total and 8 MiB per receipt; refuse unsafe allocation before mutation |
+| Undo eligibility | Seven days after durable commit, subject to affected-row preconditions |
+
+Callers may request a shorter budget through `InspectionControl`. Queueing,
+network reads, XML parsing, SQL analysis and result publication observe finite
+budgets and owner/cancellation state. Heavy analysis runs separately from guide
+page reads. Canceling or dropping one operation must not cancel sibling work
+merely because a caller shares a cancellation control; ordinary completion
+must not cancel the caller's token. Expired/canceled work releases its worker,
+snapshot and temporary-artifact resources.
+
+A deadline is not a rollback acknowledgement for a committed mutation. Reads
+and previews can fail without effects. Apply/undo have a durable commit boundary:
+check cancellation/deadline before mutation, then preserve/report committed
+results or reconcile through the same commit/operation identity after a lost
+reply. `Error::CompletionUnknown { operation }` identifies such an uncertain effect.
+A caller must not create a new repair to retry an uncertain old effect.
+Recovery returns the durable receipt and leaves effective state pending when
+post-commit publication was never observed. It does not replay the mutation or
+promise background work after the caller/owner disappeared. In that case,
+request a normal guide refresh (Guide sources → Update the guide now in the UI,
+or the host's normal refresh path), then verify again. Durable undo remains
+available subject to its affected-row preconditions and retention window.
+
+### Repair lifecycle and completion
+
+| Runtime method | Result and meaning |
+|---|---|
+| `preview_guide_repair` | Immutable plan, digest, before/after mappings/configuration, protected choices, indirect effects and expiry |
+| `guide_repair_plan` | Bounded mapping/indirect-effect pages for that same plan and digest |
+| `release_guide_repair_plan` | Release an abandoned uncommitted preview without changing stored choices |
+| `apply_guide_repair` | Atomic durable configuration/mapping commit, effective-state outcome and verification operation |
+| `undo_guide_repair` | Conditional inverse commit or a typed conflict/expiry result |
+| `verify_guide_repair` | Observed bindings/coverage tied to examined, expected and current revisions |
+| `guide_repair_operation` | Current transient status or reconstruction from durable commit state after restart |
+| `recent_guide_repairs` | Bounded source-scoped discovery of persisted commits/inverses after restart; at most 50 |
+| `cancel_guide_repair_operation` | Stop remaining transient work; committed choices remain committed |
+
+Each plan concerns one source and one explicit independently reviewable batch.
+Cross-source work uses separate explicit batches; a purportedly atomic plan
+never silently applies a subset. Manual choices and intentional no-guide are
+protected by default. Overriding them requires explicit opt-in for those rows.
+Preview shows added feeds, settings/order changes and indirect automatic-match
+effects, including effects outside the mapped batch. Incomplete impact evidence
+is labeled; it is not represented as a complete preview. Indirect effects use
+actual retained before-bindings. `availability_unknown` distinguishes an
+unproven after-binding from a known absence; channel metadata alone cannot
+prove the fallback chain has retained programs.
+
+A staged target carries exact staged evidence, not a guessed future feed ID.
+Apply pins/validates its stage, allocates any new feed IDs in the writer
+transaction, then commits feed configuration, mappings and inverse together.
+New feeds enter at lowest precedence unless an explicit reviewed ordering
+change says otherwise. Allocation preserves numeric identities still reserved
+by manual choices and eligible inverses, including feeds removed in the same
+batch; exhaustion changes nothing. Any affected-row/evidence failure changes
+nothing.
+
+No-op refresh and unrelated edits alone cannot invalidate apply or undo.
+Apply checks relevant before-values/evidence inside the transaction; undo
+compares all affected committed after-values. Unrelated edits survive. Removing
+an added feed conflicts if another explicit choice now uses it. An undo conflict
+changes no subset. Undo restores configuration and schedules refresh as needed;
+it cannot promise resurrection of replaced cached program bytes.
+
+Completion distinguishes durable configuration/mapping, installed effective
+bindings, available programs, pending verification and verified coverage.
+A saved choice can require refresh; cache/refresh failure preserves the saved
+choice and reports the incomplete effective outcome. Old import/cache/verification
+work cannot overwrite a newer commit or certify a revision it never examined.
+Durable commit revisions remain exact after later edits. Undo direction is
+also fenced even when a no-op inverse retains the same numeric revisions.
+An old verification cannot replace a later undo or cancellation observation.
+Status recovery checks the durable journal before reusing transient state.
+Verification exposes
+`evidence_revision` and `current_evidence_revision` in addition to configuration
+and mapping revisions: a later program or binding refresh with identical
+configuration cannot certify an observation from an earlier snapshot.
+
+Automatic matching, including an observed absence, requires evidence of a
+complete projection from the current matching metadata and feed configuration.
+A cached one-channel rebind cannot establish that proof for the other channels.
+Older caches without complete projection evidence remain readable; verification
+stays pending until a normal complete guide import supplies current evidence.
+Explicit no-guide remains an intentional choice rather than missing evidence.
+
+Ordinary restart retains committed choices and eligible inverses, reconstructs
+operation observations and expires uncommitted previews. Restore invalidates
+old undo authority, cursors, previews and active work, then recomputes current
+coverage. Probe caches are disposable, encrypted with a random secret for their
+owning epoch, excluded from catalog backups, and removed/invalidated when the
+owner retires or stale crash artifacts are found.
+
+### Capability and compatibility policy
+
+`Runtime::foundation_capabilities()` returns portable capability names/states.
+This describes implemented service surfaces; credentials, current owner readiness
+and a particular provider's availability still require actual typed operations.
+The capability/status surface must distinguish implemented behavior,
+unsupported-on-this-host behavior, provider-unverified availability and features
+not implemented. Stage 1 stabilizes queries/EPG inspection/repair and their
+operation-status interfaces only after real consumers and contract tests pass.
+The app's existing M3U/Xtream catch-up behavior remains provider-dependent;
+Stalker archive support and Xtream probing are separate compatibility work.
+Playback/session APIs, DVR, VOD and parental administration are implemented
+native application services outside this contract until separately stabilized.
+Reminders and local timeshift remain unimplemented.
+MCP transport, wire IDs, external grants and reconnect receipts are Stage 2.
+
+Breaking signatures or behavioral semantics require a recorded contract
+revision, migration/release notes and coordinated consumer updates. Deprecate
+or forward old entry points where practical. Enum variants, public struct fields
+and required trait methods are not automatically nonbreaking Rust changes.
+Error meanings, identity lifetime, ordering, bounds, cursor invalidation,
+completion, cancellation and publication guarantees also require review.
+
+Compatibility gates include UI and independent headless consumers,
+architecture/signature checks, portable builds, full repository checks,
+contention/scale budgets and affected host/device tests. Keep these gates
+and the explicit platform/provider limits when extending v1. A missing, skipped
+or narrow test cannot establish a broader capability.
+
+### Operational queue diagnostics (experimental)
+
+`Runtime::store_queue_stats()` returns an in-memory snapshot for the writer,
+reader and analysis lanes without opening SQLite or starting a worker. Each
+`StoreQueueStats` contains only its fixed lane name, pending count, oldest
+pending age, longest observed queue wait and skipped-read count. Ages exclude
+running work; completed jobs retain no timestamp entries. These instantaneous
+observations are not an atomic snapshot across all three lanes and are outside
+the stable query/repair v1 contract.
+
+A dropped reply future cancels a queued reader or analysis job before it opens
+or queries SQLite. A running read is still governed by its operation's existing
+cancellation checks. Dropping a writer reply does not retract an accepted write:
+the writer preserves FIFO order and
+[shutdown barriers](#application-runtime-and-commands). Settings-file writes
+already coalesce superseded snapshots; this change preserves that separate
+mechanism. Diagnostics contain no paths, queries or provider data and send no
+telemetry.
+
 ## The NSH boundary
 
 NSH is the UI toolkit: a retained shadow tree with signals, laid out and
@@ -715,7 +1155,7 @@ depend on it; the application runtime does not import it.
   that links the app library. That workspace has its own lock,
   `tools/ci/package.Cargo.lock`. Windows is the exception: it ships the app
   crate's own executable, with no generated runner.
-- The [Patina NSH fork](nsh.md) is a path dependency at `../nsh-patina`. CI and
+- The [Patina NSH fork](development.md#nsh-pin) is a path dependency at `../nsh-patina`. CI and
   `tools/check.sh` use the exact commit in [`nsh.rev`](../nsh.rev). The vendored `nsh-tv`
   decoder reads NSH's raw keyboard events; `iptv-nav` owns Patina's actions.
 

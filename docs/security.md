@@ -96,10 +96,13 @@ Mozilla roots (`webpki-roots`); Android's declarative trust configuration is not
 a replacement for that native verifier.
 
 Both Media3 and mpv use one bounded loopback transport per player. Only the
-transport sends upstream identity headers: Authorization, Cookie,
-Proxy-Authorization, SN and X-User-Agent. They stay on the original stream's
-scheme, host and effective port, including redirects, HLS variant/segment/key/map
-requests and DASH resources. Players receive no global identity headers. mpv also rejects decoder-selected top-level references outside the current relay capability before opening them, and disables automatic sidecar discovery. The
+transport sends upstream headers. A request to another scheme, host or effective
+port than the stream's, whether a redirect, an HLS variant/segment/key/map
+request or a DASH resource, carries only the allowlist
+`iptv_providers::http::CROSS_ORIGIN_HEADERS` (User-Agent, content negotiation and
+ranges), plus `Referer` and `Origin` reduced to an origin; identity headers such
+as Authorization, Cookie, SN or a playlist's API key stay on the original origin.
+Players receive no global identity headers. mpv also rejects decoder-selected top-level references outside the current relay capability before opening them, and disables automatic sidecar discovery. The
 loopback URL contains a random capability and must never be logged, exported or
 persisted. A replacement stream cancels its old transport and active requests;
 the persistent video surface is unchanged.
@@ -139,6 +142,11 @@ not guaranteed. Legacy encryption closes its SQLite handle before replacing
 the database on Windows, under the application's process-lifetime instance lock.
 
 
+Setting aside a positively corrupt library moves the database, its sidecars and
+the stored playlist copies into `recovered/<timestamp>/` in the app's data
+directory. They stay encrypted with the device key, and at most three such copies
+are retained.
+
 ## Artwork and provider-selected destinations
 
 Natively, artwork passes through the public-address/DNS-pinning transport
@@ -169,6 +177,13 @@ also unencrypted content in the user's selected directory. Catalog encryption
 protects recording metadata, not video files. Completion receipts live inside the
 encrypted database and bind a recording to its source incarnation and retained
 file digest. The application does not persist stream URLs in those receipts.
+
+Diagnostic records are redacted (addresses, credentials, tokens and storage
+paths) before they enter a bounded in-memory buffer, the last-panic report or the
+desktop `patina.log`, which rotates at 1 MiB and keeps three files. Redaction is
+a safety net: call sites must still not log secrets. A diagnostic export leaves
+the device only through **Send a diagnostic log**, after confirmation, to a file,
+share target or clipboard.
 
 Parental controls govern actions inside Patina; they are not an OS security
 boundary against a user who can inspect process memory, replace app binaries or
@@ -255,8 +270,9 @@ guarantees hold only in part:
 - **Limits.** Byte budgets, the total time and the idle timeout are enforced
   by the runtime's network client and the web host; redirect counts and
   connection timeouts are the browser's own.
-- **Storage.** The browser store is unencrypted (no key store), and settings
-  and favorites last for the session until a private-files port exists.
+- **Storage.** The browser store is unencrypted (no key store). Favorites are
+  saved with it; settings and each playlist's last channel are small files
+  in IndexedDB beside it.
 - **Randomness and time.** Salts, recovery codes and SQLite's randomness
   come from the Worker's `crypto.getRandomValues`; local time from the
   page's time zone.
@@ -279,10 +295,14 @@ behavior pending a separately tested host initialization change. The native
 teardown ownership decision likewise remains evidence-led; it is not replaced
 by an unproven detached destructor.
 
-The `RUSTSEC-2026-0192` exception in `deny.toml` covers the transitive NSH font
-parser's maintenance status. Owner: NSH dependency maintainer (repository
+`deny.toml` accepts three maintenance advisories. `RUSTSEC-2026-0192` covers the
+transitive NSH font parser. Owner: NSH dependency maintainer (repository
 maintainers until assigned). Review by 2026-12-16, and whenever NSH changes;
 remove it after the tracked skrifa migration and full text/render validation.
+`RUSTSEC-2025-0141` covers bincode, which NSH's native runners use to load bundled
+syntax definitions; remove it when those dependencies drop bincode.
+`RUSTSEC-2026-0543` covers chrono; revisit by 2026-12-17 and migrate Patina's
+callers and NSH together.
 The pinned Rust, NSH, mpv/FFmpeg and platform dependency inventories are in
 `tools/ci/pins.py`, the Cargo lockfiles and platform build manifests. An advisory
 exception is scoped acceptance, not a claim that all native dependencies are
@@ -290,9 +310,15 @@ vulnerability-free.
 
 ## Casting on the local network
 
-The desktop Cast sender gives the selected receiver a short-lived opaque HTTP address. The relay admits only that receiver's IP and requires a random capability for each media request. It keeps provider URLs and headers on the sender. The media and capability cross the local network in cleartext. Another sender that joins the Cast application can also read the capability. Device discovery and the Cast TLS certificate do not authenticate the TV's identity. Use a trusted local network and select the intended display.
+The Cast sender (desktop, and Android phones and tablets) gives the selected receiver a short-lived opaque HTTP address. The relay admits only that receiver's IP and requires a random capability for each media request. It keeps provider URLs and headers on the sender. The media and capability cross the local network in cleartext. Another sender that joins the Cast application can also read the capability. Device discovery and the Cast TLS certificate do not authenticate the TV's identity. Use a trusted local network and select the intended display.
 
-The relay listens on the interface used to reach the TV, on TCP port 49152 by default. Set `PATINA_CAST_RELAY_PORT` to choose another port before starting Patina. See the [desktop firewall instructions](desktop.md#cast-live-tv) for a rule scoped to the receiver address.
+The relay listens on the interface used to reach the TV, on TCP port 49152 by default. Set `PATINA_CAST_RELAY_PORT` to choose another port before starting Patina. See the [desktop firewall instructions](interaction.md#cast-live-tv) for a rule scoped to the receiver address.
+
+Android phones and tablets, and Linux and Windows with **AirPlay casting**
+enabled, also have Patina's own AirPlay sender. It uses the same receiver-bound
+relay. Verified pairings are protected by the Android Keystore or kept in the
+Linux user's Secret Service or Windows Credential Manager, and a changed receiver identity is reported to the viewer before the
+stored pairing is forgotten.
 
 AirPlay on macOS and iPad uses Apple's native video route picker and AVPlayer.
 The public picker does not expose the selected receiver's IP to Patina. Its

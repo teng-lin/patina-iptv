@@ -18,26 +18,9 @@ backup/restore, channel organization, guide/search/multiview hints, playback and
 track controls, recordings, parental controls and movie/series flows. Counts and
 dates use the selected language's formatting rules.
 
-The original untranslated inventory contained 437 source literals. These domain
-batches reduced its pinned baseline to zero:
-
-| Domain | Original literals | Remaining |
-|---|---:|---:|
-| Settings names, choices and help | 305 | 0 |
-| Palette names | 18 | 0 |
-| Guide and channel browsing | 19 | 0 |
-| Playback, tracks and picture controls | 64 | 0 |
-| Search | 12 | 0 |
-| Multiview | 10 | 0 |
-| Favorites and channel menus | 5 | 0 |
-| Desktop menus | 3 | 0 |
-| Generated playlist name | 1 | 0 |
-| **Total** | **437** | **0** |
-
-436 entries are displayed messages. One entry, the persisted locale token
+The lint's untranslated list is empty. One literal, the persisted locale token
 `system`, is a configuration value that the picker displays as the translated
-**System language**; its classification is documented under `[not-shown]`.
-No displayed message was moved there to reduce the count.
+**System language**; it is listed under `[not-shown]`.
 
 This is catalog coverage, not completed human language review. The new
 translations are machine-drafted and reviewed for source meaning, conditions,
@@ -157,8 +140,8 @@ that `tr` shows as written.
 ### The lint
 
 `crates/iptv-app/tests/app/catalog_lint.rs` reads the sources of the app,
-the core, the guide and library crates and the settings catalog, and fails
-on:
+core, presentation, guide, library and runtime crates and the settings catalog
+(its `ROOTS` list), and fails on:
 
 - a literal given to `tr`, `trf` or `key`, to the core's `translate` or
   `format`, or to a helper or message type it knows, that has no catalog

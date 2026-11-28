@@ -8,20 +8,36 @@ is a build input. Coverage includes the application; its floors are enforced whe
 the coverage lane is selected.
 
 Android emulator smoke uses a dedicated validation application ID and explicit
-serials. For local execution use [disposable AVD validation](android-validation.md),
+serials. For local execution use [disposable AVD validation](testing.md#disposable-android-validation),
 which copies the complete profile and never resets original images. x86_64 debug
 smoke is not proof of signed ARM release playback or physical accessibility.
 
-The [optimized Android evidence record](android-release-220.md) distinguishes
-checks of public signed artifacts from candidate, emulator, physical-device
-and Play Console acceptance. Follow its remaining checklist for the exact
-artifact intended for submission.
+Publishing a GitHub release does not submit to a store. The
+[mobile store submission checklist](#mobile-store-submission) lists the
+acceptance that stays with the owner, and the
+[mobile store privacy disclosures](#mobile-store-privacy-disclosures) cover the
+store forms.
 
-The [first-submission readiness record](release-readiness-222.md) separates
-built-bundle checks from physical-device and store-console acceptance. The
-[mobile privacy worksheet](store-privacy.md) tracks the disclosures and policy.
-An owner-dependent item remains pending until verified against the candidate
-and the relevant store account.
+## Contents
+
+- Build and publish: [packaging and releases](#packaging-and-releases),
+  [platform signing](#platform-signing),
+  [promoting a tag](#promote-an-existing-tag-manually),
+  [rehearsal](#release-rehearsal),
+  [immutability](#published-releases-are-immutable),
+  [provenance and SBOM](#checksums-provenance-and-sbom),
+  [corresponding source](#corresponding-source-for-bundled-media-libraries)
+- Build inputs: [NSH tool artifacts](#pinned-nsh-tool-artifacts),
+  [locked package builds](#locked-package-builds),
+  [Windows installer](#windows-installer-experimental)
+- Recovery and updates: [release contract](#release-contract-and-recovery),
+  [update feed](#authenticated-update-feed),
+  [update build settings](#native-update-checks),
+  [app updates](#app-updates),
+  [upgrade acceptance](#upgrade-acceptance),
+  [signed macOS updates](#signed-macos-updates)
+- Stores: [submission checklist](#mobile-store-submission),
+  [privacy disclosures](#mobile-store-privacy-disclosures)
 
 ## Packaging and releases
 
@@ -34,7 +50,7 @@ smoke is selected. `Android packages` can manually build an ARM debug APK for
 investigation; debug AABs are not distribution evidence. Trusted master candidates
 build unsigned release APK/AAB once, checking both ABIs, notices, Gradle unit tests
 and release lint before promotion to isolated signing jobs.
-The [Patina NSH fork](nsh.md) at `../nsh-patina` uses the commit in `nsh.rev`.
+The [Patina NSH fork](development.md#nsh-pin) at `../nsh-patina` uses the commit in `nsh.rev`.
 GitHub Actions, the Windows build and `tools/check.sh` read the pin through
 `tools/ci/pins.py`. Update `nsh.rev` when adopting changes from the fork.
 
@@ -64,7 +80,7 @@ This starts above historical workflow-run codes; local development retains its
 existing default unless CI stamps distribution metadata.
 Publication waits for package verification and candidate-bound build provenance.
 Tags and manual runs default to platforms=android-desktop: Android ARM64 and ARMv7,
-Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
+Linux x86_64, macOS Apple silicon and Windows x64. Android produces one distribution-signed
 APK and AAB for tablets and TVs, each containing both ARM architectures.
 Packaging fails if either native library or the notices are missing. Both
 signing certificates are checked against the configured keystore before upload.
@@ -351,6 +367,9 @@ Every release carries, next to the packages:
 
 - `SHA256SUMS`: the SHA-256 of every other file in the release, in the format
   `sha256sum --check` reads.
+- One `*-media-runtime-sbom.cdx.json` per desktop media runtime and an
+  `-android-classpath-sbom.cdx.json` for the Android release classpath
+  (`tools/ci/sbom.py`).
 - `Patina-<version>-sbom.cdx.json`: a CycloneDX 1.5 SBOM written by
   `tools/ci/sbom.py` (`cargo cyclonedx` 0.5.10). It lists the app crate's
   resolved `Cargo.lock` graph for all targets (normal and build dependencies,
@@ -381,16 +400,15 @@ sha256sum --check --ignore-missing SHA256SUMS
 ```
 
 Releases up to v0.1.1 predate build provenance; their `SHA256SUMS` is unsigned.
-v0.1.4 is a second historical exception. Read-only inspection on November 17,
-2026 at 04:02 UTC still found v0.1.4 as latest and release run 43941768397 failed
-at its existing-public-release guard. The earlier audit decoded all 14 asset
-attestations as `release/v0.2`, not SLSA build provenance; those asset digests
-were unchanged in this recheck. The separate macos-v0.1.4 release is also outside
-the complete release workflow. Do not claim these downloads pass the documented
-build-origin verification. Preserve their bytes and record the exception. An attestation proves which workflow run built a
-file from which commit. It does not replace platform code signing: the macOS
-and Windows packages are still not trusted by Gatekeeper or SmartScreen (see
-below).
+v0.1.4 is a second historical exception: an audit on November 17, 2026 found
+release-membership attestations (`release/v0.2`) rather than SLSA build
+provenance on its assets, and the separate macos-v0.1.4 release is outside the
+release workflow. Do not claim those downloads pass the documented build-origin
+verification. Preserve their bytes and record the exception.
+
+An attestation proves which workflow run built a file from which commit. It does
+not replace platform code signing: preview macOS and Windows packages are still
+not trusted by Gatekeeper or SmartScreen (see below).
 
 ## Corresponding source for bundled media libraries
 
@@ -469,12 +487,11 @@ Limits:
   the corresponding source for them. A legal review of the distribution terms
   is still worthwhile.
 
-This does not submit to Play or App Store Connect. An IPA's distribution
-profile determines where it can be installed; an App Store profile does not
-make a GitHub download sideloadable. Without the Apple secrets above the macOS
-image is ad hoc signed and NOT notarized, and without the Azure secrets the
-Windows installer is unsigned: both are then released as previews (see
-[Platform signing](#platform-signing)). Before calling a release stable,
+An IPA's distribution profile determines where it can be installed; an App Store
+profile does not make a GitHub download sideloadable. Without the Apple secrets
+above the macOS image is ad hoc signed and NOT notarized, and without the Azure
+secrets the Windows installer is unsigned: both are then released as previews
+(see [Platform signing](#platform-signing)). Before calling a release stable,
 configure Developer ID notarization and Windows code signing.
 
 Before a stable release, also validate the RPM, pacman package, AppImage and
@@ -482,6 +499,11 @@ DMG on real desktops with a GPU and sound (CI covers installation and start-up
 only), and signed iPad installation when enabling iOS. Android releases need tablet/TV smoke
 tests on tab36 and tv36 with synthetic playlists. CI build and headless tests
 do not replace those device checks.
+
+Casting also needs physical receivers before a receiver or sender platform is
+claimed as supported: rolling live HLS, channel change, stop, return to local
+playback, the parental PIN prompt and audible output, recorded with receiver and
+sender software versions.
 
 The About row displays the compiled workspace version and the first eight hex
 characters of the source commit, for example `v0.2.1(a3d4123f)`. Cargo tracks
@@ -517,10 +539,8 @@ Manual Package checks on master can still seed desktop preview packaging depende
 
 After changing this pipeline, compare a cold run with a second run at the same
 NSH pin: the latter must skip both NSH build steps while still building the app,
-generating notices, linting, packaging and verifying signatures. The expected
-saving is the skipped compilation time minus the artifact restore overhead;
-measure this in CI before claiming an improvement. Upstream Java-only runtime
-preparation is a separate follow-up; this pipeline retains the complete runtime.
+generating notices, linting, packaging and verifying signatures. Measure the
+saving in CI before claiming an improvement.
 
 ## Locked package builds
 
@@ -568,23 +588,7 @@ only on a wrapper environment variable would not protect those nested builds.
 
 ## Windows installer (experimental)
 
-Windows validation follows [the shared tier matrix](ci.md). The native PR tier
-compiles test targets and executes platform checks; nightly and release candidates
-execute the full host suite. wasm and ordinary doctests run once on Linux.
-
-The planner and parity tests enforce more than crate names: features, target
-selection, exact ignored filters, output flags, wrapper delegation and failure
-propagation. Windows retains its Win32 chrome/pointer and executable-icon checks.
-Linux's EGL/decode unit tests and GTK native-player harness are Linux-only;
-the Xvfb/GTK coverage and performance lanes do not establish Windows or macOS
-real-decoder coverage. `IPTV_REQUIRE_PLAYER_TESTS` does not enable those tests
-on Windows. A Windows native decoder/GUI test is outside this shared plan.
-
-The Windows setup action uses the same Rust build cache as the other hosts;
-only master saves it. Formatting, shell/Python/Kotlin tooling and workspace-wide
-`cargo deny` remain additional Linux/macOS wrapper checks. The untargeted deny
-audit includes Windows dependencies; `audit-runners.sh` additionally audits the
-graph the Windows executable ships, for its own target.
+Windows validation follows [the shared tier matrix](ci.md#windows-and-linux-only-checks).
 
 Installer generation runs in selected package checks and the
 release workflow for tags and manual desktop selections, using
@@ -647,18 +651,20 @@ Rehearsals verify the actual branch ref and remain drafts; they do not prove a
 later tag or signing configuration. Post-publication verification downloads and
 checks the public bytes again. Never bypass a failure by replacing public files.
 
-After verification, the same job retains `update-release.json` in the Actions
+The `verify-published` job then retains `update-release.json` in the Actions
 artifact `verified-update-record-<run attempt>`. This is the per-release input
-for [Android and desktop updates](plans/2026-11-25-cross-platform-updates.md).
-It identifies the available viewer packages, their immutable URLs, exact sizes
-and hashes, and each desktop preview’s signing status from the signing job.
-Treat it as input to the future authenticated feed publisher. Clients require
+for the [authenticated update feed](#authenticated-update-feed). It identifies
+the available viewer packages, their immutable URLs, exact sizes and hashes,
+and each desktop package's signing status from the signing job. Clients require
 signed update metadata before offering an installer.
 
-For a staging signing event, run the following at the Patina checkout with a
-verified release record and a checkout of the TUF repository. Start from its
-latest accepted target, serialize signing events, and inspect the target diff
-before signing. The command creates the first index when the file is absent.
+### Authenticated update feed
+
+The release workflow does not publish a feed. For a staging signing event, run
+the following at the Patina checkout with a verified release record and a
+checkout of the TUF repository. Start from its latest accepted target, serialize
+signing events, and inspect the target diff before signing. The command creates
+the first index when the file is absent.
 
 ```sh
 python3 tools/ci/update-index.py ../update-feed/targets/index.json update-release.json
@@ -667,8 +673,18 @@ python3 tools/ci/update-index.py ../update-feed/targets/index.json update-releas
 A retry or an older record preserves newer package entries. A conflict for
 the same package and version, or different commits for one release across
 platforms, aborts before replacing the file. The resulting
-target is ready for the repository’s signing event. Publish the signed target
+target is ready for the repository's signing event. Publish the signed target
 and versioned metadata before the timestamp.
+
+Before production signing:
+
+- Host production metadata on its own static deployment, so a feed refresh
+  cannot overwrite the privacy policy site, and record its stable URL.
+- Record the offline root custodians and their signature threshold, and rehearse
+  root rotation and recovery. Keep rehearsal keys and URLs separate.
+- Schedule metadata refreshes between releases and verify the public result.
+- Withdraw a bad target in newer metadata, and issue a higher-version repair for
+  devices that already updated.
 
 Unsigned candidate packages and their checked evidence are retained for 30 days
 in Actions. A promoted release publishes `candidate-manifest.json` with checksums
@@ -683,9 +699,9 @@ A changed source requires new validation. If a failed job already uploaded part
 of its output, remove only that job's unpublished Actions artifacts before
 retrying it. Keep successful package jobs' artifacts.
 
-If a protected-context alias fails after `seal-candidate` succeeded, retrying only
-the alias leaves a manifest from the previous attempt. Selection deliberately
-rejects that mismatch. Before tagging, delete only the unpublished Actions artifact
+If the run gains a new attempt after `seal-candidate` succeeded, for example by
+retrying only another job, the manifest still names the previous attempt.
+Selection deliberately rejects that mismatch. Before tagging, delete only the unpublished Actions artifact
 named `release-candidate`, then rerun the `seal-candidate` job (using its job ID).
 It checks and seals the retained unsigned packages under GitHub's new attempt;
 it does not rerun the successful package builds. Never delete their signing inputs,
@@ -708,7 +724,8 @@ a backup compatible with the older version into a separate profile with its
 corresponding platform key. If key or schema compatibility is unknown, remain on
 the newer version and seek a fixed release. Do not promise downgrade support from
 fresh-install package smoke. Validate install-over-previous, catalog reopen,
-recording retention and backup restore before claiming an upgrade path passed.
+recording retention and backup restore before claiming an upgrade path passed
+([upgrade acceptance](#upgrade-acceptance)).
 
 
 Desktop release artifacts also retain a `*-build-environment.json` beside their
@@ -721,15 +738,14 @@ they neither freeze the host repositories nor promise byte-identical rebuilds.
 
 For a rehearsal build, set `PATINA_UPDATE_FEED` to the HTTPS directory serving
 the staging repository and `PATINA_UPDATE_ROOT` to its out-of-band public TUF
-root file before compiling Patina. The feed serves `metadata/` and `targets/`.
+root file before compiling Patina. Set both or neither; the feed address is an
+HTTPS directory ending in `/` that serves `metadata/` and `targets/`.
 Disclose the selected host in the privacy notice before distributing a
 configured build. GitHub discovery, inline release notes and manual package
-links work without that pair. The feed authorizes installation inside Patina;
-verification errors leave the explicit manual package link available and never
-authorize an installer. Settings → About also offers Never, On launch, Daily,
-Weekly (default) and Monthly checks. See [app updates](app-updates.md) for the
-viewer behavior and platform limits. Existing installations need one manual
-upgrade to acquire the checker.
+links work without that pair. The feed authorizes installation inside Patina.
+[App updates](#app-updates) describes viewer behavior, failure handling and
+platform limits. Existing installations without the checker need one manual
+upgrade to acquire it.
 
 To rehearse direct APK installation, compile the staging build with
 `PATINA_APK_HANDOFF=1` and the staging feed and root above. Gradle's
@@ -737,20 +753,19 @@ To rehearse direct APK installation, compile the staging build with
 handoff activity. The normal release bundle goes through the store. Use the
 About action to download the selected build and confirm installation. An
 active recording defers the handoff. Keep production activation gated on the
-signed install-over-previous exercises in the proposal.
+signed [install-over-previous exercises](#upgrade-acceptance).
 
-Set `PATINA_APPIMAGE_HANDOFF=1` for AppImage rehearsals with the staging
-feed. AppRun records its image path’s device and inode at startup. About can replace that
-file after confirmation or save the verified image to a new name on a writable
-filesystem. Patina keeps playing until the viewer restarts it. Each replacement
-preserves the old image beside the installation as
+Set `PATINA_APPIMAGE_HANDOFF=1` for AppImage rehearsals with the staging feed.
+AppRun records its image path’s device and inode at startup. About can replace
+that file after confirmation or save the verified image to a new name on a
+writable filesystem. Patina keeps playing until the viewer restarts it. Each
+replacement preserves the old image beside the installation as
 `<file>.<previous-version>.previous`, adding its inode to the name if an earlier
-backup already occupies it. Keep that file until the new version
-opens the existing library, then remove the backup when it is no longer needed. Restoring the executable alone cannot reverse a
-database migration. A hard interruption can also leave a hidden
-`.patina-update-*` directory beside the chosen file. After restarting, inspect
-its contents before removing it. DEB, RPM and pacman users can download the corresponding
-package through About and apply it with their system package tool.
+backup already occupies it. Keep that file until the new version opens the
+existing library, then remove the backup when it is no longer needed. Restoring
+the executable alone cannot reverse a database migration. A hard interruption
+can also leave a hidden `.patina-update-*` directory beside the chosen file.
+After restarting, inspect its contents before removing it.
 
 For a signed Windows rehearsal, set `PATINA_WINDOWS_PUBLISHER` at compile
 time to the exact subject distinguished name of the approved Authenticode
@@ -761,3 +776,357 @@ while holding the EXE open against replacement. After confirmation the helper
 waits for Patina to exit before starting the per-user wizard. Setup cannot ask
 Restart Manager to close another Patina session. Preview releases continue to
 show their release notes.
+
+## App updates
+
+Settings → About → Check for updates compares the installed version with the
+highest stable semantic version published on GitHub. Drafts and prereleases do
+not count. A newer local build is never offered a downgrade. The panel shows
+installed/latest versions, the release date, the last successful check and
+scrollable release notes. Failed checks remain failures, with the previous
+successful result available; a missing package is reported separately.
+
+Checks run in the foreground. The frequency choices are Never, On launch,
+Daily, **Weekly (default)** and Monthly. Monthly means the same day of the next
+calendar month, clamped to that month's last day. Manual checks work at every
+frequency. A failed automatic check uses bounded retry backoff. Skip this version
+suppresses its automatic notice; a manual check can still review it. Later
+dismisses the notice without losing the result. A notice waits until fullscreen
+playback and other panels have closed and can be reviewed with a TV remote.
+
+GitHub requests use a separate client: update requests carry no provider
+headers, playlist addresses, credentials, history or device identifiers. Release
+notes render as text. Package links must match this repository's release and the
+installation's platform, architecture and package format. Store Android builds
+do not offer a direct APK. iOS/iPadOS, Tizen and terminal builds do not use this
+checker. See the [privacy policy](privacy-policy/index.html).
+
+### Download and installation
+
+Every supported matching package has a manual download route. Installation
+inside Patina requires additional authentication and platform capabilities:
+
+| Installation | Behavior |
+| --- | --- |
+| Direct Android APK | Opt-in builds download a TUF-authorized APK, verify size and digest, then ask Android's installer to confirm its package, signing identity and higher version code. Store builds stay on their distribution channel. |
+| Windows per-user setup | Opt-in builds verify TUF authorization, Authenticode publisher and timestamp before asking to close Patina and start the installer. Unsigned previews use manual download. |
+| macOS app | Opt-in Developer ID builds use pinned Sparkle and its signed appcast for download, installation and relaunch. Current unsigned previews download the DMG manually. See [macOS configuration](#signed-macos-updates). |
+| Linux AppImage | Opt-in builds verify the full image and ask before replacing a writable installation or saving elsewhere. The previous image remains available for recovery. Restart manually to use the replacement. |
+| Linux DEB, RPM, pacman | Download the matching package and apply it using the system package tool. GitHub availability does not promise availability from a configured package repository. |
+
+Authentication failure never enables installation. An explicit **Download
+package** browser action remains available when an installer feed or appcast is
+unavailable. Downloading through that action requires the viewer to install the
+package using the platform's normal tools.
+
+Android, Windows and AppImage in-app downloads show progress and can be
+canceled. Closing the update panel lets an accepted download finish; the runtime
+retains the verified file and offers it again without downloading twice. Explicit
+cancellation removes their partial and retained stages. These runtime stages are
+private temporary files and do not survive app exit. Recording activity is checked
+again before installer handoff. Deferring installation preserves the staged file;
+it does not silently stop a recording.
+
+### Production activation
+
+Production activation still requires a published [authenticated
+feed](#authenticated-update-feed), trusted keys, [platform
+signing](#platform-signing) and [install-over-previous
+acceptance](#upgrade-acceptance). The unsigned macOS and Windows previews do not
+become signed merely by enabling this UI. Enable each platform's installation
+route only after its own acceptance passes. Build settings are under [native
+update checks](#native-update-checks).
+
+### Update verification
+
+Existing test executables cover actual loopback GitHub HTTP discovery, a signed
+synthetic TUF repository, streamed download and byte/digest verification,
+truncated/corrupt/oversized refusal, progress, cancellation, retained stages and
+cleanup. Schedule tests cover frequency boundaries, persistence, skipped and
+unseen versions, retry backoff and clock rollback. App journeys exercise About,
+inline notes, close/reopen, failed-check recovery, delayed Android channel
+reports, physical remote notice navigation, compact large-text layout and saving
+Monthly. Native macOS fixture tests exercise the AppKit bridge's
+generation fencing, restart approval and cancellation.
+
+```sh
+cargo test --locked -p iptv-runtime --features test-support --lib app_updates::
+cargo test --locked -p iptv-app --features test-support --test app app_updates::
+cargo test --locked -p iptv-app --features test-support --lib screens::settings_view::updates::view::
+python3 tools/ci/test-macos-dmg.py
+```
+
+`python3 tools/ci/test-macos-dmg.py` checks absent and partial Sparkle
+configuration, transport and key validation, the pinned archive boundary, version
+preservation and disabled automatic installation. On macOS it also compiles the
+bridge against AppKit/Security and exercises preview refusal, version agreement,
+off-main-thread requests, shell-authorized relaunch, root disposal, cancellation
+and extraction races, prepared Skip replies, retry reauthorization, deferred
+recovery, and a child process that cancels Cocoa termination and exits normally.
+
+### Upgrade acceptance
+
+Fixtures prove discovery, verified download and native contracts. They do not
+replace this release gate: use two packaged releases, entered through the normal
+About action, and record the signing status, install location, package format,
+and for Android the signer, package ID and both version codes. Verify that the
+synthetic library, favorites, settings and encrypted catalog survive, that
+cancellation and failure leave a launchable app, and that an active recording
+survives a deferred update. Include a database migration in the upgrade pair
+before treating restoration of an older executable as recovery.
+
+- **Android:** a phone in portrait and landscape, a tablet, and a TV using only
+  the remote; two production-signed APKs on representative ARM hardware. Cover
+  permission denial, return from Settings, confirm, cancel, retry and relaunch.
+- **Windows:** as a standard user, cover cancel, locked files and reopening the
+  library.
+- **AppImage:** cover interrupted downloads, insufficient space, read-only paths
+  and a failed launch.
+- **DEB, RPM, pacman:** install over the previous version.
+- **macOS:** two Developer ID builds with the same updater key. Cancel one
+  download, reject a tampered archive, complete the upgrade and verify the new
+  version after relaunch, then reopen the library, keep recordings and exercise
+  backup restore. Start a recording while the install dialog is open and verify
+  that relaunch waits. Cancel at the download/extraction boundary and dispose the
+  root before approving a prepared update. Decline an immediate quit and confirm
+  that the recording host resumes, the deferred notice appears and a later check
+  resumes only the selected version. Exercise an unwritable installation and an
+  offline appcast.
+
+## Signed macOS updates
+
+Patina includes an opt-in bridge to Sparkle **2.10.1**, pinned to the upstream
+archive SHA256 in `tools/ci/macos-sparkle.py`. Before enabling production
+updates, provision an Ed25519 update-signing key in the protected release
+publisher, establish the HTTPS appcast URL, and complete the Developer ID
+signing/notarization setup. The update key is separate from the Apple signing
+identity and the TUF key used by other installer adapters. No production updater
+key, appcast URL or Developer ID credential is supplied by the repository. Do
+not generate a throwaway key for production or alter the preview signing policy
+to make capability checks pass.
+
+Set repository **variables** `PATINA_SPARKLE_FEED` and
+`PATINA_SPARKLE_PUBLIC_KEY` together. The unsigned macOS candidate job downloads
+the pinned upstream archive; bundling verifies its hash and framework signature,
+copies the framework and its license, and seals the public configuration inside
+the app. Partial configuration fails packaging. Neither variable is a secret.
+
+For a local candidate build, the equivalent command is:
+
+```sh
+PATINA_SPARKLE_ARCHIVE=/outside-checkout/Sparkle-2.10.1.tar.xz \
+PATINA_SPARKLE_FEED=https://updates.example.test/patina/appcast.xml \
+PATINA_SPARKLE_PUBLIC_KEY="$PATINA_PUBLIC_UPDATE_KEY" \
+bash tools/package-macos.sh
+```
+
+The protected signing stage must sign the nested Sparkle helper bundles inside
+out, preserving their entitlements, then sign and notarize the enclosing app and
+DMG. Patina enables the action only for a running Developer ID application with
+complete public configuration and the pinned bundled framework. An unsigned
+candidate remains manual even when it contains Sparkle.
+
+After the final DMG is signed, notarized and verified, publish that immutable DMG
+to its GitHub release. Generate an appcast from those exact bytes using the
+**pinned** upstream `bin/generate_appcast`; use its `--ed-key-file` option with a
+protected file outside the checkout. Match `--download-url-prefix` to the exact
+GitHub release asset directory and include release notes beside the DMG. Publish
+the resulting appcast at `PATINA_SPARKLE_FEED` after the referenced assets exist.
+Retain the appcast and artifact hashes as release evidence. Never place the
+private key in repository variables, candidate artifacts, app resources or logs.
+
+The release workflow does not publish an appcast. Missing or mismatched appcast
+entries fail installation; GitHub notes and the manual package route remain
+usable.
+
+Upstream references: [programmatic setup](https://sparkle-project.org/documentation/programmatic-setup/),
+[publishing](https://sparkle-project.org/documentation/publishing/), and
+[code signing](https://sparkle-project.org/documentation/#6-code-sign-your-app).
+
+### macOS lifecycle
+
+GitHub release discovery and release notes work independently of Sparkle.
+Ad hoc signed previews offer their matching DMG for manual installation; they
+cannot safely replace themselves through the signed channel.
+
+Sparkle supplies download progress, cancellation, Ed25519 verification,
+app replacement and relaunch. Patina owns check frequency and requires an
+explicit installation action. Sparkle's own automatic checks, automatic
+downloading and installing and JavaScript release notes are disabled. The
+appcast version must match the GitHub version the viewer chose, including for a
+resumed update. A forwarding public `SPUUserDriver` keeps Sparkle's standard UI
+and captures its check and download cancellation blocks; Patina uses no private
+Sparkle driver API or AppKit delegate replacement.
+
+Relaunch waits until the recording host can close safely and flushes watch time.
+AppKit publishes a token-scoped restart request; the owning NSH shell task checks
+the runtime and approves it. Native callbacks never access shell state, and
+disposing that root revokes queued approval.
+
+Cancellation ends when extraction begins. Cancel and Skip become unavailable
+during extraction, preparation and handoff; Later can still close the app panel.
+The Ready reply is held until the recording guard approves installation. Root
+disposal before approval answers that one-shot reply with Skip, which cancels the
+prepared installation; disposal during extraction retains only native state until
+Ready can be answered that way.
+
+Once approved, Sparkle's external installer owns the handoff. A prepared update
+can install on a later normal quit, even when immediate termination is declined:
+the external agent observes process exit and does not require Cocoa's
+WillTerminate notification. If the approved process remains alive after 60
+seconds, Patina releases the native UI and controller, restores the recording
+host and reports that installation was deferred. This does not remove the
+prepared update; checking again can resume it through the same version and
+recording guards.
+
+References for the pinned version:
+[SPUUserDriver](https://github.com/sparkle-project/Sparkle/blob/2.10.1/Sparkle/SPUUserDriver.h)
+and [InstallerProgress](https://github.com/sparkle-project/Sparkle/blob/2.10.1/Sparkle/InstallerProgress/InstallerProgressAppController.m).
+
+## Mobile store submission
+
+These items are open until verified against the exact candidate and the owner's
+store accounts ([#220](https://github.com/teng-lin/patina-iptv/issues/220),
+[#222](https://github.com/teng-lin/patina-iptv/issues/222)). Privacy forms and
+policy links ([#221](https://github.com/teng-lin/patina-iptv/issues/221)) are
+under [mobile store privacy disclosures](#mobile-store-privacy-disclosures).
+Record results against the artifact hash and source commit, keeping emulator and
+physical-device evidence separate. No account details, signing identities or
+provisioning profiles belong in public evidence.
+
+Review notes describe normal entry: launch, add a synthetic playlist through
+playlist setup, open its guide and play authorized demo media. The owner hosts
+that fixture publicly before submission; do not offer a review-only bypass or a
+private fixture address. Describe only what the submitted platform supports:
+the iPad build does not record, and scheduled recording is unavailable.
+
+### Android
+
+- Run [signed release acceptance](testing.md#signed-release-acceptance)
+  on a physical tablet and TV: normal launcher and first run, playlist import,
+  playback and XMLTV refresh, picture in picture on handheld and its absence on
+  TV, background and return, backup and restore, recording, document pickers and
+  install-over-previous.
+- Confirm that each form factor opens its own launcher activity, that a stale or
+  alternate-launcher start redirects to it, and that notifications return to it.
+- In Play Console: developer identity and verification, package registration for
+  `com.hantekllc.iptvrs`, Play App Signing (confirm the owner-approved upload
+  certificate), IARC content rating, launch territories and trader status. Where
+  the personal-account closed-testing rule applies, verify at least 12 opted-in
+  testers for 14 consecutive days and approved production access.
+- Check the uploaded version's DEX size and optimization, obfuscation and
+  shrinking percentages in App bundle explorer, and Android vitals memory across
+  RAM tiers and app states, against Google's
+  [technical quality requirements](https://support.google.com/googleplay/android-developer/answer/17492799).
+  Record unavailable data explicitly; a local R8 build does not establish them.
+  Keep the exact AAB, which retains the R8 maps.
+
+### iPad
+
+- Confirm program membership, agreements, the app record for
+  `com.hantekllc.iptvrs`, the distribution profile, a signed upload and its
+  validation, the age rating and launch territories.
+- Inspect the **signed final** bundle:
+  `python3 tools/ci/inspect-ios-bundle.py <path to Patina.app>`.
+- Classify the cryptography of the app and its linked libraries (SQLCipher,
+  Rustls, MPVKit inputs) and record the matching export-compliance answer. The
+  plist does not set `ITSAppUsesNonExemptEncryption`, and HTTPS use alone does
+  not justify answering `false`.
+- Add the missing `PrivacyInfo.xcprivacy` declarations after auditing
+  required-reason API use by the finished binary and its dependencies (file and
+  disk metadata, boot time, `NSUserDefaults`, including NSH's read of the
+  system-written `AppleTemperatureUnit`, which reason `CA92.1` does not cover).
+  App Privacy answers do not replace these manifests.
+- Install the signed candidate on a physical iPad and verify launch, source
+  import, playback, background and return, and
+  **Settings → About → Privacy policy**.
+
+## Mobile store privacy disclosures
+
+The public [Patina IPTV Privacy Policy](https://teng-lin.github.io/patina-iptv/privacy-policy/)
+is published from [this repository](privacy-policy/index.html) by GitHub Pages.
+Android and iPad expose that URL at **Settings → About → Privacy policy**. Use
+the same URL in Play Console and App Store Connect.
+
+### Release behavior
+
+| Data or feature | Android tablet and TV | iPad |
+| --- | --- | --- |
+| Playlist and provider credentials, headers and guide sources | SQLCipher catalog, with key protected by Android Keystore. Provider authentication and requests go directly to the configured service. | SQLCipher catalog, with key protected by the Apple Keychain. Same direct requests. |
+| Playlists, guide, artwork and playback | Imported documents and catalog data are local. Requests go to the configured hosts or content hosts for streams, guide data and artwork. Media3 receives media through an app-local relay. | Same content requests. MPVKit receives media through the app-local relay. |
+| Preferences, favorites, search history, viewing history and playback progress | Stored locally. The watch history database and search terms are not sent to providers. A provider can infer viewing from stream requests. | Same. |
+| Backups and restored data | User-requested exports are unencrypted and may contain provider credentials and history. Android uses the system's document picker. The selected storage provider may receive the file. Automatic app-data backup and device transfer are excluded. | In-app backup and restore are unavailable. Private app data is excluded from automatic system backup. |
+| Recordings | Media on device, with optional user-selected exports and a foreground service while a recording runs. Recording starts only when the viewer chooses Record; nothing is scheduled. The app fetches media from the selected provider. | No recording ([capabilities](platform-support.md#record-now-and-the-recordings-library)). |
+| Casting | Phones and tablets can send a live channel to a Chromecast or AirPlay receiver on the local network. The receiver gets the media over plain HTTP; provider addresses and credentials stay in the app's relay. Android TV has no cast sender. | AirPlay to a receiver chosen in Apple's picker, with the same relay boundary. |
+| Diagnostics and accounts | Local app and platform logs. **Send a diagnostic log** in Settings exports a redacted log only when the viewer asks, to a destination they choose; TV images without a picker or share target do not offer it. No automatic Patina diagnostics upload, analytics, ads or Patina account. Google may collect diagnostics under its own OS or store settings. | Same app behavior. Apple may collect diagnostics under its own OS or store settings. |
+| Bundled components | NSH, AndroidX/Media3, SQLCipher and Rust libraries. See the Android classpath and Rust SBOMs for the release graph. | NSH, MPVKit (including libmpv and FFmpeg), SQLCipher and Rust libraries. See the verified MPVKit inventory and Rust SBOM. |
+
+Portal authentication also transmits viewer-supplied MAC, serial and device
+identifiers when configured, with portal language/time zone and protocol
+profile fields. These are provider identity settings, not a hardware MAC read
+from Android or iPad. Include them when assessing identifier disclosures.
+
+The [security model](security.md) documents the encryption boundaries, explicit
+HTTP support and export handling. The policy covers transfers to configured
+providers, provider-selected hosts, external players and storage destinations.
+
+### Listing decisions to verify on the submitted builds
+
+These are proposals from a source inspection, not saved or published store
+declarations. [#221](https://github.com/teng-lin/patina-iptv/issues/221) stays
+open until the candidate builds, both listing fields and both completed forms
+have been checked.
+
+- **Google Play Data safety.** Local-only history, preferences and cached data
+  are outside data collection. Off-device provider requests can carry user IDs,
+  account credentials, connection headers and signals about which content
+  the user requested, so do not select a blanket no-data answer. Review the
+  applicable categories for every track and
+  feature. Google's exception for an expected user-initiated transfer applies
+  to sharing and does not remove collection from the form. Review automatic
+  guide refresh and a recording that runs on in the background against that
+  distinction. Provider
+  retention is unknown, so do not assume ephemeral processing. Explicit HTTP
+  is supported, so the app cannot declare that all data is encrypted in
+  transit. Patina has no account creation or deletion flow.
+  [Google Play Data safety guidance](https://support.google.com/googleplay/android-developer/answer/10787469)
+
+  | Play field or category | Proposed answer or open question |
+  | --- | --- |
+  | Personal info, User IDs | Provider account names and IDs, for app functionality. Credentials can also occur in addresses, headers and exported archives; resolve any further authentication category in the form. |
+  | Device or other IDs | Configured portal MAC, serial and device identifiers. User entry does not make their transmission local-only. |
+  | App interactions | Provider-visible content requests. Local history, favorites and progress leave only in an explicit backup export; assess that transfer separately. |
+  | Search history, files, videos | No normal upload found. Resolve how the form treats backup and recording exports and external-player transfers. |
+  | Location | No location use found. IP visibility alone does not prove location inference. |
+  | Crash logs, diagnostics, ads, analytics | No automatic upload or advertising purpose found. Confirm against the packaged SDK graph and the user-initiated log export. |
+  | Deletion | Local clear, remove and uninstall only; nothing deletes provider-held data. Verify the form's deletion choices and support process. |
+
+- **Apple App Privacy.** Source review found no Patina-operated data collection
+  or tracking by bundled components, so the proposal is **Data Not Collected**
+  with **no tracking**, conditional on the packaged iPad app, its SDKs and their
+  privacy manifests, and on there being no developer or partner retention path.
+  Apple asks about data accessible to the
+  developer or integrated third-party partners beyond the time needed to
+  service a request. The viewer's independently chosen provider can retain
+  its own requests and is covered in the privacy policy.
+  Do not copy the Google answers into Apple's form. Export compliance and
+  privacy manifests are [separate submission items](#ipad).
+  [Apple App Privacy guidance](https://developer.apple.com/app-store/app-privacy-details/)
+
+### Owner follow-through
+
+1. Reconcile these answers with the exact submitted builds, every active Play
+   track, the runtime SBOMs, the iPad privacy manifests and observed synthetic
+   traffic.
+2. Enter the policy URL in Play **App content → Privacy policy** and App Store
+   Connect **App Privacy → Privacy Policy URL**, including required
+   localizations, and check that the policy's app name matches each listing.
+3. Finish both forms, verify their previews and listing links, and record only
+   sanitized field, status and date evidence.
+4. After a policy change deploys, check that the URL is reachable anonymously and
+   matches the source. On the submitted Android tablet, TV and iPad artifacts,
+   open it from the app; on a TV without a browser, check that the address is
+   shown instead.
+
+Keep release artifact, SDK inventory and console evidence with the store
+submission record, outside the repository.

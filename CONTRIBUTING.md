@@ -4,7 +4,7 @@ Thank you for helping. This page covers setup, the checks to run, and the
 rules a change has to meet. [AGENTS.md](AGENTS.md) states the project rules in
 short form, and [docs/architecture.md](docs/architecture.md) explains how the
 code is laid out and why.
-The [subsystem ownership and validation map](docs/contributing.md) locates
+The [subsystem ownership and validation map](docs/development.md) locates
 the domain owner, adapter and nearest checks for a proposed change.
 
 ## Set up
@@ -19,7 +19,7 @@ Under the hood, a full local check environment needs:
 
 - Rust, the version pinned in `rust-toolchain.toml` (rustup installs it
   automatically), with the `wasm32-unknown-unknown` target.
-- The pinned [Patina NSH fork and CLI](docs/nsh.md).
+- The pinned [Patina NSH fork and CLI](docs/development.md#nsh-pin).
 - The platform libraries listed under
   [Build from source](README.md#build-from-source) in the README
   (`tools/ci/linux-packages.txt` on Debian/Ubuntu).
@@ -27,6 +27,8 @@ Under the hood, a full local check environment needs:
   `cargo install cargo-deny --version 0.20.2 --locked`.
 - `python3` (3.11 or newer) and `ffmpeg` for the scripts and the synthetic
   test streams.
+- On Linux, Xvfb and a Mesa software OpenGL driver for the native player
+  scenario.
 - For the SQLite store's browser build and its tests: a `clang` with the
   `wasm32` target (it compiles SQLite) and Node.js (it runs the tests,
   `tools/wasm-test.mjs`).
@@ -40,12 +42,14 @@ Run the app against the synthetic fixtures as the README's
 tools/check.sh
 ```
 
-It runs the NSH commit check, formatting, Clippy with warnings as
-errors, `cargo deny`, the tests of every library crate, the
-`wasm32-unknown-unknown` builds of the portable crates, the app build, the
-app's unit and headless scenario tests, and the unit tests of the build and
-release scripts. CI runs the same script on Linux and macOS, and
-`tools/build-windows.ps1 -Check` runs the same crate set on Windows.
+It runs the NSH commit check, formatting, line-length and script lints,
+Clippy with warnings as errors, `cargo deny`, the tests of every workspace
+crate (the app's unit and headless scenario tests included), the app build,
+and the unit tests of the build and release scripts. On Linux it also builds
+and lints for `wasm32-unknown-unknown`, builds the documentation and runs the
+GTK native player scenario on a private Xvfb display. CI runs the same script
+on Linux and macOS, and `tools/build-windows.ps1 -Check` runs the same crate
+set on Windows.
 
 One scenario: `cargo test -p iptv-app --features test-support <name>`.
 
@@ -57,10 +61,12 @@ Two extra checks are worth running when they apply:
 - `tools/ci/coverage.sh` measures the library crates and headless application
   scenarios together on Linux, plus an actual GTK player scenario on a private
   Xvfb display. It needs Xvfb, a Mesa software OpenGL driver and `ffmpeg`.
-  The enforced floors are calibrated on Linux CI; explicit `-p CRATE` measurements
-  can be run on other hosts without enforcing those Linux floors.
-  [Runtime recovery validation](docs/runtime-recovery-validation.md) records the
-  journey matrix and the limits of this evidence.
+  It writes the summary, LCOV data and HTML under `target/coverage/`.
+  `tools/ci/check-coverage-floors.py` enforces each crate's floor; raise a floor
+  only after measuring the same lane. The floors are calibrated on Linux CI;
+  explicit `-p CRATE` measurements can be run on other hosts without enforcing
+  them. Line coverage is not evidence of user journeys, screen-reader
+  usability, provider compatibility or behavior on real devices.
 
 ### When a device run is needed
 
@@ -70,9 +76,9 @@ input handling on Android, or to threading and storage that Android exercises
 differently needs a run on a real device before it merges. Use an Android tablet,
 an Android TV device, or both when the change affects both form factors. Run the
 changed journey manually with a synthetic test profile and record the devices and
-results in the pull request. See [physical-device acceptance](docs/android-validation.md#physical-device-acceptance).
+results in the pull request. See [physical-device acceptance](docs/testing.md#physical-device-acceptance).
 CI smoke runs on disposable tablet and TV emulators. To run the same checks
-locally, use the [disposable AVD runner](docs/android-validation.md#running-the-emulator).
+locally, use the [disposable AVD runner](docs/testing.md#running-the-emulator).
 
 ## Rules for every change
 
@@ -112,6 +118,12 @@ with `--locked`; a download is checked against a SHA-256.
 
 ## Commits and pull requests
 
+Open pull requests as drafts while pushing fixups (`gh pr create --draft`).
+Once the change is complete, mark it ready (`gh pr ready`) to start the
+complete validation run. A draft run always fails its gate on purpose and
+lists the heavy lanes it deferred. [CI tiers](docs/ci.md) describes the
+scheduling and required checks.
+
 - Write the subject as one imperative sentence that says what the commit
   does, without a type prefix and without a trailing period: "Keep translated
   labels reactive", not "fix: labels".
@@ -121,8 +133,9 @@ with `--locked`; a download is checked against a SHA-256.
   behavior changes.
 - Add or update tests with the change. A bug fix comes with a test that fails
   without it.
-- Add a line to the Unreleased section of [CHANGELOG.md](CHANGELOG.md) when
-  users or packagers would notice the change.
+- [CHANGELOG.md](CHANGELOG.md) records only user-facing changes and fixes. Add
+  a line to its Unreleased section when a user would notice the change.
+  Refactors, tests, CI, tooling and documentation get no entry.
 - Dependency changes update `Cargo.lock` on purpose, and the runner lock with
   it; see [Locked package builds](docs/release.md#locked-package-builds).
 
