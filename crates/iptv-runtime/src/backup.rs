@@ -981,6 +981,16 @@ fn reconcile_previous_restore(root: &Path) -> Result<()> {
             // The validated tree was renamed into place before interruption.
             preserve_non_backup_entries(&previous, root)?;
             fs::remove_dir_all(&previous).context("Could not finish the previous restore")?;
+            let recovered_root = root.join("recovered");
+            if recovered_root.is_dir() {
+                let preserved = latest_recovered_slot(root);
+                prune_recovered_copies(
+                    &recovered_root,
+                    MAX_RECOVERED_LIBRARIES,
+                    preserved.as_deref(),
+                );
+                let _ = sync_dir_io(&recovered_root);
+            }
         } else {
             // Platform initialization may recreate the missing directory before
             // recovery runs. Its existence is not an activation commit marker.
@@ -1071,7 +1081,50 @@ fn rollback_rejected_resumed_restore(
     }
 }
 
+enum ActivateOutcome {
+    NoPendingWork,
+    Installed {
+        was_corrupt_restore: bool,
+        active_slot: Option<PathBuf>,
+    },
+}
+
+enum ActivateFailure {
+    PreInstall(Error),
+    PostInstall(Error),
+}
+
+impl ActivateFailure {
+    fn into_error(self) -> Error {
+        match self {
+            Self::PreInstall(error) | Self::PostInstall(error) => error,
+        }
+    }
+}
+
 fn activate_locked(ports: &crate::Ports, root: &Path) -> Result<()> {
+    activate_locked_outcome(ports, root)
+        .map(|_| ())
+        .map_err(ActivateFailure::into_error)
+}
+
+fn activate_locked_outcome(
+    ports: &crate::Ports,
+    root: &Path,
+) -> std::result::Result<ActivateOutcome, ActivateFailure> {
+    let outcome = prepare_and_install_locked(ports, root).map_err(ActivateFailure::PreInstall)?;
+    if let ActivateOutcome::Installed {
+        was_corrupt_restore,
+        ref active_slot,
+    } = outcome
+    {
+        finish_installed_locked(root, was_corrupt_restore, active_slot.as_deref())
+            .map_err(ActivateFailure::PostInstall)?;
+    }
+    Ok(outcome)
+}
+
+fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<ActivateOutcome> {
     remove_stale_work(root)?;
     recover_replacement(root)?;
     // No native export is active before App starts. A killed process can leave
@@ -1103,7 +1156,7 @@ fn activate_locked(ports: &crate::Ports, root: &Path) -> Result<()> {
                 fs::rename(&prior, &pending).context("Could not recover the pending restore")?;
             }
             let _ = fs::remove_file(&active_corrupt);
-            return Ok(());
+            return Ok(ActivateOutcome::NoPendingWork);
         }
         let _ = fs::remove_file(&active_corrupt);
         if prior.exists() {
@@ -1123,9 +1176,12 @@ fn activate_locked(ports: &crate::Ports, root: &Path) -> Result<()> {
                 fs::rename(&prior, &pending).context("Could not recover the pending restore")?;
             }
             let _ = fs::remove_file(&active_corrupt);
-            return Ok(());
+            return Ok(ActivateOutcome::NoPendingWork);
         }
         if staged_corrupt.exists() {
+            if pending.exists() && !prior.exists() {
+                fs::rename(&pending, &prior).context("Could not schedule the restore")?;
+            }
             publish_staged_path(root, &staged_corrupt)?;
         } else if !active_corrupt.exists() && prior.exists() && !pending.exists() {
             let _ = fs::rename(&prior, &pending);
@@ -1148,12 +1204,12 @@ fn activate_locked(ports: &crate::Ports, root: &Path) -> Result<()> {
                         .context("Could not recover the pending restore")?;
                 }
                 let _ = fs::remove_file(&active_corrupt);
-                return Ok(());
+                return Ok(ActivateOutcome::NoPendingWork);
             }
             return Err("Could not move the damaged library aside".into());
         }
         let _ = fs::remove_file(&active_corrupt);
-        return Ok(());
+        return Ok(ActivateOutcome::NoPendingWork);
     }
     // Revalidate persisted staging before moving the working state aside.
     for entry in fs::read_dir(&pending).context("Could not read pending backup")? {
@@ -1262,6 +1318,20 @@ fn activate_locked(ports: &crate::Ports, root: &Path) -> Result<()> {
             .resumed_settings_dirty
             .store(true, Ordering::SeqCst);
     }
+    Ok(ActivateOutcome::Installed {
+        was_corrupt_restore,
+        active_slot,
+    })
+}
+
+fn finish_installed_locked(
+    root: &Path,
+    was_corrupt_restore: bool,
+    active_slot: Option<&Path>,
+) -> Result<()> {
+    let active_corrupt = sibling(root, "restore-corrupt-active");
+    let prior = sibling(root, "restore-prior");
+    let previous = sibling(root, "restore-previous");
     #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("installed");
     sync_dir(root.parent().ok_or("Application storage has no parent")?)?;
@@ -1273,6 +1343,18 @@ fn activate_locked(ports: &crate::Ports, root: &Path) -> Result<()> {
         preserve_non_backup_entries(&previous, root)?;
         fs::remove_dir_all(previous)
             .context("Restore succeeded; could not remove the previous private copy")?;
+    }
+    if was_corrupt_restore {
+        let preserved = active_slot
+            .and_then(Path::file_name)
+            .map(|name| root.join("recovered").join(name));
+        let recovered_root = root.join("recovered");
+        prune_recovered_copies(
+            &recovered_root,
+            MAX_RECOVERED_LIBRARIES,
+            preserved.as_deref(),
+        );
+        let _ = sync_dir_io(&recovered_root);
     }
     Ok(())
 }
@@ -1337,6 +1419,7 @@ pub(crate) fn finish_interrupted_sidecar_recovery(root: &Path, database: &Path) 
     let Some(destination) = latest_recovered_slot(root) else {
         return Ok(());
     };
+    let mut moved_any = false;
     for suffix in ["-wal", "-shm", "-journal"] {
         let sidecar = db_sidecar(database, suffix);
         if !sidecar.exists() {
@@ -1350,6 +1433,7 @@ pub(crate) fn finish_interrupted_sidecar_recovery(root: &Path, database: &Path) 
         {
             return Err(error);
         }
+        moved_any = true;
     }
     let playlists = root.join("playlists");
     if playlists.exists() {
@@ -1361,13 +1445,21 @@ pub(crate) fn finish_interrupted_sidecar_recovery(root: &Path, database: &Path) 
         {
             return Err(error);
         }
+        moved_any = true;
     }
-    prune_recovered_copies(
-        &recovered_root_of(&destination),
-        MAX_RECOVERED_LIBRARIES,
-        Some(&destination),
-    );
-    let _ = fs::remove_file(&marker);
+    if moved_any || marker.exists() {
+        let recovered_root = recovered_root_of(&destination);
+        sync_dir_io(&destination)?;
+        sync_dir_io(&recovered_root)?;
+        sync_dir_io(root)?;
+        if !has_interrupted_corrupt_restore(root) {
+            prune_recovered_copies(&recovered_root, MAX_RECOVERED_LIBRARIES, Some(&destination));
+        }
+        if marker.exists() {
+            fs::remove_file(&marker)?;
+            sync_dir_io(&recovered_root)?;
+        }
+    }
     Ok(())
 }
 
@@ -1471,7 +1563,7 @@ fn prune_recovered_copies(recovered_root: &Path, keep: usize, preserve: Option<&
 fn move_corrupt_files_aside(ports: &crate::Ports, database: &Path) -> io::Result<PathBuf> {
     let recovered_root = ports.directory.join("recovered");
     let slot = create_recovered_slot(&recovered_root, ports.exclude_from_backup)?;
-    move_corrupt_files_into_slot(ports, database, &slot)?;
+    move_corrupt_files_into_slot(ports, database, &slot, true)?;
     Ok(slot)
 }
 
@@ -1479,6 +1571,7 @@ fn move_corrupt_files_into_slot(
     ports: &crate::Ports,
     database: &Path,
     slot: &Path,
+    prune_after_sync: bool,
 ) -> io::Result<()> {
     let root = ports.directory.as_path();
     let recovered_root = root.join("recovered");
@@ -1528,11 +1621,16 @@ fn move_corrupt_files_into_slot(
         }
         return Err(error);
     }
-    let _ = sync_dir(slot);
-    let _ = sync_dir(&recovered_root);
-    let _ = sync_dir(root);
-    prune_recovered_copies(&recovered_root, MAX_RECOVERED_LIBRARIES, Some(slot));
-    let _ = fs::remove_file(&marker_path);
+    sync_dir_io(slot)?;
+    sync_dir_io(&recovered_root)?;
+    sync_dir_io(root)?;
+    if prune_after_sync {
+        prune_recovered_copies(&recovered_root, MAX_RECOVERED_LIBRARIES, Some(slot));
+    }
+    if marker_path.exists() {
+        fs::remove_file(&marker_path)?;
+    }
+    sync_dir_io(&recovered_root)?;
     Ok(())
 }
 
@@ -1702,7 +1800,7 @@ fn commit_corrupt_restore(
                     err,
                 )));
             }
-            if let Err(err) = move_corrupt_files_into_slot(ports, &database, &slot) {
+            if let Err(err) = move_corrupt_files_into_slot(ports, &database, &slot, false) {
                 if database.is_file() {
                     let _ = fs::remove_file(&active_marker);
                     let _ = fs::remove_dir_all(&staged);
@@ -1753,18 +1851,39 @@ fn commit_corrupt_restore(
                 return Err(RecoveryRestoreError::Backup(error));
             }
             recovery_crash_point("after-publish-before-activate");
-            if let Err(error) = activate_locked(ports, root) {
-                if !database.is_file() {
-                    rollback_failed_attempt(&slot);
+            match activate_locked_outcome(ports, root) {
+                Ok(ActivateOutcome::Installed { .. }) => {}
+                Ok(ActivateOutcome::NoPendingWork) => {
+                    if !database.is_file() {
+                        rollback_failed_attempt(&slot);
+                    }
+                    return Err(RecoveryRestoreError::Backup(Error::from(
+                        "Could not activate the restore; current data was kept",
+                    )));
+                }
+                Err(ActivateFailure::PreInstall(error)) => {
+                    if !database.is_file() {
+                        rollback_failed_attempt(&slot);
+                    }
                     return Err(RecoveryRestoreError::Backup(error));
                 }
-                // The validated pending restore was already installed into `root`;
-                // only delete `.restore-previous` once non-backup entries moved out.
-                let previous = sibling(root, "restore-previous");
-                if previous.exists() && preserve_non_backup_entries(&previous, root).is_ok() {
-                    let _ = fs::remove_dir_all(&previous);
+                Err(ActivateFailure::PostInstall(error)) => {
+                    // The validated pending restore was already installed into `root`;
+                    // only delete `.restore-previous` once non-backup entries moved out.
+                    let previous = sibling(root, "restore-previous");
+                    if previous.exists() && preserve_non_backup_entries(&previous, root).is_ok() {
+                        let _ = fs::remove_dir_all(&previous);
+                    }
+                    let preserved = root.join("recovered").join(&slot_name);
+                    let recovered_root = root.join("recovered");
+                    prune_recovered_copies(
+                        &recovered_root,
+                        MAX_RECOVERED_LIBRARIES,
+                        Some(&preserved),
+                    );
+                    let _ = sync_dir_io(&recovered_root);
+                    log::warn!("iptv backup: post-restore cleanup warning: {error}");
                 }
-                log::warn!("iptv backup: post-restore cleanup warning: {error}");
             }
             let _ = sync_dir(root.parent().unwrap_or(Path::new(".")));
             let _ = fs::remove_file(&active_marker);

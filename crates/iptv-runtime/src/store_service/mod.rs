@@ -148,6 +148,14 @@ fn remaining(deadline: Instant) -> Duration {
     deadline.saturating_duration_since(Instant::now())
 }
 
+fn services_by_root()
+-> &'static Mutex<std::collections::HashMap<std::path::PathBuf, Vec<std::sync::Weak<Service>>>> {
+    static BY_ROOT: OnceLock<
+        Mutex<std::collections::HashMap<std::path::PathBuf, Vec<std::sync::Weak<Service>>>>,
+    > = OnceLock::new();
+    BY_ROOT.get_or_init(Mutex::default)
+}
+
 /// One connection's worker: a lane of the owner's execution port (natively
 /// a thread) that runs jobs in order, each with the connection.
 struct Lane {
@@ -250,6 +258,7 @@ pub(crate) struct Service {
     ui_thread: OnceLock<ThreadId>,
     /// This service, for work it queues on itself (a host's persistence).
     me: OnceLock<std::sync::Weak<Service>>,
+    registered: AtomicBool,
     /// Imports and guide work where there are no workers (a cooperative
     /// host) run one at a time: a blocking store request made by one
     /// would otherwise step another's publish to its end inline.
@@ -288,6 +297,7 @@ impl Service {
             settings: Default::default(),
             ui_thread: OnceLock::new(),
             me: OnceLock::new(),
+            registered: AtomicBool::new(false),
             #[cfg(not(feature = "native"))]
             cooperative_imports: tokio::sync::Mutex::new(()),
             #[cfg(feature = "test-support")]
@@ -316,10 +326,32 @@ impl Service {
         self.epochs.begin();
     }
 
+    pub(crate) fn shared(ports: crate::Ports) -> Arc<Self> {
+        let service = Arc::new(Self::new(ports));
+        service.register();
+        service
+    }
+
+    fn register(self: &Arc<Self>) {
+        let _ = self.me.set(Arc::downgrade(self));
+        if !self.ports.file_storage || self.ports.store_host.is_some() {
+            return;
+        }
+        if self.registered.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let mut by_root = services_by_root()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let list = by_root.entry(self.directory().to_owned()).or_default();
+        list.retain(|weak| weak.strong_count() > 0);
+        list.push(Arc::downgrade(self));
+    }
+
     /// A handle for work accepted now. It stays bound to this owner and to
     /// the application epoch of this moment, on whichever thread it runs.
     pub(crate) fn accept(self: &Arc<Self>) -> Services {
-        let _ = self.me.set(Arc::downgrade(self));
+        self.register();
         let closed = self.epochs.closed.lock().unwrap_or_else(|e| e.into_inner());
         Services {
             service: self.clone(),
@@ -405,42 +437,86 @@ impl Service {
         limit
     }
 
-    /// Closes open SQLite handles across all lanes and blocks new store opens
-    /// while `operation` moves or replaces the database files on disk, keeping
-    /// this owner's epoch active so `retry_startup` can reopen immediately.
-    pub(crate) fn with_closed_connections<R>(&self, operation: impl FnOnce() -> R) -> Option<R> {
+    /// Closes open SQLite handles across all lanes of every owner sharing this
+    /// storage root and blocks new store opens while `operation` moves or
+    /// replaces the database files on disk, keeping this owner's epoch active
+    /// so `retry_startup` can reopen immediately.
+    pub(crate) fn with_closed_connections<R>(
+        self: &Arc<Self>,
+        operation: impl FnOnce() -> R,
+    ) -> Option<R> {
         struct Guard<'a>(&'a AtomicBool);
         impl Drop for Guard<'_> {
             fn drop(&mut self) {
                 self.0.store(false, Ordering::SeqCst);
             }
         }
-        if self
-            .epochs
-            .replacing
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return None;
+        let owners = if self.ports.file_storage && self.ports.store_host.is_none() {
+            self.register();
+            let mut by_root = services_by_root()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut found = Vec::new();
+            if let Some(list) = by_root.get_mut(self.directory()) {
+                list.retain(|weak| {
+                    if let Some(strong) = weak.upgrade() {
+                        found.push(strong);
+                        true
+                    } else {
+                        false
+                    }
+                });
+            }
+            if !found.iter().any(|item| Arc::ptr_eq(item, self)) {
+                found.push(self.clone());
+            }
+            found.sort_by_key(|item| Arc::as_ptr(item) as usize);
+            found.dedup_by(|a, b| Arc::ptr_eq(a, b));
+            found
+        } else {
+            vec![self.clone()]
+        };
+        let mut guards = Vec::with_capacity(owners.len());
+        for owner in &owners {
+            if owner
+                .epochs
+                .replacing
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return None;
+            }
+            guards.push(Guard(&owner.epochs.replacing));
         }
-        let _guard = Guard(&self.epochs.replacing);
         let deadline = Instant::now() + self.drain_limit();
         let reset = |lane: &Lane, limit: Instant| {
+            if lane.jobs.get().is_none() {
+                *lane
+                    .connection
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Connection::default();
+                return true;
+            }
             lane.barrier(remaining(limit), |connection| {
                 *connection = Connection::default();
             })
         };
-        if !(reset(&self.writer, deadline)
-            && reset(&self.reader, deadline)
-            && reset(&self.analysis, deadline))
-        {
-            return None;
+        for owner in &owners {
+            if !(reset(&owner.writer, deadline)
+                && reset(&owner.reader, deadline)
+                && reset(&owner.analysis, deadline))
+            {
+                return None;
+            }
         }
         let output = operation();
         let post_deadline = Instant::now() + self.drain_limit();
-        let _ = reset(&self.writer, post_deadline);
-        let _ = reset(&self.reader, post_deadline);
-        let _ = reset(&self.analysis, post_deadline);
+        for owner in &owners {
+            let _ = reset(&owner.writer, post_deadline);
+            let _ = reset(&owner.reader, post_deadline);
+            let _ = reset(&owner.analysis, post_deadline);
+        }
+        drop(guards);
         Some(output)
     }
 
@@ -1344,7 +1420,7 @@ impl Default for Service {
 impl Service {
     /// A started owner on `ports` (tests of other modules).
     pub(crate) fn started_for_tests(ports: crate::Ports) -> Arc<Self> {
-        let service = Arc::new(Self::new(ports));
+        let service = Self::shared(ports);
         service.epochs.begin();
         service
     }
@@ -1357,7 +1433,7 @@ impl Services {
     pub(crate) fn for_tests(directory: &Path) -> Self {
         let mut ports = crate::Ports::for_tests();
         ports.directory = directory.to_owned();
-        let service = Arc::new(Service::new(ports));
+        let service = Service::shared(ports);
         service.epochs.begin();
         service.accept()
     }

@@ -72,6 +72,74 @@ fn private_file(path: &Path, exclusive: bool) -> Result<File> {
     }
     options.open(path).map_err(io_error)
 }
+
+#[cfg(not(target_family = "wasm"))]
+struct VerifyScratch {
+    dir: PathBuf,
+    db: PathBuf,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl VerifyScratch {
+    fn copy_from(path: &Path) -> Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let pid = std::process::id();
+        let make_dir = |base: &Path| -> std::io::Result<PathBuf> {
+            for _ in 0..256 {
+                let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+                let candidate = base.join(format!(".iptv-verify-{pid}-{seq}"));
+                let mut builder = std::fs::DirBuilder::new();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::DirBuilderExt;
+                    builder.mode(0o700);
+                }
+                match builder.create(&candidate) {
+                    Ok(()) => return Ok(candidate),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+        };
+        // Prefer the parent of `path`'s directory (app container outside the
+        // live data directory, writable inside mobile sandboxes), falling back
+        // to the OS temp directory when unavailable.
+        let container = path
+            .parent()
+            .and_then(Path::parent)
+            .filter(|p| !p.as_os_str().is_empty());
+        let dir = match container.map(make_dir) {
+            Some(Ok(dir)) => dir,
+            _ => make_dir(&std::env::temp_dir()).map_err(io_error)?,
+        };
+        let db = dir.join("iptv.sqlite");
+        let scratch = Self { dir, db };
+        let mut src = File::open(path).map_err(io_error)?;
+        let mut dst = private_file(&scratch.db, true)?;
+        std::io::copy(&mut src, &mut dst).map_err(io_error)?;
+        drop(dst);
+        for suffix in ["-wal", "-journal"] {
+            match File::open(sibling(path, suffix)) {
+                Ok(mut sidecar) => {
+                    let mut out = private_file(&sibling(&scratch.db, suffix), true)?;
+                    std::io::copy(&mut sidecar, &mut out).map_err(io_error)?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io_error(e)),
+            }
+        }
+        Ok(scratch)
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl Drop for VerifyScratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
 impl Store {
     /// Opens an encrypted database, converting a legacy plaintext file atomically.
     /// The original remains usable if export, validation, or migration fails.
@@ -121,15 +189,31 @@ impl Store {
     /// Re-verifies positive corruption evidence before moving a library aside.
     /// Wrong keys (`SQLITE_NOTADB`), newer schemas, missing or healthy files,
     /// and I/O or lock errors return `Err` and never establish corruption.
+    /// Probes an isolated scratch copy so verification never creates `-wal` or
+    /// `-shm` sidecars in the live directory.
     pub fn verify_corrupt_encrypted(path: impl AsRef<Path>, key: &DatabaseKey) -> Result<()> {
         crate::files_available()?;
-        let path = path.as_ref();
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = (path, key);
+            Err(StoreError::Unavailable(crate::error::LIBRARY_NOT_CORRUPT))
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            Self::verify_corrupt_encrypted_native(path.as_ref(), key)
+        }
+    }
+    #[cfg(not(target_family = "wasm"))]
+    fn verify_corrupt_encrypted_native(path: &Path, key: &DatabaseKey) -> Result<()> {
         let metadata = match std::fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
-            Err(_) => return Err(StoreError::Unavailable("saved library is not corrupt")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(StoreError::Unavailable(crate::error::LIBRARY_NOT_CORRUPT));
+            }
+            Err(e) => return Err(io_error(e)),
         };
         if !metadata.file_type().is_file() || metadata.len() == 0 {
-            return Err(StoreError::Unavailable("saved library is not corrupt"));
+            return Err(StoreError::Unavailable(crate::error::LIBRARY_NOT_CORRUPT));
         }
         let mut header = [0; 16];
         let legacy = match File::open(path) {
@@ -141,9 +225,10 @@ impl Store {
                 "refusing plaintext database in place of encrypted installation",
             ));
         }
+        let scratch = VerifyScratch::copy_from(path)?;
         crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
-            path,
+            &scratch.db,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let _ = conn.set_db_config(
@@ -181,7 +266,8 @@ impl Store {
                 };
             }
         }
-        let has_wal = std::fs::metadata(sibling(path, "-wal")).is_ok_and(|meta| meta.len() > 0);
+        let has_wal =
+            std::fs::metadata(sibling(&scratch.db, "-wal")).is_ok_and(|meta| meta.len() > 0);
         if !legacy && !has_wal {
             let mut cipher_check = conn.prepare("PRAGMA cipher_integrity_check")?;
             let mut rows = cipher_check.query([])?;
@@ -201,7 +287,7 @@ impl Store {
                 };
             }
         }
-        Err(StoreError::Unavailable("saved library is not corrupt"))
+        Err(StoreError::Unavailable(crate::error::LIBRARY_NOT_CORRUPT))
     }
     /// Opens scratch storage with exactly the live store's encryption policy.
     /// Plaintext is possible only for an explicitly plaintext/test Store.

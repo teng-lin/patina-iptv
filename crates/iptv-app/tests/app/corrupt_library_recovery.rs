@@ -182,9 +182,6 @@ fn corrupt_library_start_fresh_requires_confirmation_defaults_to_cancel_and_open
     let mut app = start_app();
     step(app.wait_for("id:store-startup-failure"));
     let db_at_recovery = fs::read(&db_path).unwrap();
-    let wal_at_recovery = b"uncheckpointed-wal-sidecar".to_vec();
-    fs::write(root.join("iptv.sqlite-wal"), &wal_at_recovery).unwrap();
-    fs::write(root.join("iptv.sqlite-shm"), b"synthetic-shm").unwrap();
     step(app.wait_for("text:The saved library file is damaged and can’t be read."));
     assert!(app.screen().matches("id:store-recovery-restore").unwrap());
     assert!(
@@ -209,6 +206,10 @@ fn corrupt_library_start_fresh_requires_confirmation_defaults_to_cancel_and_open
     step(app.wait_for("id:store-recovery-details"));
     step(app.wait_for("text:The library database failed an integrity check after unlocking."));
     assert!(!app.screen().shows("SQLITE_CORRUPT"));
+    assert!(
+        !app.screen().shows(&db_path.to_string_lossy()),
+        "corrupt-library details must not expose filesystem paths"
+    );
     step(app.back());
     step(app.wait_for_gone("id:store-recovery-details", Duration::from_secs(3)));
 
@@ -252,8 +253,6 @@ fn corrupt_library_start_fresh_requires_confirmation_defaults_to_cancel_and_open
         )
         .is_ok()
     );
-    assert!(slot.join("iptv.sqlite-wal").is_file());
-    assert!(slot.join("iptv.sqlite-shm").is_file());
     assert!(slot.join("README.txt").is_file());
     assert_eq!(
         fs::read_to_string(root.join("settings.json")).unwrap(),

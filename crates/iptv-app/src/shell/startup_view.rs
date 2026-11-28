@@ -713,9 +713,10 @@ fn failure_details(
                     .bg(move || rgb(app.theme.with(|theme| theme.background.window)))
                     .child(ui_kit::body(scale, diagnostic))
                     .children(
-                        failure
-                            .path
-                            .iter()
+                        (!matches!(failure.cause, Cause::Corrupt))
+                            .then_some(failure.path.as_ref())
+                            .flatten()
+                            .into_iter()
                             .map(|path| ui_kit::body(scale, path.display().to_string())),
                     )
             })

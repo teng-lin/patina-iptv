@@ -1022,9 +1022,38 @@ fn adopt_recordings_preserves_valid_completion_receipt_and_rejects_corrupt_cells
     assert_eq!(target.recording_jobs().unwrap().len(), 1);
     assert!(target.recording_completion(JobId(7)).unwrap().is_some());
 
-    // Corrupting a TEXT column into non-UTF-8 bytes in `recording_jobs` must reject
-    // adoption before mutating `target`.
+    // Corrupting a TEXT column into non-UTF-8 bytes in a discarded scheduled
+    // zero-byte row (`status='scheduled' AND bytes=0`) or its progress row must
+    // NOT abort adoption of valid kept recordings.
     let hex_key: String = KEY_A.iter().map(|b| format!("{b:02x}")).collect();
+    {
+        let conn = rusqlite::Connection::open(&host_db).unwrap();
+        conn.pragma_update(None, "key", format!("x'{hex_key}'"))
+            .unwrap();
+        let src_id: i64 = conn
+            .query_row("SELECT id FROM sources LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        conn.execute(
+            "INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,message,source_incarnation)
+             VALUES(8,?1,'ch-0','Synthetic Channel 000','Scheduled Discarded',3000,4000,'scheduled',0,'','1')",
+            [src_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO recording_playback_progress(recording_id,position_ms,duration_ms,completed,updated_at)
+             VALUES(8,'not-an-integer',NULL,0,3000)",
+            [],
+        )
+        .unwrap();
+    }
+    target
+        .adopt_host_recordings_encrypted(&host_db, &DatabaseKey::from_bytes(KEY_A))
+        .expect("corrupt progress on a discarded scheduled row must not abort adoption");
+    assert_eq!(target.recording_jobs().unwrap().len(), 1);
+
+    // Corrupting a TEXT column into non-UTF-8 bytes in a KEPT `recording_jobs` row
+    // must still reject adoption before mutating `target`.
     {
         let conn = rusqlite::Connection::open(&host_db).unwrap();
         conn.pragma_update(None, "key", format!("x'{hex_key}'"))
@@ -1044,4 +1073,216 @@ fn adopt_recordings_preserves_valid_completion_receipt_and_rejects_corrupt_cells
         target.recording_jobs().unwrap()[0].request.title,
         "Synthetic Show"
     );
+}
+
+#[test]
+fn verify_leaves_no_live_sidecars_and_distinguishes_inaccessible_from_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("clean-wal-live");
+    let db_path = seed_multipage_encrypted_store(&root, KEY_A, "No Live Sidecars");
+    // Ensure clean WAL-mode DB has no `-wal` or `-shm` on disk before verification.
+    let _ = fs::remove_file(root.join("iptv.sqlite-wal"));
+    let _ = fs::remove_file(root.join("iptv.sqlite-shm"));
+    assert!(!root.join("iptv.sqlite-wal").exists());
+    assert!(!root.join("iptv.sqlite-shm").exists());
+
+    // Healthy verification returns `is_library_not_corrupt()` without creating live sidecars.
+    let healthy_err =
+        Store::verify_corrupt_encrypted(&db_path, &DatabaseKey::from_bytes(KEY_A)).unwrap_err();
+    assert!(healthy_err.is_library_not_corrupt());
+    assert!(!root.join("iptv.sqlite-wal").exists());
+    assert!(!root.join("iptv.sqlite-shm").exists());
+
+    // Corrupt DB with rejected backup leaves zero new files in `root`.
+    corrupt_pages_after_header(&db_path);
+    let mut bad_archive = std::io::Cursor::new(b"PATINABK\x01truncated".as_slice());
+    assert!(
+        backup::restore_backup_into_empty_library(&ports_with_key(&root, KEY_A), &mut bad_archive)
+            .is_err()
+    );
+    assert!(!root.join("iptv.sqlite-wal").exists());
+    assert!(!root.join("iptv.sqlite-shm").exists());
+
+    // Missing file reports `is_library_not_corrupt()`.
+    let missing_err = Store::verify_corrupt_encrypted(
+        root.join("does-not-exist.sqlite"),
+        &DatabaseKey::from_bytes(KEY_A),
+    )
+    .unwrap_err();
+    assert!(missing_err.is_library_not_corrupt());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // If running as non-root, making parent directory 0o000 causes symlink_metadata
+        // to fail with PermissionDenied, which must NOT report `is_library_not_corrupt()`.
+        let locked_dir = temp.path().join("locked-dir");
+        fs::create_dir_all(&locked_dir).unwrap();
+        let locked_db = locked_dir.join("iptv.sqlite");
+        fs::write(&locked_db, b"nonempty").unwrap();
+        fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let meta_res = fs::symlink_metadata(&locked_db);
+        let verify_res =
+            Store::verify_corrupt_encrypted(&locked_db, &DatabaseKey::from_bytes(KEY_A));
+        fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        if meta_res.is_err() {
+            let err = verify_res.unwrap_err();
+            assert!(
+                !err.is_library_not_corrupt(),
+                "inaccessible file must not masquerade as missing/healthy: {err:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn failed_restore_rollback_keeps_three_recovered_copies_and_second_owner_closes_handles() {
+    let temp = tempfile::tempdir().unwrap();
+    let origin_root = temp.path().join("origin-valid");
+    fs::create_dir_all(&origin_root).unwrap();
+    let archive_path = temp.path().join("valid-restore.patinabackup");
+    {
+        let origin = runtime_with_ports(ports_with_key(&origin_root, KEY_B));
+        let mut store = Store::open_encrypted(
+            origin_root.join("iptv.sqlite"),
+            &DatabaseKey::from_bytes(KEY_B),
+        )
+        .unwrap();
+        store
+            .add_source(&Source {
+                name: "Restored After Rollback".into(),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: SecretUrl::new("http://playlist.example.test/ok.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            })
+            .unwrap();
+        drop(store);
+        let busy = origin.begin_backup().unwrap();
+        let out = archive_path.clone();
+        let settings_text = origin.settings().to_json_string();
+        block_on(busy.worker(move |b| b.export(&out, &settings_text))).unwrap();
+        assert!(origin.drain_services());
+    }
+
+    let root = temp.path().join("shared-root");
+    let ports = ports_with_key(&root, KEY_A);
+
+    // 1. Open warm connections on `owner_a`, then corrupt the DB on disk and run
+    // `recover_corrupt_start_fresh` from a second `owner_b` sharing `root`.
+    let db_path = seed_multipage_encrypted_store(&root, KEY_A, "Shared Root Initial");
+    let owner_a = runtime_with_ports(ports.clone());
+    let _ = block_on(owner_a.announce_retired_recordings()).unwrap();
+    corrupt_pages_after_header(&db_path);
+    let owner_b = runtime_with_ports(ports.clone());
+    let moved_slot = block_on(owner_b.recover_corrupt_start_fresh()).unwrap();
+    assert!(moved_slot.join("iptv.sqlite").is_file());
+    assert!(!db_path.exists());
+    assert!(owner_a.drain_services());
+    assert!(owner_b.drain_services());
+    drop(owner_a);
+    drop(owner_b);
+
+    // 2. Seed two more recovered copies so `recovered/` holds 3 copies (`slot0..2`).
+    let mut prior_slots = vec![moved_slot];
+    for idx in 1..3 {
+        seed_multipage_encrypted_store(&root, KEY_A, &format!("Prior Copy {idx}"));
+        corrupt_pages_after_header(&db_path);
+        prior_slots.push(backup::set_aside_corrupt_library(&ports).unwrap());
+    }
+    assert_eq!(prior_slots.len(), backup::MAX_RECOVERED_LIBRARIES);
+
+    // Seed a 4th corrupt live DB and simulate a pre-install rejection during
+    // `activate_locked` (corrupt `staged_corrupt` resumed when an older `restore-pending`
+    // was also waiting): all 3 prior recovered copies AND the older `restore-pending`
+    // must remain intact, and `resume` must return Err!
+    seed_multipage_encrypted_store(&root, KEY_A, "Fourth Corrupt Live");
+    let fourth_bytes = corrupt_pages_after_header(&db_path);
+    let fourth_slot = root.join("recovered/20991231-235959Z");
+    fs::create_dir_all(&fourth_slot).unwrap();
+    fs::rename(&db_path, fourth_slot.join("iptv.sqlite")).unwrap();
+    fs::write(fourth_slot.join("README.txt"), b"fourth\n").unwrap();
+    fs::write(
+        backup::sibling(&root, "restore-corrupt-active"),
+        b"20991231-235959Z",
+    )
+    .unwrap();
+    let older_pending = backup::sibling(&root, "restore-pending");
+    fs::create_dir_all(&older_pending).unwrap();
+    fs::write(older_pending.join("older.txt"), b"keep-older-pending").unwrap();
+    let bad_staged = backup::sibling(&root, "restore-corrupt-staged");
+    fs::create_dir_all(&bad_staged).unwrap();
+    fs::write(bad_staged.join("iptv.sqlite"), &fourth_bytes).unwrap();
+    fs::write(bad_staged.join("settings.json"), b"{}").unwrap();
+
+    // Verify on an independent root that `restore_activation()` with a locked key
+    // moves an older `restore-pending` into `restore-prior` before publishing `staged_corrupt`.
+    let locked_root = temp.path().join("locked-prior-preserve");
+    fs::create_dir_all(locked_root.join("recovered/20991231-235959Z")).unwrap();
+    fs::write(
+        locked_root.join("recovered/20991231-235959Z/iptv.sqlite"),
+        b"corrupt-moved",
+    )
+    .unwrap();
+    fs::write(
+        backup::sibling(&locked_root, "restore-corrupt-active"),
+        b"20991231-235959Z",
+    )
+    .unwrap();
+    fs::create_dir_all(backup::sibling(&locked_root, "restore-pending")).unwrap();
+    fs::write(
+        backup::sibling(&locked_root, "restore-pending").join("older.txt"),
+        b"keep-older-pending",
+    )
+    .unwrap();
+    let locked_staged = backup::sibling(&locked_root, "restore-corrupt-staged");
+    fs::create_dir_all(&locked_staged).unwrap();
+    fs::write(locked_staged.join("iptv.sqlite"), b"encrypted-staged-bytes").unwrap();
+    fs::write(locked_staged.join("settings.json"), b"{}").unwrap();
+    let locked_owner = runtime_with_ports(Ports::new(locked_root.clone(), |_| {
+        Err(iptv_runtime::Error::key_unavailable(
+            "platform credential broker is locked or unavailable",
+        ))
+    }));
+    assert!(locked_owner.restore_activation()().is_err());
+    assert!(locked_owner.drain_services());
+    assert!(
+        backup::sibling(&locked_root, "restore-prior")
+            .join("older.txt")
+            .is_file(),
+        "locked-key activation must preserve older pending restore in restore-prior"
+    );
+
+    // On `root` with valid key, `restore_activation()` rejects `bad_staged`, rolls
+    // `fourth_slot` back to `iptv.sqlite`, restores `restore-prior` -> `restore-pending`,
+    // and keeps all 3 prior slots!
+    let verifier = runtime_with_ports(ports.clone());
+    assert!(
+        verifier.restore_activation()().is_err(),
+        "rejected resumed restore must return Err after rolling back"
+    );
+    assert!(verifier.drain_services());
+    assert_eq!(fs::read(&db_path).unwrap(), fourth_bytes);
+    assert!(older_pending.join("older.txt").is_file());
+    for slot in &prior_slots {
+        assert!(
+            slot.join("iptv.sqlite").is_file(),
+            "rollback must keep all 3 prior recovered copies: {slot:?}"
+        );
+    }
+    fs::remove_dir_all(&older_pending).unwrap();
+
+    // Finally, a valid restore commits and prunes `recovered/` down to 3 copies!
+    let committed_slot = backup::restore_backup_into_empty_library(
+        &ports,
+        &mut fs::File::open(&archive_path).unwrap(),
+    )
+    .unwrap();
+    assert!(committed_slot.join("iptv.sqlite").is_file());
+    let remaining_count = fs::read_dir(root.join("recovered"))
+        .unwrap()
+        .filter_map(|e| e.ok().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())))
+        .count();
+    assert_eq!(remaining_count, backup::MAX_RECOVERED_LIBRARIES);
 }

@@ -265,9 +265,10 @@ impl Recovery {
         self.activate(self.focus)
     }
 
-    /// Activate `action`, returning true when the host should retry startup.
+    /// Activate `Retry` or `Details`, returning true when the host should retry startup.
+    /// Actions with dedicated host effects (`RestoreBackup`, `StartFresh`) require [`Self::activate`].
     pub fn select(&mut self, action: Action) -> bool {
-        self.activate(action) == Effect::Retry
+        matches!(action, Action::Retry | Action::Details) && self.activate(action) == Effect::Retry
     }
 
     /// Dismiss the Start fresh confirmation without modifying storage.
@@ -416,6 +417,10 @@ mod tests {
     fn corrupt_focus_moves_in_order_and_start_fresh_requires_cancel_first_confirmation() {
         let mut recovery = Recovery::for_cause(Cause::Corrupt, Retry::Unavailable);
         assert_eq!(recovery.focus(), Action::RestoreBackup);
+        assert!(!recovery.select(Action::RestoreBackup));
+        assert!(!recovery.working());
+        assert!(!recovery.select(Action::StartFresh));
+        assert_eq!(recovery.confirming_start_fresh(), None);
         assert!(!recovery.step(-1));
         assert!(recovery.step(1));
         assert_eq!(recovery.focus(), Action::StartFresh);

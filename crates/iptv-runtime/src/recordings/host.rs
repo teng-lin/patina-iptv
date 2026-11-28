@@ -97,7 +97,7 @@ pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
                 .host
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some(Arc::new(Service::new(ports.clone())));
+                Some(Service::shared(ports.clone()));
             state
         })
         .clone()
@@ -139,7 +139,7 @@ impl State {
             && let Some(previous) = host.as_ref()
         {
             let ports = previous.accept().ports().clone();
-            *host = Some(Arc::new(Service::new(ports)));
+            *host = Some(Service::shared(ports));
         }
         let services = if let Some(host) = host.as_ref() {
             host.begin();

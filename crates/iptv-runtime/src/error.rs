@@ -11,6 +11,7 @@ enum ErrorKind {
     SettingsLocked,
     ProviderCapacity,
     Unavailable(&'static str),
+    KeyUnavailable(&'static str),
     RestartRequired(&'static str),
     SchemaTooNew {
         found: u32,
@@ -37,7 +38,9 @@ impl Error {
     /// A static application reason, without database diagnostics or provider data.
     pub fn unavailable_reason(&self) -> Option<&'static str> {
         match &self.0 {
-            ErrorKind::Unavailable(reason) | ErrorKind::RestartRequired(reason) => Some(reason),
+            ErrorKind::Unavailable(reason)
+            | ErrorKind::KeyUnavailable(reason)
+            | ErrorKind::RestartRequired(reason) => Some(reason),
             ErrorKind::SettingsLocked => Some(SETTINGS_LOCKED_REASON),
             ErrorKind::ProviderCapacity => Some(PROVIDER_CAPACITY_REASON),
             _ => None,
@@ -96,6 +99,9 @@ impl Error {
             ErrorKind::Unavailable(reason) => {
                 iptv_store_sqlite::StoreError::Unavailable(reason).retryable_open()
             }
+            ErrorKind::KeyUnavailable(reason) => {
+                iptv_store_sqlite::StoreError::KeyUnavailable(reason).retryable_open()
+            }
             ErrorKind::WorkerUnavailable => true,
             ErrorKind::Storage(error) => error.retryable_open(),
             _ => false,
@@ -131,28 +137,12 @@ impl Error {
 
     /// Opening failed because the database key or platform credential store was unavailable.
     pub fn is_credential_unavailable(&self) -> bool {
-        if self.is_not_database() {
-            return true;
-        }
-        let reason = match &self.0 {
-            ErrorKind::Unavailable(reason) | ErrorKind::RestartRequired(reason) => Some(*reason),
-            ErrorKind::Storage(iptv_store_sqlite::StoreError::Unavailable(reason))
-            | ErrorKind::Storage(iptv_store_sqlite::StoreError::RestartRequired(reason)) => {
-                Some(*reason)
-            }
-            _ => None,
-        };
-        reason.is_some_and(|text| {
-            let bytes = text.as_bytes();
-            [
-                &b"credential"[..],
-                b"database key",
-                b"Keystore",
-                b"key store",
-            ]
-            .into_iter()
-            .any(|needle| bytes.windows(needle.len()).any(|part| part == needle))
-        })
+        matches!(self.0, ErrorKind::KeyUnavailable(_)) || self.is_not_database()
+    }
+
+    /// A failure from the platform credential store or database key broker.
+    pub fn key_unavailable(reason: &'static str) -> Self {
+        Self(ErrorKind::KeyUnavailable(reason))
     }
 
     /// A failure involving host state that is only initialized on launch.
@@ -183,6 +173,9 @@ impl Error {
         match self.0 {
             ErrorKind::Storage(error) => error,
             ErrorKind::Unavailable(reason) => iptv_store_sqlite::StoreError::Unavailable(reason),
+            ErrorKind::KeyUnavailable(reason) => {
+                iptv_store_sqlite::StoreError::KeyUnavailable(reason)
+            }
             ErrorKind::SettingsLocked => {
                 iptv_store_sqlite::StoreError::Unavailable(SETTINGS_LOCKED_REASON)
             }
@@ -217,6 +210,9 @@ impl std::fmt::Debug for Error {
             ErrorKind::SettingsLocked => f.write_str("SettingsLocked"),
             ErrorKind::ProviderCapacity => f.write_str("ProviderCapacity"),
             ErrorKind::Unavailable(reason) => f.debug_tuple("Unavailable").field(reason).finish(),
+            ErrorKind::KeyUnavailable(reason) => {
+                f.debug_tuple("KeyUnavailable").field(reason).finish()
+            }
             ErrorKind::RestartRequired(reason) => {
                 f.debug_tuple("RestartRequired").field(reason).finish()
             }
@@ -238,6 +234,7 @@ impl std::fmt::Debug for Error {
             ErrorKind::Storage(error) => f.write_str(match error {
                 iptv_store_sqlite::StoreError::Sqlite(_) => "Sqlite",
                 iptv_store_sqlite::StoreError::Migration { .. } => "Migration",
+                iptv_store_sqlite::StoreError::PrivateDocument { .. } => "PrivateDocument",
                 iptv_store_sqlite::StoreError::SourceNotFound(_) => "SourceNotFound",
                 iptv_store_sqlite::StoreError::CustomGroupNotFound(_) => "CustomGroupNotFound",
                 iptv_store_sqlite::StoreError::InvalidData(_) => "InvalidData",
@@ -251,8 +248,9 @@ impl std::fmt::Display for Error {
         match &self.0 {
             ErrorKind::SettingsLocked => f.write_str("settings are locked"),
             ErrorKind::ProviderCapacity => f.write_str("provider viewing capacity is full"),
-            ErrorKind::Unavailable(reason) => write!(f, "store unavailable: {reason}"),
-            ErrorKind::RestartRequired(reason) => write!(f, "store unavailable: {reason}"),
+            ErrorKind::Unavailable(reason)
+            | ErrorKind::KeyUnavailable(reason)
+            | ErrorKind::RestartRequired(reason) => write!(f, "store unavailable: {reason}"),
             ErrorKind::SchemaTooNew { found, supported } => write!(
                 f,
                 "database schema version {found} is newer than this build supports ({supported})"
@@ -291,6 +289,9 @@ impl From<iptv_store_sqlite::StoreError> for Error {
                 ErrorKind::SchemaTooNew { found, supported }
             }
             error if error.is_corrupt_database() => ErrorKind::CorruptDatabase(error),
+            iptv_store_sqlite::StoreError::KeyUnavailable(reason) => {
+                ErrorKind::KeyUnavailable(reason)
+            }
             iptv_store_sqlite::StoreError::Unavailable(reason) => ErrorKind::Unavailable(reason),
             error => ErrorKind::Storage(error),
         };
@@ -317,10 +318,14 @@ mod tests {
         assert!(error.into_store_error().is_not_database());
 
         let locked_broker =
-            Error::unavailable("platform credential broker is locked or unavailable");
+            Error::key_unavailable("platform credential broker is locked or unavailable");
         assert!(!locked_broker.is_corrupt_database());
         assert!(!locked_broker.is_not_database());
         assert!(locked_broker.is_credential_unavailable());
+
+        let unrelated_credential_word =
+            Error::unavailable("cannot read playlist credential metadata");
+        assert!(!unrelated_credential_word.is_credential_unavailable());
 
         let malformed = StoreError::Sqlite(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),

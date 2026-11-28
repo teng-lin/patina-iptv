@@ -115,6 +115,8 @@ const STATICS: &[(&str, &str)] = &[
     ("private_files.rs", "TREES"),
     // Per-directory catalog replacement gate shared across owners and startup.
     ("storage.rs", "REPLACEMENT"),
+    // Per-directory weak store-lane registry drained across file replacement.
+    ("store_service/mod.rs", "BY_ROOT"),
     // Serialize native service startup/restore and retain its independent owner.
     ("recordings/host.rs", "ACTIVATION"),
     ("recordings/host.rs", "HOSTS"),

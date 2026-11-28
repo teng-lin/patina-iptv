@@ -261,6 +261,7 @@ pub(super) fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: boo
         async move {
             let mut startup = startup.await;
             if startup.is_ok()
+                && services.is_current()
                 && services.ports().file_storage
                 && crate::backup::take_resumed_settings_dirty(owner.data_dir())
             {

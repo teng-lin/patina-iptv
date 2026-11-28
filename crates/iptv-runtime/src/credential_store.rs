@@ -4,7 +4,12 @@ use std::path::Path;
 
 /// The owner's key broker answers for its own library file.
 fn database_key(ports: &crate::Ports, path: &Path) -> Result<DatabaseKey, StoreError> {
-    (ports.database_key)(path).map_err(crate::Error::into_store_error)
+    (ports.database_key)(path).map_err(|error| match error.into_store_error() {
+        other @ (StoreError::Unavailable("cannot inspect existing database")
+        | StoreError::Unavailable("secure random generator failed")) => other,
+        StoreError::Unavailable(reason) => StoreError::KeyUnavailable(reason),
+        other => other,
+    })
 }
 
 pub(crate) fn open_database(ports: &crate::Ports, path: &Path) -> Result<Store, StoreError> {
@@ -54,7 +59,7 @@ mod test_support_tests {
         );
         assert!(matches!(
             result,
-            Err(iptv_store_sqlite::StoreError::Unavailable(
+            Err(iptv_store_sqlite::StoreError::KeyUnavailable(
                 "synthetic database key was not installed"
             ))
         ));

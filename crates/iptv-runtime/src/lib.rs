@@ -184,7 +184,7 @@ impl Runtime {
     pub fn new(ports: Ports) -> Self {
         let recordings = recordings::host::acquire(&ports);
         let entropy = ports.entropy;
-        let store = std::sync::Arc::new(store_service::Service::new(ports));
+        let store = store_service::Service::shared(ports);
         #[cfg(feature = "test-support")]
         let guide_checks = guide_checks::GuideChecks::mirrored(store.guide_checks.clone());
         #[cfg(not(feature = "test-support"))]
