@@ -40,14 +40,12 @@ bounded() {
 
 apt=(apt-get)
 source_files=("$sources/sources.list" "$sources/sources.list.d/"*.list "$sources/sources.list.d/"*.sources)
-if [[ ${PATINA_APT_UBUNTU_ONLY:-false} == true ]]; then
-  # This caller needs only Ubuntu packages. Keep using the image's signed
-  # deb822 entries through both mirror attempts and skip unrelated vendor feeds.
-  ubuntu_source="$sources/sources.list.d/ubuntu.sources"
-  if [[ ! -r "$ubuntu_source" ]]; then
-    echo "::error::Ubuntu package sources missing at $ubuntu_source" >&2
-    exit 1
-  fi
+ubuntu_source="$sources/sources.list.d/ubuntu.sources"
+if [[ -r "$ubuntu_source" ]]; then
+  # Every caller installs Ubuntu packages only. Keep using the image's signed
+  # deb822 entries through both mirror attempts and skip the runner image's
+  # vendor feeds, whose outages would otherwise fail the refresh. Images
+  # without this file (before Ubuntu 24.04) use all their configured sources.
   source_files=("$ubuntu_source")
   apt+=(-o "Dir::Etc::sourcelist=$ubuntu_source" -o Dir::Etc::sourceparts=-)
 fi

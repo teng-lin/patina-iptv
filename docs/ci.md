@@ -309,6 +309,10 @@ Hosted runner setup must fail fast, not consume a job's whole timeout (#159).
 Each download attempt is bounded to four minutes, each list refresh or dpkg
 repair to 90 seconds, and each offline install to three minutes. On GitHub's
 Ubuntu runners, known cloud archive URLs use Canonical's HTTPS archive first.
+Where the image keeps Ubuntu's entries in `ubuntu.sources`, the script and the
+source index refresh (`tools/ci/enable-deb-src.sh`) read that file alone: the
+jobs need only Ubuntu packages, and an outage of one of the image's vendor
+feeds would fail the refresh. A job needing a vendor package must change this.
 A failed fetch retries once with the configured mirror. apt refreshes signed
 indexes and can reuse completed downloads across attempts. The install starts after the download
 finishes, and a failed install gets one offline retry after dpkg repair.
@@ -343,6 +347,17 @@ workspace using the committed runner lock, NSH pin, compiler, NDK, host library
 versions, ABI, and profile. The generic pinned NSH runtime has a separate cache.
 The development APK disables LTO and records Cargo timings. A manual Android
 smoke run can select ThinLTO for comparison.
+
+Two other downloads have refused hosted runners for a while. The native runtime
+fetch (`tools/ci/native_candidates.py`) retries a published release asset after
+5, 15 and 45 seconds on HTTP 403, 408, 429, 500, 502, 503 and 504 and on
+connection errors. A 404 still means an unpublished pin and selects the tested
+candidate; a refusal never does, and the checksum applies to every download.
+Maven Central has answered builds without a Gradle cache with HTTP 429, so on
+GitHub Actions `hosts/android/settings.gradle.kts` asks Google's mirror of it
+first, with Maven Central serving what the mirror lacks. Strict dependency
+verification applies to both. Gradle does not fall back to the next repository
+when one answers with an error, so a mirror outage fails the build.
 
 When a hosted runner or mirror still stalls, re-run only the failed jobs:
 

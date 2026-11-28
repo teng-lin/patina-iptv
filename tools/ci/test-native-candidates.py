@@ -92,6 +92,57 @@ class Candidate(unittest.TestCase):
             fallback.assert_not_called()
 
 
+class Retry(unittest.TestCase):
+    setUp = Candidate.setUp
+    write_archive = Candidate.write_archive
+
+    def refusal(self, code):
+        return urllib.error.HTTPError(self.pin["url"], code, "generated refusal", None, None)
+
+    def published(self, data=None):
+        response = io.BytesIO(self.runtime if data is None else data)
+        response.geturl = lambda: self.pin["url"]
+        return response
+
+    def fetch(self, outcomes):
+        with mock.patch.object(native.urllib.request, "urlopen", side_effect=outcomes) as network, \
+                mock.patch.object(native.time, "sleep") as sleep, \
+                mock.patch.object(native, "candidate_file") as fallback, \
+                mock.patch.object(native.sys, "stderr", new_callable=io.StringIO):
+            try:
+                return native.fetch("windows", "runtime", self.cache, self.root)
+            finally:
+                self.attempts = network.call_count
+                self.delays = [call.args[0] for call in sleep.call_args_list]
+                fallback.assert_not_called()
+
+    def test_transient_refusals_are_retried_with_backoff(self):
+        path = self.fetch([self.refusal(403), urllib.error.URLError("generated reset"), self.published()])
+        self.assertEqual(path.read_bytes(), self.runtime)
+        self.assertEqual((self.attempts, self.delays), (3, [5, 15]))
+
+    def test_a_retry_discards_the_partial_download(self):
+        partial = self.published()
+        partial.read = mock.Mock(side_effect=[b"generated partial bytes", ConnectionResetError("generated reset")])
+        self.assertEqual(self.fetch([partial, self.published()]).read_bytes(), self.runtime)
+
+    def test_a_persistent_refusal_fails_without_using_a_candidate(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            self.fetch([self.refusal(403) for _ in range(4)])
+        self.assertEqual((self.attempts, self.delays), (4, [5, 15, 45]))
+        self.assertEqual(list((self.cache / self.tag).iterdir()), [])
+
+    def test_other_statuses_are_not_retried(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            self.fetch([self.refusal(401)])
+        self.assertEqual((self.attempts, self.delays), (1, []))
+
+    def test_a_checksum_mismatch_is_not_retried(self):
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            self.fetch([self.published(b"corrupt generated payload")])
+        self.assertEqual((self.attempts, self.delays), (1, []))
+
+
 class Provenance(unittest.TestCase):
     def setUp(self):
         self.commit = "a" * 40
