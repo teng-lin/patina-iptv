@@ -358,6 +358,43 @@ impl Store {
             Some(key) => Store::open_encrypted(from, key)?,
             None => Store::open(from)?,
         };
+        // Validate every row through typed decoders before copying raw SQLite
+        // values so corrupt B-tree cells cannot poison a pending restore.
+        let _ = host.recording_jobs()?;
+        let _ = host.recording_progress_points()?;
+        let _ = host.retired_recording_schedules()?;
+        let completions: Vec<(i64, String, String, i64, String, String)> = host
+            .conn
+            .prepare(
+                "SELECT job_id,source_incarnation,outcome,bytes,digest,message
+                 FROM recording_completions LIMIT 1000",
+            )?
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        for (_, _, outcome, bytes, _, _) in &completions {
+            if !matches!(outcome.as_str(), "completed" | "partial" | "failed") || *bytes < 0 {
+                return Err(StoreError::InvalidData(
+                    "invalid recording completion row".into(),
+                ));
+            }
+        }
+        let _: Option<String> = host
+            .conn
+            .query_row(
+                "SELECT value FROM store_meta WHERE key='retired_recording_notice'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
         // A scheduled row with media is an interrupted capture resuming.
         const KEPT: &str = "status<>'scheduled' OR bytes>0";
         let tx = self

@@ -8,9 +8,38 @@ fn database_key(ports: &crate::Ports, path: &Path) -> Result<DatabaseKey, StoreE
 }
 
 pub(crate) fn open_database(ports: &crate::Ports, path: &Path) -> Result<Store, StoreError> {
+    let open = || {
+        if let Some(root) = path.parent()
+            && !path.exists()
+        {
+            if crate::backup::has_interrupted_corrupt_restore(root) {
+                let _ = database_key(ports, path)?;
+                crate::backup::resume_interrupted_corrupt_restore(ports, root).map_err(|_| {
+                    StoreError::Unavailable(iptv_core::message::key(
+                        "The saved library could not be opened",
+                    ))
+                })?;
+            } else {
+                crate::backup::finish_interrupted_sidecar_recovery(root, path).map_err(|_| {
+                    StoreError::Unavailable(iptv_core::message::key(
+                        "Could not move the damaged library aside",
+                    ))
+                })?;
+            }
+        }
+        let key = database_key(ports, path)?;
+        let store = Store::open_encrypted(path, &key)?;
+        seal_documents(store, path)
+    };
+    match path.parent() {
+        Some(root) => crate::storage::with_directory_replacement(root, open),
+        None => open(),
+    }
+}
+
+pub(crate) fn verify_corrupt_database(ports: &crate::Ports, path: &Path) -> Result<(), StoreError> {
     let key = database_key(ports, path)?;
-    let store = Store::open_encrypted(path, &key)?;
-    seal_documents(store, path)
+    Store::verify_corrupt_encrypted(path, &key)
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -59,8 +88,8 @@ pub(crate) fn validate_staged_database(
     validate_staged_with_key(path, &key)
 }
 
-#[cfg_attr(all(test, not(unix)), allow(dead_code))]
-fn validate_staged_with_key(path: &Path, key: &DatabaseKey) -> Result<(), StoreError> {
+#[cfg_attr(all(test, not(feature = "native")), allow(dead_code))]
+pub(super) fn validate_staged_with_key(path: &Path, key: &DatabaseKey) -> Result<(), StoreError> {
     use std::io::Read;
     let mut header = [0; 16];
     let mut file = std::fs::File::open(path)

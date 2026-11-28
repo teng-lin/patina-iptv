@@ -53,7 +53,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{
     Arc, Mutex, OnceLock,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::thread::ThreadId;
 use std::time::Duration;
@@ -194,6 +194,7 @@ impl Lane {
 struct Epochs {
     next: AtomicU64,
     active: AtomicU64,
+    replacing: AtomicBool,
     /// Closing admission must wake queries before accepted FIFO writes drain.
     closed: Mutex<CancelToken>,
 }
@@ -350,6 +351,11 @@ impl Service {
     }
 
     fn open_store(&self) -> Result<Store, StoreError> {
+        if self.epochs.replacing.load(Ordering::SeqCst) {
+            return Err(StoreError::Unavailable(iptv_core::message::key(
+                "The saved library could not be opened",
+            )));
+        }
         if let Some(host) = &self.ports.store_host {
             return host.open();
         }
@@ -397,6 +403,45 @@ impl Service {
         #[cfg(feature = "test-support")]
         let limit = self.hooks.drain_limit().unwrap_or(limit);
         limit
+    }
+
+    /// Closes open SQLite handles across all lanes and blocks new store opens
+    /// while `operation` moves or replaces the database files on disk, keeping
+    /// this owner's epoch active so `retry_startup` can reopen immediately.
+    pub(crate) fn with_closed_connections<R>(&self, operation: impl FnOnce() -> R) -> Option<R> {
+        struct Guard<'a>(&'a AtomicBool);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        if self
+            .epochs
+            .replacing
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return None;
+        }
+        let _guard = Guard(&self.epochs.replacing);
+        let deadline = Instant::now() + self.drain_limit();
+        let reset = |lane: &Lane, limit: Instant| {
+            lane.barrier(remaining(limit), |connection| {
+                *connection = Connection::default();
+            })
+        };
+        if !(reset(&self.writer, deadline)
+            && reset(&self.reader, deadline)
+            && reset(&self.analysis, deadline))
+        {
+            return None;
+        }
+        let output = operation();
+        let post_deadline = Instant::now() + self.drain_limit();
+        let _ = reset(&self.writer, post_deadline);
+        let _ = reset(&self.reader, post_deadline);
+        let _ = reset(&self.analysis, post_deadline);
+        Some(output)
     }
 
     #[cfg(all(test, feature = "test-support"))]

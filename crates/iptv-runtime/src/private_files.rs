@@ -46,10 +46,19 @@ pub(crate) fn prepare_store(store: Store, path: &Path) -> Result<Store, StoreErr
         return Ok(store);
     };
     let directory = root.join("playlists");
+    let map_doc_err = |error: StoreError| {
+        if error.is_corrupt_database() {
+            StoreError::Unavailable(iptv_core::message::key(
+                "The saved library could not be opened",
+            ))
+        } else {
+            error
+        }
+    };
     publication(&directory, || {
-        cleanup_unlocked(&directory)?;
+        cleanup_unlocked(&directory).map_err(map_doc_err)?;
         if !store.private_documents_sealed()? {
-            seal_clean_tree(&store, &directory)?;
+            seal_clean_tree(&store, &directory).map_err(map_doc_err)?;
             store.mark_private_documents_sealed()?;
         }
         Ok(store)

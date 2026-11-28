@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::store_service::Services;
@@ -32,6 +32,11 @@ impl Default for State {
 }
 
 const MAGIC: &[u8; 9] = b"PATINABK\x01";
+/// Maximum number of set-aside corrupt library folders retained under `<data_dir>/recovered/`.
+pub const MAX_RECOVERED_LIBRARIES: usize = 3;
+const RECOVERED_README: &[u8] = b"Patina moved this unreadable library database aside so the app could start with a fresh library.\n\
+Your settings, system keystore entries, and update state were kept in place.\n\
+The files in this folder remain encrypted with your device's database key.\n";
 use iptv_import::backup_manifest::{
     self, MAX_BYTES, MAX_FILES, MAX_MANIFEST, allowed, entry_limit,
 };
@@ -41,11 +46,32 @@ pub fn next_document_request() -> String {
     SEQUENCE.fetch_add(1, Ordering::Relaxed).to_string()
 }
 use error::{Context, Error, Rejection, Result};
-type Started = Arc<OnceLock<std::result::Result<(), StartupError>>>;
+#[derive(Default)]
+struct DirectoryStartup {
+    outcome: OnceLock<std::result::Result<(), StartupError>>,
+    resumed_settings_dirty: AtomicBool,
+}
+type Started = Arc<DirectoryStartup>;
 /// The first activation outcome of each storage root in this process. A
 /// process-lifetime fact about a directory, not owner state: every owner of
 /// the same root shares it, and an owner of another root has its own.
 static STARTED: Mutex<Option<HashMap<PathBuf, Started>>> = Mutex::new(None);
+
+fn started_for(root: &Path) -> Started {
+    STARTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_default()
+        .entry(root.to_owned())
+        .or_default()
+        .clone()
+}
+
+pub(crate) fn take_resumed_settings_dirty(root: &Path) -> bool {
+    started_for(root)
+        .resumed_settings_dirty
+        .swap(false, Ordering::SeqCst)
+}
 
 /// Why activating or recovering a restore failed at startup; `error` is
 /// logged by the caller, its message shown when the failure is `fatal`.
@@ -154,18 +180,22 @@ impl Drop for Scratch {
 
 pub use crate::storage::sibling;
 fn scratch(services: &Services) -> Result<Scratch> {
+    scratch_for_ports(services.ports())
+}
+fn scratch_for_ports(ports: &crate::Ports) -> Result<Scratch> {
     let path = sibling(
-        services.directory(),
+        &ports.directory,
         &format!(
             "backup-work-{}-{}",
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ),
     );
-    private_dir(services, &path).context("Could not create temporary backup storage")?;
+    private_dir_with(&path, ports.exclude_from_backup)
+        .context("Could not create temporary backup storage")?;
     Ok(Scratch(path))
 }
-fn private_dir(services: &Services, path: &Path) -> io::Result<()> {
+fn private_dir_with(path: &Path, exclude: fn(&Path) -> io::Result<()>) -> io::Result<()> {
     let builder = fs::DirBuilder::new();
     #[cfg(unix)]
     let mut builder = builder;
@@ -175,7 +205,7 @@ fn private_dir(services: &Services, path: &Path) -> io::Result<()> {
         builder.mode(0o700);
     }
     builder.create(path)?;
-    let result = (services.ports().exclude_from_backup)(path);
+    let result = exclude(path);
     if result.is_err() {
         // Scratch ownership starts only after admission succeeds. This directory
         // was just created, but no guard exists yet to clean a refused one.
@@ -361,10 +391,34 @@ fn seal_restore(services: &Services, directory: &Path) -> Result<()> {
         .context("Could not encrypt the pending restore")
 }
 #[cfg(test)]
+fn seal_restore_without_live_store(ports: &crate::Ports, directory: &Path) -> Result<()> {
+    let path = directory.join("iptv.sqlite");
+    if let Ok(key) = (ports.database_key)(&path) {
+        super::credential_store::validate_staged_with_key(&path, &key)
+            .context("Could not encrypt the pending restore")
+    } else {
+        Ok(())
+    }
+}
+#[cfg(not(test))]
+fn seal_restore_without_live_store(ports: &crate::Ports, directory: &Path) -> Result<()> {
+    super::credential_store::validate_staged_database(ports, &directory.join("iptv.sqlite"))
+        .context("Could not encrypt the pending restore")
+}
+#[cfg(test)]
 fn validate_pending(
-    _: &crate::Ports,
+    ports: &crate::Ports,
     path: &Path,
 ) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
+    if let Ok(key) = (ports.database_key)(path) {
+        let mut header = [0; 16];
+        let plaintext = File::open(path)
+            .and_then(|mut f| f.read_exact(&mut header))
+            .is_ok_and(|()| &header == b"SQLite format 3\0");
+        if !plaintext {
+            return Store::validate_encrypted_snapshot(path, &key);
+        }
+    }
     Store::validate_snapshot(path)
 }
 #[cfg(not(test))]
@@ -670,8 +724,34 @@ fn validate_settings(text: &str) -> Result<()> {
 /// Validates all content before replacing an existing pending restore. No
 /// running database or settings file is changed by staging or cancellation.
 fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
-    let root = services.directory();
-    let work = scratch(services)?;
+    stage_with(services.ports(), input, |work| seal_restore(services, work))
+}
+
+fn stage_into_scratch_without_live_store(
+    ports: &crate::Ports,
+    input: &mut impl Read,
+) -> Result<Scratch> {
+    stage_into_scratch(ports, input, |work| {
+        seal_restore_without_live_store(ports, work)
+    })
+}
+
+fn stage_with(
+    ports: &crate::Ports,
+    input: &mut impl Read,
+    seal: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
+    let work = stage_into_scratch(ports, input, seal)?;
+    publish_pending_restore(&ports.directory, work)
+}
+
+fn stage_into_scratch(
+    ports: &crate::Ports,
+    input: &mut impl Read,
+    seal: impl FnOnce(&Path) -> Result<()>,
+) -> Result<Scratch> {
+    let root = ports.directory.as_path();
+    let work = scratch_for_ports(ports)?;
     let mut magic = [0; 9];
     input
         .read_exact(&mut magic)
@@ -807,7 +887,15 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
     drop(store);
     // All archive validation and reference rewriting succeeded. Encrypt the
     // persistent pending tree before its rename can make it survive restart.
-    seal_restore(services, &work.0)?;
+    seal(&work.0)?;
+    Ok(work)
+}
+
+fn publish_pending_restore(root: &Path, work: Scratch) -> Result<()> {
+    publish_staged_path(root, &work.0)
+}
+
+fn publish_staged_path(root: &Path, staged: &Path) -> Result<()> {
     // Close/checkpoint WAL before directory swap; SQLite open on next launch
     // sees a complete database, and no staging handles remain.
     recover_replacement(root)?;
@@ -819,7 +907,7 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
     if pending.exists() {
         fs::rename(&pending, &replaced).context("Could not replace the pending restore")?;
     }
-    if let Err(error) = fs::rename(&work.0, &pending) {
+    if let Err(error) = fs::rename(staged, &pending) {
         if replaced.exists() {
             let _ = fs::rename(&replaced, &pending);
         }
@@ -871,16 +959,10 @@ pub(crate) fn lock(root: &Path) -> std::result::Result<(), Error> {
 /// or recover it.
 pub(crate) fn startup(ports: &crate::Ports) -> std::result::Result<(), StartupError> {
     let root = &ports.directory;
-    let started = STARTED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get_or_insert_default()
-        .entry(root.clone())
-        .or_default()
-        .clone();
+    let started = started_for(root);
     // Keep the first outcome, including a fatal recovery failure. Recreating
     // an engine must neither rerun activation nor bypass failed recovery.
-    *started.get_or_init(|| {
+    *started.outcome.get_or_init(|| {
         activate(ports, root).map_err(|error| StartupError {
             error,
             fatal: !root.exists(),
@@ -889,6 +971,107 @@ pub(crate) fn startup(ports: &crate::Ports) -> std::result::Result<(), StartupEr
 }
 
 fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
+    crate::storage::with_directory_replacement(root, || activate_locked(ports, root))
+}
+
+fn reconcile_previous_restore(root: &Path) -> Result<()> {
+    let previous = sibling(root, "restore-previous");
+    if previous.exists() {
+        if root.join("iptv.sqlite").is_file() {
+            // The validated tree was renamed into place before interruption.
+            preserve_non_backup_entries(&previous, root)?;
+            fs::remove_dir_all(&previous).context("Could not finish the previous restore")?;
+        } else {
+            // Platform initialization may recreate the missing directory before
+            // recovery runs. Its existence is not an activation commit marker.
+            if root.exists() {
+                fs::remove_dir_all(root).context("Could not recover application storage")?;
+            }
+            fs::rename(&previous, root).context("Could not recover application storage")?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn has_interrupted_corrupt_restore(root: &Path) -> bool {
+    sibling(root, "restore-corrupt-active").exists()
+}
+
+pub(crate) fn resume_interrupted_corrupt_restore(ports: &crate::Ports, root: &Path) -> Result<()> {
+    activate_locked(ports, root)
+}
+
+enum ActiveMarker {
+    Commit(PathBuf),
+    Rollback(PathBuf),
+}
+
+fn read_active_marker(root: &Path, active_marker: &Path) -> Option<ActiveMarker> {
+    let raw = fs::read_to_string(active_marker).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix("rollback:") {
+        if rest.is_empty() {
+            return None;
+        }
+        Some(ActiveMarker::Rollback(root.join("recovered").join(rest)))
+    } else {
+        let slot = root.join("recovered").join(trimmed);
+        slot.join("iptv.sqlite")
+            .is_file()
+            .then_some(ActiveMarker::Commit(slot))
+    }
+}
+
+#[cfg(not(windows))]
+fn sync_dir_io(path: &Path) -> io::Result<()> {
+    File::open(path).and_then(|f| f.sync_all())
+}
+
+#[cfg(windows)]
+fn sync_dir_io(_: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+fn write_sync_marker(path: &Path, content: &[u8]) -> io::Result<()> {
+    let temp = sibling(path, "writing");
+    let _ = fs::remove_file(&temp);
+    let mut file = private_file(&temp)?;
+    file.write_all(content)?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(&temp, path)?;
+    if let Some(parent) = path.parent() {
+        sync_dir_io(parent)?;
+    }
+    Ok(())
+}
+
+fn rollback_rejected_resumed_restore(
+    root: &Path,
+    slot: &Path,
+    active_corrupt: &Path,
+    prior: &Path,
+    pending: &Path,
+) {
+    let slot_text = slot.file_name().unwrap_or_default().to_string_lossy();
+    let _ = cancel(root);
+    let _ = write_sync_marker(active_corrupt, format!("rollback:{slot_text}").as_bytes());
+    if rollback_set_aside(&root.join("iptv.sqlite"), slot).is_ok() {
+        let promoted = if prior.exists() && !pending.exists() {
+            fs::rename(prior, pending).is_ok()
+        } else {
+            true
+        };
+        if promoted {
+            let _ = fs::remove_file(active_corrupt);
+        }
+    }
+}
+
+fn activate_locked(ports: &crate::Ports, root: &Path) -> Result<()> {
     remove_stale_work(root)?;
     recover_replacement(root)?;
     // No native export is active before App starts. A killed process can leave
@@ -904,47 +1087,130 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
             }
         }
     }
+    reconcile_previous_restore(root)?;
+    let prior = sibling(root, "restore-prior");
+    let staged_corrupt = sibling(root, "restore-corrupt-staged");
+    let active_corrupt = sibling(root, "restore-corrupt-active");
     let pending = sibling(root, "restore-pending");
     let previous = sibling(root, "restore-previous");
-    if previous.exists() {
-        if root.join("iptv.sqlite").is_file() {
-            // The validated tree was renamed into place before interruption.
-            fs::remove_dir_all(&previous).context("Could not finish the previous restore")?;
-        } else {
-            // Platform initialization may recreate the missing directory before
-            // recovery runs. Its existence is not an activation commit marker.
-            if root.exists() {
-                fs::remove_dir_all(root).context("Could not recover application storage")?;
+    let active_state = read_active_marker(root, &active_corrupt);
+    if root.join("iptv.sqlite").is_file() {
+        if staged_corrupt.exists() {
+            let _ = fs::remove_dir_all(&staged_corrupt);
+        }
+        if matches!(active_state, Some(ActiveMarker::Rollback(_))) {
+            if prior.exists() && !pending.exists() {
+                fs::rename(&prior, &pending).context("Could not recover the pending restore")?;
             }
-            fs::rename(&previous, root).context("Could not recover application storage")?;
+            let _ = fs::remove_file(&active_corrupt);
+            return Ok(());
+        }
+        let _ = fs::remove_file(&active_corrupt);
+        if prior.exists() {
+            let _ = fs::remove_dir_all(&prior);
+        }
+    } else {
+        finish_interrupted_sidecar_recovery(root, &root.join("iptv.sqlite"))
+            .context("Could not move the damaged library aside")?;
+        if let Some(ActiveMarker::Rollback(slot)) = &active_state {
+            if staged_corrupt.exists() {
+                let _ = fs::remove_dir_all(&staged_corrupt);
+            }
+            let _ = cancel(root);
+            rollback_set_aside(&root.join("iptv.sqlite"), slot)
+                .context("Could not move the damaged library aside")?;
+            if prior.exists() && !pending.exists() {
+                fs::rename(&prior, &pending).context("Could not recover the pending restore")?;
+            }
+            let _ = fs::remove_file(&active_corrupt);
+            return Ok(());
+        }
+        if staged_corrupt.exists() {
+            publish_staged_path(root, &staged_corrupt)?;
+        } else if !active_corrupt.exists() && prior.exists() && !pending.exists() {
+            let _ = fs::rename(&prior, &pending);
         }
     }
+    let active_slot = match active_state {
+        Some(ActiveMarker::Commit(slot)) => Some(slot),
+        _ => None,
+    };
     if !pending.exists() {
         if !root.exists() && previous.exists() {
             fs::rename(previous, root).context("Could not recover application storage")?;
         }
+        if active_corrupt.exists() && !root.join("iptv.sqlite").is_file() {
+            if let Some(slot) = &active_slot {
+                rollback_set_aside(&root.join("iptv.sqlite"), slot)
+                    .context("Could not move the damaged library aside")?;
+                if prior.exists() {
+                    fs::rename(&prior, &pending)
+                        .context("Could not recover the pending restore")?;
+                }
+                let _ = fs::remove_file(&active_corrupt);
+                return Ok(());
+            }
+            return Err("Could not move the damaged library aside".into());
+        }
+        let _ = fs::remove_file(&active_corrupt);
         return Ok(());
     }
     // Revalidate persisted staging before moving the working state aside.
     for entry in fs::read_dir(&pending).context("Could not read pending backup")? {
         let entry = entry.context("Could not read pending backup entry")?;
         if let Some(name) = entry.file_name().to_str() {
-            entry_limit(
-                name,
-                entry
-                    .metadata()
-                    .context("Could not read backup file size")?
-                    .len(),
-            )
-            .context("Backup structured entry is too large")?;
+            let len = entry
+                .metadata()
+                .context("Could not read backup file size")?
+                .len();
+            if let Err(err) = entry_limit(name, len) {
+                if let Some(slot) = &active_slot {
+                    rollback_rejected_resumed_restore(
+                        root,
+                        slot,
+                        &active_corrupt,
+                        &prior,
+                        &pending,
+                    );
+                }
+                return Err(Error::new("Backup structured entry is too large", err));
+            }
         }
     }
-    validate_pending(ports, &pending.join("iptv.sqlite"))
-        .context("The pending backup library is invalid; current data was kept")?;
-    validate_settings(&read_small_file(
-        &pending.join("settings.json"),
-        "settings.json",
-    )?)?;
+    if let Err(store_err) = validate_pending(ports, &pending.join("iptv.sqlite")) {
+        let definitive = !store_err.is_not_database()
+            && (store_err.is_snapshot_content_error()
+                || matches!(
+                    store_err,
+                    iptv_store_sqlite::StoreError::SchemaTooNew { .. }
+                ));
+        if definitive && let Some(slot) = &active_slot {
+            rollback_rejected_resumed_restore(root, slot, &active_corrupt, &prior, &pending);
+        }
+        return Err(Error::new(
+            "The pending backup library is invalid; current data was kept",
+            store_err,
+        ));
+    }
+    let settings_text = match read_small_file(&pending.join("settings.json"), "settings.json") {
+        Ok(text) => text,
+        Err(err) => {
+            if err.rejection().is_some()
+                && let Some(slot) = &active_slot
+            {
+                rollback_rejected_resumed_restore(root, slot, &active_corrupt, &prior, &pending);
+            }
+            return Err(err);
+        }
+    };
+    if let Err(err) = validate_settings(&settings_text) {
+        if err.rejection().is_some()
+            && let Some(slot) = &active_slot
+        {
+            rollback_rejected_resumed_restore(root, slot, &active_corrupt, &prior, &pending);
+        }
+        return Err(err);
+    }
     // Recording media stays beside the catalog directory under this host's
     // job ids, so the restored library takes this host's recording rows and
     // keeps reopening it. The backup's own rows were dropped when it was
@@ -952,10 +1218,26 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
     // gives the same result. A failure keeps the restore and leaves the media
     // without rows, as before.
     let host = root.join("iptv.sqlite");
-    if host.is_file()
-        && let Err(error) = adopt_host_recordings(ports, &host, &pending.join("iptv.sqlite"))
+    if host.is_file() {
+        if let Err(error) = adopt_host_recordings(ports, &host, &pending.join("iptv.sqlite")) {
+            let redacted = crate::Error::from(error);
+            log::warn!("iptv backup: keeping this device's recordings failed: {redacted}");
+        }
+    } else if let Some(slot) = active_slot.as_ref()
+        && let Ok(copy_work) = scratch_for_ports(ports)
     {
-        log::warn!("iptv backup: keeping this device's recordings failed: {error}");
+        let copy_db = copy_work.0.join("iptv.sqlite");
+        if fs::copy(slot.join("iptv.sqlite"), &copy_db).is_ok() {
+            let slot_wal = slot.join("iptv.sqlite-wal");
+            if slot_wal.is_file() {
+                let _ = fs::copy(slot_wal, copy_work.0.join("iptv.sqlite-wal"));
+            }
+            if let Err(error) = adopt_host_recordings(ports, &copy_db, &pending.join("iptv.sqlite"))
+            {
+                let redacted = crate::Error::from(error);
+                log::warn!("iptv backup: keeping this device's recordings failed: {redacted}");
+            }
+        }
     }
     #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("validated");
@@ -965,6 +1247,7 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
     }
     #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("previous");
+    let was_corrupt_restore = active_corrupt.exists();
     if let Err(error) = fs::rename(&pending, root) {
         if previous.exists() {
             let _ = fs::rename(&previous, root);
@@ -974,16 +1257,527 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
             error,
         ));
     }
+    if was_corrupt_restore {
+        started_for(root)
+            .resumed_settings_dirty
+            .store(true, Ordering::SeqCst);
+    }
     #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("installed");
     sync_dir(root.parent().ok_or("Application storage has no parent")?)?;
+    let _ = fs::remove_file(&active_corrupt);
+    let _ = fs::remove_dir_all(&prior);
     #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("synced");
     if previous.exists() {
+        preserve_non_backup_entries(&previous, root)?;
         fs::remove_dir_all(previous)
             .context("Restore succeeded; could not remove the previous private copy")?;
     }
     Ok(())
+}
+
+fn preserve_non_backup_entries(previous: &Path, root: &Path) -> Result<()> {
+    for name in ["recovered", "iptv.sqlite.encrypted"] {
+        let from = previous.join(name);
+        let to = root.join(name);
+        if from.exists() && !to.exists() {
+            fs::rename(&from, &to).context("Could not finish the previous restore")?;
+        }
+    }
+    Ok(())
+}
+
+fn db_sidecar(database: &Path, suffix: &str) -> PathBuf {
+    let mut name = database.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn recovery_crash_point(point: &str) {
+    if std::env::var_os("IPTV_TEST_CORRUPT_CRASH_POINT").is_some_and(|val| val == point) {
+        std::process::exit(0);
+    }
+}
+#[cfg(not(any(test, feature = "test-support")))]
+fn recovery_crash_point(_: &str) {}
+
+fn latest_recovered_slot(root: &Path) -> Option<PathBuf> {
+    let recovered_base = root.join("recovered");
+    let marker = recovered_base.join(".latest");
+    let marked = fs::read_to_string(&marker)
+        .ok()
+        .map(|name| recovered_base.join(name.trim()))
+        .filter(|path| path.join("iptv.sqlite").is_file());
+    marked.or_else(|| {
+        let entries = fs::read_dir(&recovered_base).ok()?;
+        let mut latest: Option<(String, PathBuf)> = None;
+        for entry in entries.flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let path = entry.path();
+            if !path.join("iptv.sqlite").is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if latest.as_ref().is_none_or(|(prev, _)| name > *prev) {
+                latest = Some((name, path));
+            }
+        }
+        latest.map(|(_, path)| path)
+    })
+}
+
+/// Completes moving leftover `-wal`/`-shm`/`-journal` sidecars and `playlists`
+/// if a previous process exited right after moving `iptv.sqlite` into `recovered/`.
+pub(crate) fn finish_interrupted_sidecar_recovery(root: &Path, database: &Path) -> io::Result<()> {
+    let marker = root.join("recovered/.latest");
+    let Some(destination) = latest_recovered_slot(root) else {
+        return Ok(());
+    };
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = db_sidecar(database, suffix);
+        if !sidecar.exists() {
+            continue;
+        }
+        let target = destination.join(format!("iptv.sqlite{suffix}"));
+        let fallback = destination.join(format!("iptv.sqlite.orphan{suffix}"));
+        let dest = if target.exists() { &fallback } else { &target };
+        if let Err(error) = fs::rename(&sidecar, dest)
+            && sidecar.exists()
+        {
+            return Err(error);
+        }
+    }
+    let playlists = root.join("playlists");
+    if playlists.exists() {
+        let target = destination.join("playlists");
+        let fallback = destination.join("playlists.orphan");
+        let dest = if target.exists() { &fallback } else { &target };
+        if let Err(error) = fs::rename(&playlists, dest)
+            && playlists.exists()
+        {
+            return Err(error);
+        }
+    }
+    prune_recovered_copies(
+        &recovered_root_of(&destination),
+        MAX_RECOVERED_LIBRARIES,
+        Some(&destination),
+    );
+    let _ = fs::remove_file(&marker);
+    Ok(())
+}
+
+fn recovered_root_of(slot: &Path) -> PathBuf {
+    slot.parent().unwrap_or(slot).to_owned()
+}
+
+fn recovered_timestamp_prefix() -> String {
+    let secs = i64::try_from(crate::time::since_epoch().as_secs()).unwrap_or(0);
+    match chrono::DateTime::from_timestamp(secs, 0) {
+        Some(dt) => dt.format("%Y%m%d-%H%M%SZ").to_string(),
+        None => format!("{secs:010}"),
+    }
+}
+
+fn next_slot_attempt_for_prefix(recovered_root: &Path, base: &str) -> u32 {
+    let Ok(entries) = fs::read_dir(recovered_root) else {
+        return 0;
+    };
+    let mut next = 0u32;
+    let dashed = format!("{base}-");
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let text = name.to_string_lossy();
+        if text == base {
+            next = next.max(1);
+        } else if let Some(rest) = text.strip_prefix(&dashed)
+            && let Ok(num) = rest.parse::<u32>()
+        {
+            next = next.max(num.saturating_add(1));
+        }
+    }
+    next
+}
+
+fn create_recovered_slot(
+    recovered_root: &Path,
+    exclude: fn(&Path) -> io::Result<()>,
+) -> io::Result<PathBuf> {
+    if !recovered_root.exists() {
+        private_dir_with(recovered_root, exclude)?;
+    }
+    let base = recovered_timestamp_prefix();
+    let start = next_slot_attempt_for_prefix(recovered_root, &base);
+    for attempt in start..start.saturating_add(10_000) {
+        let folder = if attempt == 0 {
+            base.clone()
+        } else {
+            format!("{base}-{attempt:04}")
+        };
+        let candidate = recovered_root.join(folder);
+        match private_dir_with(&candidate, exclude) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::from(io::ErrorKind::AlreadyExists))
+}
+
+fn prune_recovered_copies(recovered_root: &Path, keep: usize, preserve: Option<&Path>) {
+    let Ok(entries) = fs::read_dir(recovered_root) else {
+        return;
+    };
+    let mut has_preserved = false;
+    let mut others: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                return None;
+            }
+            let path = entry.path();
+            if preserve == Some(path.as_path()) {
+                has_preserved = path.join("iptv.sqlite").is_file();
+                return None;
+            }
+            if !path.join("iptv.sqlite").is_file() {
+                // Clean up an empty slot left behind if a crash happened before rename.
+                if path.join("README.txt").is_file() {
+                    let _ = fs::remove_file(path.join("README.txt"));
+                    let _ = fs::remove_dir(&path);
+                }
+                return None;
+            }
+            Some((entry.file_name().to_string_lossy().into_owned(), path))
+        })
+        .collect();
+    let max_others = if has_preserved {
+        keep.saturating_sub(1)
+    } else {
+        keep
+    };
+    others.sort_by(|a, b| a.0.cmp(&b.0));
+    if others.len() > max_others {
+        for (_, oldest) in others.drain(..others.len() - max_others) {
+            let _ = fs::remove_dir_all(oldest);
+        }
+    }
+}
+
+fn move_corrupt_files_aside(ports: &crate::Ports, database: &Path) -> io::Result<PathBuf> {
+    let recovered_root = ports.directory.join("recovered");
+    let slot = create_recovered_slot(&recovered_root, ports.exclude_from_backup)?;
+    move_corrupt_files_into_slot(ports, database, &slot)?;
+    Ok(slot)
+}
+
+fn move_corrupt_files_into_slot(
+    ports: &crate::Ports,
+    database: &Path,
+    slot: &Path,
+) -> io::Result<()> {
+    let root = ports.directory.as_path();
+    let recovered_root = root.join("recovered");
+    let readme_path = slot.join("README.txt");
+    let marker_path = recovered_root.join(".latest");
+    let slot_name = slot
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let prepared = (|| -> io::Result<()> {
+        let mut readme = private_file(&readme_path)?;
+        readme.write_all(RECOVERED_README)?;
+        readme.sync_all()?;
+        write_sync_marker(&marker_path, slot_name.as_bytes())?;
+        fs::rename(database, slot.join("iptv.sqlite"))
+    })();
+    if let Err(error) = prepared {
+        let _ = fs::remove_file(&marker_path);
+        let _ = fs::remove_file(&readme_path);
+        let _ = fs::remove_dir(slot);
+        return Err(error);
+    }
+    recovery_crash_point("before-sidecars");
+    let move_companions = (|| -> io::Result<()> {
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let sidecar = db_sidecar(database, suffix);
+            if sidecar.exists()
+                && let Err(error) = fs::rename(&sidecar, slot.join(format!("iptv.sqlite{suffix}")))
+                && sidecar.exists()
+            {
+                return Err(error);
+            }
+        }
+        let playlists = root.join("playlists");
+        if playlists.exists()
+            && let Err(error) = fs::rename(&playlists, slot.join("playlists"))
+            && playlists.exists()
+        {
+            return Err(error);
+        }
+        Ok(())
+    })();
+    if let Err(error) = move_companions {
+        if rollback_set_aside(database, slot).is_ok() {
+            let _ = fs::remove_file(&marker_path);
+        }
+        return Err(error);
+    }
+    let _ = sync_dir(slot);
+    let _ = sync_dir(&recovered_root);
+    let _ = sync_dir(root);
+    prune_recovered_copies(&recovered_root, MAX_RECOVERED_LIBRARIES, Some(slot));
+    let _ = fs::remove_file(&marker_path);
+    Ok(())
+}
+
+/// Restores companions (`-wal`, `-shm`, `-journal`, `playlists`) BEFORE
+/// republishing `iptv.sqlite` so the live database never reappears while its
+/// WAL or documents remain stranded in `recovered/`.
+fn rollback_set_aside(database: &Path, slot: &Path) -> io::Result<()> {
+    if !database.exists() && slot.join("iptv.sqlite").is_file() {
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let moved = slot.join(format!("iptv.sqlite{suffix}"));
+            if moved.exists() {
+                fs::rename(&moved, db_sidecar(database, suffix))?;
+            }
+        }
+        if let Some(root) = database.parent() {
+            let moved_playlists = slot.join("playlists");
+            let root_playlists = root.join("playlists");
+            if moved_playlists.exists() && !root_playlists.exists() {
+                fs::rename(&moved_playlists, root_playlists)?;
+            }
+        }
+        fs::rename(slot.join("iptv.sqlite"), database)?;
+        let _ = fs::remove_file(slot.join("README.txt"));
+        let _ = fs::remove_dir(slot);
+    }
+    Ok(())
+}
+
+/// Re-checks positive database corruption (`is_corrupt_database()`), closes any
+/// native background recording host, and atomically renames the corrupt library
+/// and its WAL/SHM sidecars into `<data_dir>/recovered/<timestamp>/`.
+///
+/// Refuses `SQLITE_NOTADB` (wrong/unavailable key), newer schemas, healthy
+/// stores, and missing files. Credentials, settings, and update state stay.
+pub fn set_aside_corrupt_library(
+    ports: &crate::Ports,
+) -> std::result::Result<PathBuf, crate::Error> {
+    if !ports.file_storage {
+        return Err(crate::Error::unavailable(iptv_core::message::key(
+            "Private app storage is unavailable",
+        )));
+    }
+    let root = ports.directory.as_path();
+    let database = root.join("iptv.sqlite");
+    let destination = crate::recordings::host::with_stopped_background_host(root, || {
+        crate::storage::with_directory_replacement(root, || {
+            reconcile_previous_restore(root).map_err(|_| {
+                crate::Error::unavailable(iptv_core::message::key(
+                    "Could not move the damaged library aside",
+                ))
+            })?;
+            super::credential_store::verify_corrupt_database(ports, &database)
+                .map_err(crate::Error::from)?;
+            move_corrupt_files_aside(ports, &database).map_err(|_| {
+                crate::Error::unavailable(iptv_core::message::key(
+                    "Could not move the damaged library aside",
+                ))
+            })
+        })
+    })
+    .ok_or_else(|| {
+        crate::Error::unavailable(iptv_core::message::key(
+            "The saved library could not be opened",
+        ))
+    })??;
+    log::warn!("iptv recovery: corrupt library set aside for a fresh start");
+    Ok(destination)
+}
+
+/// Distinguishes library-precondition failures from backup-archive failures
+/// when restoring into an unreadable library at startup.
+#[derive(Debug)]
+pub enum RecoveryRestoreError {
+    Store(crate::Error),
+    Backup(Error),
+}
+
+/// Validates a `.patinabackup` archive completely before modifying anything,
+/// moves the positively-corrupt library aside into `<data_dir>/recovered/`, and
+/// activates the validated backup so reopening loads the restored library.
+pub fn restore_backup_into_empty_library(
+    ports: &crate::Ports,
+    input: &mut impl Read,
+) -> Result<PathBuf> {
+    check_corrupt_restore_preconditions(ports).map_err(|err| {
+        Error::new(
+            "The saved library could not be opened",
+            err.into_store_error(),
+        )
+    })?;
+    let work = stage_into_scratch_without_live_store(ports, input)?;
+    commit_corrupt_restore(ports, work).map_err(|err| match err {
+        RecoveryRestoreError::Store(store_err) => Error::new(
+            "The saved library could not be opened",
+            store_err.into_store_error(),
+        ),
+        RecoveryRestoreError::Backup(backup_err) => backup_err,
+    })
+}
+
+pub(crate) fn restore_backup_file_into_empty_library(
+    ports: &crate::Ports,
+    backup_path: &Path,
+) -> std::result::Result<PathBuf, RecoveryRestoreError> {
+    check_corrupt_restore_preconditions(ports).map_err(RecoveryRestoreError::Store)?;
+    let work = {
+        let mut input = File::open(backup_path)
+            .context(iptv_core::message::key("Could not read the chosen backup"))
+            .map_err(RecoveryRestoreError::Backup)?;
+        stage_into_scratch_without_live_store(ports, &mut input)
+            .map_err(RecoveryRestoreError::Backup)?
+    };
+    commit_corrupt_restore(ports, work)
+}
+
+fn check_corrupt_restore_preconditions(
+    ports: &crate::Ports,
+) -> std::result::Result<(), crate::Error> {
+    if !ports.file_storage {
+        return Err(crate::Error::unavailable(iptv_core::message::key(
+            "Private app storage is unavailable",
+        )));
+    }
+    let database = ports.directory.join("iptv.sqlite");
+    super::credential_store::verify_corrupt_database(ports, &database).map_err(crate::Error::from)
+}
+
+fn commit_corrupt_restore(
+    ports: &crate::Ports,
+    work: Scratch,
+) -> std::result::Result<PathBuf, RecoveryRestoreError> {
+    let root = ports.directory.as_path();
+    let database = root.join("iptv.sqlite");
+    crate::recordings::host::with_stopped_background_host(root, || {
+        crate::storage::with_directory_replacement(root, || {
+            reconcile_previous_restore(root).map_err(RecoveryRestoreError::Backup)?;
+            super::credential_store::verify_corrupt_database(ports, &database)
+                .map_err(|err| RecoveryRestoreError::Store(crate::Error::from(err)))?;
+            let staged = sibling(root, "restore-corrupt-staged");
+            if staged.exists() {
+                fs::remove_dir_all(&staged)
+                    .context("Could not schedule the restore")
+                    .map_err(RecoveryRestoreError::Backup)?;
+            }
+            fs::rename(&work.0, &staged)
+                .context("Could not schedule the restore")
+                .map_err(RecoveryRestoreError::Backup)?;
+            let recovered_root = root.join("recovered");
+            let slot = match create_recovered_slot(&recovered_root, ports.exclude_from_backup) {
+                Ok(slot) => slot,
+                Err(err) => {
+                    let _ = fs::remove_dir_all(&staged);
+                    return Err(RecoveryRestoreError::Backup(Error::new(
+                        iptv_core::message::key("Could not move the damaged library aside"),
+                        err,
+                    )));
+                }
+            };
+            let slot_name = slot.file_name().unwrap_or_default().to_os_string();
+            let slot_text = slot_name.to_string_lossy().into_owned();
+            let active_marker = sibling(root, "restore-corrupt-active");
+            if let Err(err) = write_sync_marker(&active_marker, slot_text.as_bytes()) {
+                let _ = fs::remove_dir(&slot);
+                let _ = fs::remove_dir_all(&staged);
+                return Err(RecoveryRestoreError::Backup(Error::new(
+                    "Could not schedule the restore",
+                    err,
+                )));
+            }
+            if let Err(err) = move_corrupt_files_into_slot(ports, &database, &slot) {
+                if database.is_file() {
+                    let _ = fs::remove_file(&active_marker);
+                    let _ = fs::remove_dir_all(&staged);
+                }
+                return Err(RecoveryRestoreError::Backup(Error::new(
+                    iptv_core::message::key("Could not move the damaged library aside"),
+                    err,
+                )));
+            }
+            let pending = sibling(root, "restore-pending");
+            let prior = sibling(root, "restore-prior");
+            let rollback_failed_attempt = |slot: &Path| {
+                let _ = fs::remove_dir_all(&staged);
+                let _ = cancel(root);
+                let _ =
+                    write_sync_marker(&active_marker, format!("rollback:{slot_text}").as_bytes());
+                if rollback_set_aside(&database, slot).is_ok() {
+                    let promoted = if prior.exists() && !pending.exists() {
+                        fs::rename(&prior, &pending).is_ok()
+                    } else {
+                        true
+                    };
+                    if promoted {
+                        let _ = fs::remove_file(&active_marker);
+                    }
+                }
+            };
+            if prior.exists() {
+                let _ = fs::remove_dir_all(&prior);
+            }
+            if pending.exists()
+                && let Err(err) = fs::rename(&pending, &prior)
+            {
+                let _ = fs::remove_dir_all(&staged);
+                let _ =
+                    write_sync_marker(&active_marker, format!("rollback:{slot_text}").as_bytes());
+                if rollback_set_aside(&database, &slot).is_ok() {
+                    let _ = fs::remove_file(&active_marker);
+                }
+                return Err(RecoveryRestoreError::Backup(Error::new(
+                    "Could not schedule the restore",
+                    err,
+                )));
+            }
+            recovery_crash_point("after-set-aside-before-publish");
+            if let Err(error) = publish_staged_path(root, &staged) {
+                rollback_failed_attempt(&slot);
+                return Err(RecoveryRestoreError::Backup(error));
+            }
+            recovery_crash_point("after-publish-before-activate");
+            if let Err(error) = activate_locked(ports, root) {
+                if !database.is_file() {
+                    rollback_failed_attempt(&slot);
+                    return Err(RecoveryRestoreError::Backup(error));
+                }
+                // The validated pending restore was already installed into `root`;
+                // only delete `.restore-previous` once non-backup entries moved out.
+                let previous = sibling(root, "restore-previous");
+                if previous.exists() && preserve_non_backup_entries(&previous, root).is_ok() {
+                    let _ = fs::remove_dir_all(&previous);
+                }
+                log::warn!("iptv backup: post-restore cleanup warning: {error}");
+            }
+            let _ = sync_dir(root.parent().unwrap_or(Path::new(".")));
+            let _ = fs::remove_file(&active_marker);
+            let _ = fs::remove_dir_all(&prior);
+            log::warn!("iptv recovery: corrupt library set aside and backup restored");
+            Ok(root.join("recovered").join(slot_name))
+        })
+    })
+    .ok_or_else(|| {
+        RecoveryRestoreError::Backup(Error::from(iptv_core::message::key(
+            "Recording host did not close; restart Patina before restoring",
+        )))
+    })?
 }
 
 #[cfg(all(test, feature = "native"))]

@@ -39,7 +39,13 @@ pub enum StoreError {
 
 pub type Result<T, E = StoreError> = std::result::Result<T, E>;
 
+pub(crate) const LIBRARY_NOT_CORRUPT: &str = "saved library is not corrupt";
+
 impl StoreError {
+    /// Corruption re-verification found a missing, empty, or intact library file.
+    pub fn is_library_not_corrupt(&self) -> bool {
+        matches!(self, Self::Unavailable(LIBRARY_NOT_CORRUPT))
+    }
     /// Transient contention or device write failure may succeed on a bounded retry.
     pub fn retryable_write(&self) -> bool {
         matches!(self, Self::Sqlite(rusqlite::Error::SqliteFailure(error, _))

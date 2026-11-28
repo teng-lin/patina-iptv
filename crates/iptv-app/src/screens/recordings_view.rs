@@ -53,10 +53,7 @@ fn reload(ui: Ui) {
         });
     });
 }
-/// Scheduled recording is retired. Tells the viewer once that the upgrade
-/// canceled what an earlier version had scheduled; Recordings lists it until
-/// the viewer has opened and closed that screen.
-fn announce_retired(ui: Ui) {
+fn announce_retired_once() {
     crate::wiring::tasks::spawn_in_app(async move {
         if crate::wiring::runtime_owner::runtime()
             .announce_retired_recordings()
@@ -68,6 +65,18 @@ fn announce_retired(ui: Ui) {
             ));
         }
     });
+}
+
+pub(crate) fn on_startup_recovered() {
+    crate::wiring::runtime_owner::runtime().start_recordings();
+    announce_retired_once();
+}
+
+/// Scheduled recording is retired. Tells the viewer once that the upgrade
+/// canceled what an earlier version had scheduled; Recordings lists it until
+/// the viewer has opened and closed that screen.
+fn announce_retired(ui: Ui) {
+    announce_retired_once();
     effect(move || {
         if ui.screens.recordings_open.get() {
             return;

@@ -113,6 +113,8 @@ const STATICS: &[(&str, &str)] = &[
     ("opening/revocation.rs", "MARKS"),
     // Per-tree filesystem publication gates shared by independent native services.
     ("private_files.rs", "TREES"),
+    // Per-directory catalog replacement gate shared across owners and startup.
+    ("storage.rs", "REPLACEMENT"),
     // Serialize native service startup/restore and retain its independent owner.
     ("recordings/host.rs", "ACTIVATION"),
     ("recordings/host.rs", "HOSTS"),

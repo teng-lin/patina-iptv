@@ -115,6 +115,46 @@ impl Error {
         matches!(self.0, ErrorKind::CorruptDatabase(_))
     }
 
+    /// Re-verification found the saved library file missing, empty, or already healthy.
+    pub fn is_library_not_corrupt(&self) -> bool {
+        matches!(
+            &self.0,
+            ErrorKind::Unavailable(reason)
+                if iptv_store_sqlite::StoreError::Unavailable(reason).is_library_not_corrupt()
+        )
+    }
+
+    /// The bytes could not be read as a database with the supplied key (`SQLITE_NOTADB`).
+    pub fn is_not_database(&self) -> bool {
+        matches!(&self.0, ErrorKind::Storage(error) if error.is_not_database())
+    }
+
+    /// Opening failed because the database key or platform credential store was unavailable.
+    pub fn is_credential_unavailable(&self) -> bool {
+        if self.is_not_database() {
+            return true;
+        }
+        let reason = match &self.0 {
+            ErrorKind::Unavailable(reason) | ErrorKind::RestartRequired(reason) => Some(*reason),
+            ErrorKind::Storage(iptv_store_sqlite::StoreError::Unavailable(reason))
+            | ErrorKind::Storage(iptv_store_sqlite::StoreError::RestartRequired(reason)) => {
+                Some(*reason)
+            }
+            _ => None,
+        };
+        reason.is_some_and(|text| {
+            let bytes = text.as_bytes();
+            [
+                &b"credential"[..],
+                b"database key",
+                b"Keystore",
+                b"key store",
+            ]
+            .into_iter()
+            .any(|needle| bytes.windows(needle.len()).any(|part| part == needle))
+        })
+    }
+
     /// A failure involving host state that is only initialized on launch.
     pub fn restart_required(reason: &'static str) -> Self {
         Self(ErrorKind::RestartRequired(reason))
@@ -271,8 +311,16 @@ mod tests {
         ));
         let error = Error::from(mismatched_key);
         assert!(!error.is_corrupt_database());
+        assert!(error.is_not_database());
+        assert!(error.is_credential_unavailable());
         assert!(!error.retryable_open());
         assert!(error.into_store_error().is_not_database());
+
+        let locked_broker =
+            Error::unavailable("platform credential broker is locked or unavailable");
+        assert!(!locked_broker.is_corrupt_database());
+        assert!(!locked_broker.is_not_database());
+        assert!(locked_broker.is_credential_unavailable());
 
         let malformed = StoreError::Sqlite(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),

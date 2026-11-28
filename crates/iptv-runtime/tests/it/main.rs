@@ -8,6 +8,7 @@ mod support;
 mod architecture;
 mod command_journeys;
 mod command_values;
+mod corrupt_recovery;
 mod data_startup;
 mod foundation_contract;
 mod foundation_inspection;

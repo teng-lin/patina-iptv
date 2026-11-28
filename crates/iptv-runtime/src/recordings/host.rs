@@ -239,6 +239,16 @@ pub fn start_background_host(ports: crate::Ports) -> Result<(), Error> {
     }
     Ok(())
 }
+pub(crate) fn with_stopped_background_host<R>(
+    directory: &Path,
+    run: impl FnOnce() -> R,
+) -> Option<R> {
+    let _guard = ACTIVATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    stop_background_host(directory).then(run)
+}
+
 pub fn stop_background_host(directory: &Path) -> bool {
     let state = hosts()
         .lock()

@@ -118,6 +118,91 @@ impl Store {
         }
         Ok(store)
     }
+    /// Re-verifies positive corruption evidence before moving a library aside.
+    /// Wrong keys (`SQLITE_NOTADB`), newer schemas, missing or healthy files,
+    /// and I/O or lock errors return `Err` and never establish corruption.
+    pub fn verify_corrupt_encrypted(path: impl AsRef<Path>, key: &DatabaseKey) -> Result<()> {
+        crate::files_available()?;
+        let path = path.as_ref();
+        let metadata = match std::fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(_) => return Err(StoreError::Unavailable("saved library is not corrupt")),
+        };
+        if !metadata.file_type().is_file() || metadata.len() == 0 {
+            return Err(StoreError::Unavailable("saved library is not corrupt"));
+        }
+        let mut header = [0; 16];
+        let legacy = match File::open(path) {
+            Ok(mut file) => file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0",
+            Err(e) => return Err(io_error(e)),
+        };
+        if legacy && sibling(path, ".encrypted").exists() {
+            return Err(StoreError::Unavailable(
+                "refusing plaintext database in place of encrypted installation",
+            ));
+        }
+        crate::initialize_sqlite()?;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let _ = conn.set_db_config(
+            rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
+            true,
+        );
+        if !legacy {
+            key.apply(&conn)?;
+        }
+        conn.busy_timeout(StoreOptions::default().busy_timeout)?;
+        conn.pragma_update(None, "trusted_schema", false)?;
+        match crate::migrate::current_version(&conn) {
+            Err(error) if error.is_corrupt_database() => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(version) if version > crate::SCHEMA_VERSION => {
+                return Err(StoreError::SchemaTooNew {
+                    found: version,
+                    supported: crate::SCHEMA_VERSION,
+                });
+            }
+            Ok(_) => {}
+        }
+        let check: std::result::Result<Vec<String>, rusqlite::Error> = conn
+            .prepare("PRAGMA integrity_check(1)")
+            .and_then(|mut stmt| stmt.query_map([], |r| r.get(0))?.collect());
+        match check {
+            Ok(rows) if rows.as_slice() != ["ok"] => return Ok(()),
+            Ok(_) => {}
+            Err(error) => {
+                let store_error = StoreError::from(error);
+                return if store_error.is_corrupt_database() {
+                    Ok(())
+                } else {
+                    Err(store_error)
+                };
+            }
+        }
+        let has_wal = std::fs::metadata(sibling(path, "-wal")).is_ok_and(|meta| meta.len() > 0);
+        if !legacy && !has_wal {
+            let mut cipher_check = conn.prepare("PRAGMA cipher_integrity_check")?;
+            let mut rows = cipher_check.query([])?;
+            if let Some(row) = rows.next()? {
+                let detail: String = row.get(0)?;
+                let raw = detail.as_bytes();
+                let is_cipher_corrupt = raw.starts_with(b"HMAC verification failed")
+                    || raw
+                        .windows(b"invalid size".len())
+                        .any(|part| part == b"invalid size");
+                return if is_cipher_corrupt {
+                    Ok(())
+                } else {
+                    Err(StoreError::Unavailable(
+                        "encrypted database filesystem operation failed",
+                    ))
+                };
+            }
+        }
+        Err(StoreError::Unavailable("saved library is not corrupt"))
+    }
     /// Opens scratch storage with exactly the live store's encryption policy.
     /// Plaintext is possible only for an explicitly plaintext/test Store.
     ///

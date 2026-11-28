@@ -61,6 +61,13 @@ pub mod host {
         )))
     }
 
+    pub(crate) fn with_stopped_background_host<R>(
+        directory: &Path,
+        run: impl FnOnce() -> R,
+    ) -> Option<R> {
+        stop_background_host(directory).then(run)
+    }
+
     /// Nothing runs, so nothing has to stop.
     pub fn stop_background_host(_: &Path) -> bool {
         true

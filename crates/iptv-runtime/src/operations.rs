@@ -144,6 +144,81 @@ impl Runtime {
         crate::backup::is_pending(self.data_dir())
     }
 
+    /// Closes open store connections on this owner, verifies positive corruption,
+    /// and moves the corrupt database and WAL/SHM sidecars into `recovered/`.
+    pub fn recover_corrupt_start_fresh(
+        &self,
+    ) -> impl Future<Output = Result<std::path::PathBuf, crate::Error>> + use<> {
+        let services = self.services();
+        async move {
+            let worker = services.clone();
+            worker
+                .spawn_blocking(move || {
+                    if !services.files().flush(std::time::Duration::from_secs(5)) {
+                        return Err(crate::Error::unavailable(iptv_core::message::key(
+                            "Could not move the damaged library aside",
+                        )));
+                    }
+                    services
+                        .service()
+                        .with_closed_connections(|| {
+                            crate::backup::set_aside_corrupt_library(services.ports())
+                        })
+                        .ok_or_else(|| {
+                            crate::Error::unavailable(iptv_core::message::key(
+                                "Could not move the damaged library aside",
+                            ))
+                        })?
+                })
+                .await
+                .map_err(|_| {
+                    crate::Error::unavailable(iptv_core::message::key(
+                        "Could not move the damaged library aside",
+                    ))
+                })?
+        }
+    }
+
+    /// Validates `backup_path`, sets the positively-corrupt library aside into
+    /// `recovered/`, activates the restored snapshot, and reloads settings.
+    pub async fn recover_corrupt_restore_backup(
+        &self,
+        backup_path: std::path::PathBuf,
+    ) -> Result<std::path::PathBuf, crate::backup::RecoveryRestoreError> {
+        use crate::backup::{RecoveryRestoreError, error::Error as BackupError};
+        use iptv_core::message::key;
+        let services = self.services();
+        let worker = services.clone();
+        let recovered = worker
+            .spawn_blocking(move || {
+                if !services.files().flush(std::time::Duration::from_secs(5)) {
+                    return Err(RecoveryRestoreError::Backup(BackupError::from(key(
+                        "Could not move the damaged library aside",
+                    ))));
+                }
+                services
+                    .service()
+                    .with_closed_connections(|| {
+                        crate::backup::restore_backup_file_into_empty_library(
+                            services.ports(),
+                            &backup_path,
+                        )
+                    })
+                    .ok_or_else(|| {
+                        RecoveryRestoreError::Backup(BackupError::from(key(
+                            "Could not move the damaged library aside",
+                        )))
+                    })?
+            })
+            .await
+            .map_err(|_| {
+                RecoveryRestoreError::Backup(BackupError::from(key("The backup task stopped")))
+            })??;
+        let _ = crate::backup::take_resumed_settings_dirty(self.data_dir());
+        self.load_settings();
+        Ok(recovered)
+    }
+
     /// Holds this owner's storage for the life of the process. Call before
     /// settings, restore activation or any storage worker starts.
     pub fn lock_storage(&self) -> Result<(), crate::backup::error::Error> {
