@@ -24,7 +24,7 @@ fn heard(ui: Ui) -> Heard {
     let surface = (0..crate::playback::player::SURFACES)
         .find(|&s| crate::playback::multiview::audible(ui, s))
         .unwrap_or(0);
-    let tile = if crate::playback::multiview::is_open(ui) {
+    let tile = if crate::playback::multiview::is_open(ui.playback) {
         ui.playback
             .multiview
             .with(|m| m.as_ref().and_then(|m| m.tile_on(surface)))
@@ -41,21 +41,21 @@ fn paused(ui: Ui, heard: Heard) -> bool {
     }
 }
 
-fn set_paused(ui: Ui, heard: Heard, paused: bool) {
+fn set_paused(playback: crate::PlaybackUi, heard: Heard, paused: bool) {
     match heard.tile {
-        Some(index) => ui.playback.multiview.update(|m| {
+        Some(index) => playback.multiview.update(|m| {
             if let Some(m) = m.as_mut() {
                 m.set_paused(index, paused);
             }
         }),
-        None => ui.playback.paused.set(paused),
+        None => playback.paused.set(paused),
     }
 }
 
 /// The policy's identity for what `heard` plays: its surface and its
 /// stream's token (0: nothing open).
-fn stream(ui: Ui, heard: Heard) -> u64 {
-    let s = ui.playback.player.stream(heard.surface);
+fn stream(playback: crate::PlaybackUi, heard: Heard) -> u64 {
+    let s = playback.player.stream(heard.surface);
     if s.source.with(Option::is_none) {
         return 0;
     }
@@ -70,7 +70,7 @@ pub fn on_change(ui: Ui, surface: usize, change: AudioChange) {
     }
     untracked(|| {
         let heard = heard(ui);
-        let id = stream(ui, heard);
+        let id = stream(ui.playback, heard);
         let playing = id != 0 && !paused(ui, heard);
         let mut response = None;
         ui.playback
@@ -82,8 +82,8 @@ pub fn on_change(ui: Ui, surface: usize, change: AudioChange) {
             heard.surface
         );
         match response {
-            Some(Response::Pause) => set_paused(ui, heard, true),
-            Some(Response::Resume) => set_paused(ui, heard, false),
+            Some(Response::Pause) => set_paused(ui.playback, heard, true),
+            Some(Response::Resume) => set_paused(ui.playback, heard, false),
             None => {}
         }
     });
@@ -93,8 +93,8 @@ pub fn on_change(ui: Ui, surface: usize, change: AudioChange) {
 /// something, stopped): a call's pause is theirs now, and the audio focus
 /// coming back leaves playback as it is. Called as each explicit action is
 /// accepted, before any delayed work it starts.
-pub fn viewer_acted(ui: Ui) {
-    ui.playback.interruptions.update(|p| p.viewer_acted());
+pub fn viewer_acted(playback: crate::PlaybackUi) {
+    playback.interruptions.update(|p| p.viewer_acted());
 }
 
 /// Changes nobody reported (a tile's own pause, another stream, the heard
@@ -103,7 +103,7 @@ pub fn bind(ui: Ui) {
     // Only a change of what is heard or its pause: not every grid move.
     let now = computed(move || {
         let heard = heard(ui);
-        (paused(ui, heard), stream(ui, heard))
+        (paused(ui, heard), stream(ui.playback, heard))
     });
     effect(move || {
         let (paused, id) = now.get();

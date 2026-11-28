@@ -196,12 +196,14 @@ fn load_history() -> SearchHistory {
 /// an older build kept in a plaintext file into it (once; the file is
 /// then deleted). A screen opened before the answer started empty and is
 /// given them unless a search was made meanwhile.
-pub(crate) fn load_saved_history(ui: Ui) {
-    crate::wiring::tasks::spawn_in_app(refresh_saved_history(ui));
+pub(crate) fn load_saved_history(screens: crate::ScreensUi) {
+    crate::wiring::tasks::spawn_in_app(refresh_saved_history(screens));
 }
 
-pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output = ()> {
-    let revision = ui.screens.search_history_revision.get_untracked();
+pub(crate) fn refresh_saved_history(
+    screens: crate::ScreensUi,
+) -> impl std::future::Future<Output = ()> {
+    let revision = screens.search_history_revision.get_untracked();
     crate::wiring::runtime_owner::runtime().clear_loaded_search_history();
     let legacy = crate::wiring::data::data_dir().join(LEGACY_HISTORY_FILE);
     let loaded = crate::runtime::commands::load_search_history(
@@ -216,11 +218,11 @@ pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output =
                 return;
             }
         };
-        if ui.screens.search_history_revision.get_untracked() != revision {
+        if screens.search_history_revision.get_untracked() != revision {
             return;
         }
         if options(&crate::wiring::settings::get()).show_history {
-            ui.screens.search.update(|screen| {
+            screens.search.update(|screen| {
                 if let Some(screen) = screen
                     && screen.state.history().is_empty()
                 {
@@ -257,15 +259,14 @@ pub(crate) fn clear_history(ui: Ui) {
     });
 }
 
-fn save_history(ui: Ui) {
+fn save_history(screens: crate::ScreensUi) {
     let owner = crate::wiring::runtime_owner::runtime();
     // An initial or recovery read can fail independently of later writes.
     // Keep the saved entries if the screen could not load them.
     if !owner.search_history_loaded() {
         return;
     }
-    let Some(session) = ui
-        .screens
+    let Some(session) = screens
         .search
         .with_untracked(|s| s.as_ref().map(|s| s.state.history().clone()))
     else {
@@ -285,8 +286,8 @@ fn save_history(ui: Ui) {
     });
 }
 
-fn set_programs(ui: Ui, status: ProgramSearch) {
-    ui.screens.search.update(|s| {
+fn set_programs(screens: crate::ScreensUi, status: ProgramSearch) {
+    screens.search.update(|s| {
         if let Some(s) = s {
             s.programs = status;
         }
@@ -306,14 +307,14 @@ fn prepare(ui: Ui) {
             .and_then(|s| s.downcast_ref::<iptv_guide::combined::CombinedSchedule>())
             .is_none()
     {
-        set_programs(ui, ProgramSearch::Unavailable);
+        set_programs(ui.screens, ProgramSearch::Unavailable);
         return;
     }
     if crate::wiring::runtime_owner::runtime().has_program_index() {
-        set_programs(ui, ProgramSearch::Ready);
+        set_programs(ui.screens, ProgramSearch::Ready);
         return;
     }
-    set_programs(ui, ProgramSearch::Building);
+    set_programs(ui.screens, ProgramSearch::Building);
     // Under the app's owner: a timer dies with its owner, and multiview's
     // Search and add opens the screen from a menu item that goes as it
     // closes. A timer that finds the index built does nothing.
@@ -334,7 +335,7 @@ fn prepare(ui: Ui) {
                 Ok(index) => index,
                 Err(error) => {
                     log::warn!("iptv search: guide titles: {error}");
-                    set_programs(ui, ProgramSearch::Unavailable);
+                    set_programs(ui.screens, ProgramSearch::Unavailable);
                     search_again(ui);
                     return;
                 }
@@ -345,7 +346,7 @@ fn prepare(ui: Ui) {
                 t.elapsed().as_millis()
             );
             crate::wiring::runtime_owner::runtime().install_program_index(index);
-            set_programs(ui, ProgramSearch::Ready);
+            set_programs(ui.screens, ProgramSearch::Ready);
             search_again(ui);
         });
     });
@@ -482,17 +483,17 @@ pub fn close(ui: Ui) {
         .search
         .with_untracked(|s| s.as_ref().is_some_and(|s| s.pick));
     if picking {
-        crate::playback::multiview::list_closed(ui);
+        crate::playback::multiview::list_closed(ui.playback);
     }
-    save_history(ui);
+    save_history(ui.screens);
     crate::wiring::runtime_owner::runtime().release_program_index();
     ui.screens.search.set(None);
     crate::chrome::input::dismiss_keyboard();
 }
 
 /// The screen is shown and takes the remote.
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens
         .search
         .with(|s| s.as_ref().is_some_and(|s| !s.suspended))
 }
@@ -577,7 +578,7 @@ fn choose(ui: Ui, id: ResultId) {
 
 /// Plays full screen; the screen waits until playback leaves full screen.
 fn watch(ui: Ui, channel: usize, playback: Playback) {
-    save_history(ui);
+    save_history(ui.screens);
     let now = ui.guide.focus.with(|f| f.now);
     crate::guide::lists::tap(ui, channel, now);
     ui.play(channel, playback);

@@ -240,7 +240,7 @@ host::native_update_tests! {
                 crate::SharedUi::new(),
                 crate::playback::player::Player::new(),
             );
-            update_ui(ui).ready.set(true);
+            update_ui(ui.screens).ready.set(true);
             let release = |version: &str| ReleaseCheck {
                 installed_version: "1.0.0".into(),
                 status: ReleaseStatus::UpdateAvailable,
@@ -263,7 +263,7 @@ host::native_update_tests! {
 
             // An accepted installation holds its displayed release stable across
             // manual, startup and timer checks until its guard completes.
-            update_ui(ui).install_busy.set(true);
+            update_ui(ui.screens).install_busy.set(true);
             let installation = InstallOperation::new(ui);
             for trigger in [Trigger::Manual, Trigger::Startup, Trigger::Automatic] {
                 check(ui, trigger);
@@ -280,11 +280,11 @@ host::native_update_tests! {
                 .unwrap();
             download(ui);
             manual_download(ui);
-            update_ui(ui).focus.set(1);
+            update_ui(ui.screens).focus.set(1);
             key(ui, Action::Select);
-            update_ui(ui).focus.set(5);
+            update_ui(ui.screens).focus.set(5);
             key(ui, Action::Select);
-            assert!(!update_ui(ui).install_busy.get_untracked());
+            assert!(!update_ui(ui.screens).install_busy.get_untracked());
             assert!(application.app_update_snapshot().checking);
             assert!(application.finish_app_update_check(token, 4, Ok(release("3.0.0"))));
             assert_eq!(

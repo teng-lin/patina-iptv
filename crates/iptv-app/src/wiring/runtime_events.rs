@@ -83,12 +83,12 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::ForgetSource(source) => crate::playback::player::forget_source(source),
         RuntimeEvent::OpenPlaylists => crate::library_ui::playlists_view::open(ui),
-        RuntimeEvent::ClosePlaylists => crate::library_ui::playlists_view::close(ui),
+        RuntimeEvent::ClosePlaylists => crate::library_ui::playlists_view::close(ui.screens),
         RuntimeEvent::FirstRun => crate::library_ui::wizard_view::open_first_run(ui),
         RuntimeEvent::StoreStartupRecovered => crate::wiring::tasks::spawn_in_app(async move {
             // A failed initial read left recent searches unloaded. Reload
             // before unblocking input so a new search cannot overwrite them.
-            crate::screens::search_view::refresh_saved_history(ui).await;
+            crate::screens::search_view::refresh_saved_history(ui.screens).await;
             ui.chrome.store_startup_failure.set(None);
         }),
         RuntimeEvent::StoreStartupFailed { path, error } => {
@@ -108,7 +108,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::GuideChanged => ui.app.guide_pages.update(|version| *version += 1),
         RuntimeEvent::LibraryChanged => {
             ui.app.library.version.update(|version| *version += 1);
-            crate::playback::external_player::enforce(ui);
+            crate::playback::external_player::enforce(ui.cast);
         }
         RuntimeEvent::SettingsChanged => ui.app.settings.update(|version| *version += 1),
     }
@@ -148,14 +148,14 @@ fn schedule_changed(
             if clamped != rows {
                 ui.guide.visible_rows.set(clamped);
             }
-            crate::chrome::menu_view::catalog_changed(ui);
+            crate::chrome::menu_view::catalog_changed(ui.screens);
             ui.screens.description.set(None);
             ui.screens.editor.set(None);
             ui.app.data_version.update(|version| *version += 1);
         }
         crate::playback::player::enforce_guide_blocks(ui, &*current);
         if catalog_changed {
-            crate::playback::external_player::enforce(ui);
+            crate::playback::external_player::enforce(ui.cast);
         } else {
             ui.app.data_version.update(|version| *version += 1);
         }
@@ -167,8 +167,8 @@ fn schedule_changed(
 }
 
 /// UI context supplied to the runtime's foreground scheduling hint.
-pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
-    crate::guide::lists::focused_channel(ui.guide)
+pub(crate) fn focused_channel(ui: crate::GuideUi) -> Option<usize> {
+    crate::guide::lists::focused_channel(ui)
 }
 
 /// The headless scenarios' stand-in for an import reporting the shown

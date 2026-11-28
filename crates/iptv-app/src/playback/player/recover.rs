@@ -40,7 +40,7 @@ fn schedule_retry(ui: Ui, surface: usize, retry: Retry) {
     let wait = retry.at_ms.saturating_sub(ui.now_ms());
     log::info!("iptv player {surface} retry {} in {wait} ms", retry.attempt);
     watch_indicator(ui, surface);
-    later(ui, Duration::from_millis(wait), move || {
+    later(ui.playback, Duration::from_millis(wait), move || {
         run_retry(ui, surface, retry)
     });
 }
@@ -62,7 +62,7 @@ fn run_retry(ui: Ui, surface: usize, retry: Retry) {
     stream.health.update(|h| due = h.due(retry, now));
     if due {
         if surface == 0 {
-            resume_position(ui);
+            resume_position(ui.playback);
         }
         open(ui, surface, retry.session);
     }
@@ -79,16 +79,14 @@ pub(super) fn resume(ui: Ui, surface: usize) {
 
 /// A catch-up program that played reopens where it was, not where it
 /// was last opened.
-pub(super) fn resume_position(ui: Ui) {
-    let Playback::CatchUp { start, offset } = ui.playback.playback.get_untracked() else {
+pub(super) fn resume_position(ui: crate::PlaybackUi) {
+    let Playback::CatchUp { start, offset } = ui.playback.get_untracked() else {
         return;
     };
-    let played = ui.playback.player.main().position_ms.get_untracked() / 1000;
+    let played = ui.player.main().position_ms.get_untracked() / 1000;
     if played > 0 {
         let offset = offset.saturating_add(i32::try_from(played).unwrap_or(i32::MAX));
-        ui.playback
-            .playback
-            .set(Playback::CatchUp { start, offset });
+        ui.playback.set(Playback::CatchUp { start, offset });
     }
 }
 
@@ -100,7 +98,7 @@ fn watch_indicator(ui: Ui, surface: usize) {
         return;
     };
     let wait = at.saturating_sub(ui.now_ms());
-    later(ui, Duration::from_millis(wait), move || {
+    later(ui.playback, Duration::from_millis(wait), move || {
         if health.with_untracked(|h| h.indicator_due()) == Some(at) {
             // Nothing changed but the time: the overlays read it again.
             health.update(|_| {});
@@ -116,7 +114,7 @@ pub(super) fn watch_stall(ui: Ui, surface: usize) {
         return;
     };
     let wait = at.saturating_sub(ui.now_ms());
-    later(ui, Duration::from_millis(wait), move || {
+    later(ui.playback, Duration::from_millis(wait), move || {
         let now = ui.now_ms();
         let mut retry = None;
         health.update(|h| retry = h.tick(now));
@@ -164,14 +162,14 @@ pub fn on_error(ui: Ui, surface: usize, code: &str, http: Option<u16>) {
 
 /// The full-screen player shows its failure card (retries may go on
 /// behind it).
-pub fn failed(ui: &Ui) -> bool {
-    (ui.playback.playing.get_untracked().is_some() || crate::playback::on_demand::active(*ui))
-        && surface_failed(*ui, 0)
+pub fn failed(ui: crate::PlaybackUi) -> bool {
+    (ui.playing.get_untracked().is_some() || crate::playback::on_demand::active(ui))
+        && surface_failed(ui, 0)
 }
 
 /// `surface` shows its failure card.
-pub fn surface_failed(ui: Ui, surface: usize) -> bool {
-    ui.playback
+pub fn surface_failed(playback: crate::PlaybackUi, surface: usize) -> bool {
+    playback
         .player
         .stream(surface)
         .health
@@ -185,7 +183,9 @@ pub fn retry(ui: Ui) {
 
 /// "Try again" on `surface`.
 pub fn retry_surface(ui: Ui, surface: usize) {
-    if target(ui, surface).is_none() && !(surface == 0 && crate::playback::on_demand::active(ui)) {
+    if target(ui.playback, surface).is_none()
+        && !(surface == 0 && crate::playback::on_demand::active(ui.playback))
+    {
         return;
     }
     let now = ui.now_ms();

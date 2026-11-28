@@ -26,8 +26,8 @@ impl PartialEq for Open {
         self.state == other.state && Rc::ptr_eq(&self.done, &other.done)
     }
 }
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.parental.with(Option::is_some)
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.parental.with(Option::is_some)
 }
 /// Which prompt is open: equal for as long as it shows, unequal for any
 /// later one (the handle keeps its allocation, so no address is reused).
@@ -39,15 +39,15 @@ impl PartialEq for Prompt {
     }
 }
 /// The prompt open now (tracked).
-pub(crate) fn prompt(ui: Ui) -> Option<Prompt> {
-    ui.screens
+pub(crate) fn prompt(screens: crate::ScreensUi) -> Option<Prompt> {
+    screens
         .parental
         .with(|o| o.as_ref().map(|o| Prompt(Rc::downgrade(&o.done))))
 }
 pub fn close(ui: Ui) {
     // Credential changes can commit before their recovery notice returns.
     // Keep the modal until that result is shown instead of discarding it.
-    if committing(ui) {
+    if committing(ui.screens) {
         return;
     }
     abort(ui);
@@ -55,7 +55,7 @@ pub fn close(ui: Ui) {
 /// Lifecycle teardown must invalidate an in-flight authorization even when
 /// user dismissal is temporarily disabled during a credential write.
 pub fn abort(ui: Ui) {
-    crate::playback::external_player::cancel_pending(ui);
+    crate::playback::external_player::cancel_pending(ui.cast);
     ui.screens.parental.set(None);
     crate::wiring::runtime_owner::runtime().parental_lock();
     dismiss_keyboard();
@@ -63,8 +63,8 @@ pub fn abort(ui: Ui) {
 /// Hiding for background recordings retires verification immediately. A
 /// credential write/notice keeps only its result dialog until the window returns.
 pub fn hidden(ui: Ui) {
-    let keep = committing(ui)
-        || phase(ui) == Some(Phase::RecoveryNotice)
+    let keep = committing(ui.screens)
+        || phase(ui.screens) == Some(Phase::RecoveryNotice)
         || ui
             .screens
             .parental
@@ -81,17 +81,17 @@ pub fn hidden(ui: Ui) {
         abort(ui);
     }
 }
-fn committing(ui: Ui) -> bool {
-    busy(ui) && phase(ui) == Some(Phase::Confirm)
+fn committing(screens: crate::ScreensUi) -> bool {
+    busy(screens) && phase(screens) == Some(Phase::Confirm)
 }
-fn recovery_input(ui: Ui) -> Option<ElementRef> {
-    ui.screens
+fn recovery_input(screens: crate::ScreensUi) -> Option<ElementRef> {
+    screens
         .parental
         .with_untracked(|open| open.as_ref().map(|open| open.recovery_input))
 }
-fn finish(ui: Ui) {
+fn finish(screens: crate::ScreensUi) {
     let mut done = None;
-    ui.screens.parental.update(|open| {
+    screens.parental.update(|open| {
         done = open.take().and_then(|o| o.done.borrow_mut().take());
     });
     dismiss_keyboard();
@@ -99,19 +99,24 @@ fn finish(ui: Ui) {
         done();
     }
 }
-pub(crate) fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + 'static) {
-    ui.screens.parental.set(Some(Open {
+pub(crate) fn show(
+    screens: crate::ScreensUi,
+    target: Target,
+    phase: Phase,
+    done: impl FnOnce() + 'static,
+) {
+    screens.parental.set(Some(Open {
         state: PromptState::new(phase, target, None),
         done: Rc::new(RefCell::new(Some(Box::new(done)))),
         recovery_input: element_ref(),
     }));
 }
-pub fn protected_settings(ui: Ui, done: impl FnOnce() + 'static) {
-    request(ui, Target::settings(), move || {
+pub fn protected_settings(screens: crate::ScreensUi, done: impl FnOnce() + 'static) {
+    request(screens, Target::settings(), move || {
         if crate::wiring::runtime_owner::runtime().parental_has_pin() {
             done();
         } else {
-            show(ui, Target::settings(), Phase::New, done);
+            show(screens, Target::settings(), Phase::New, done);
         }
     });
 }
@@ -123,34 +128,34 @@ pub fn change_pin(ui: Ui) {
             return;
         }
         show(
-            ui,
+            ui.screens,
             Target::settings(),
             if owner.parental_has_pin() {
                 Phase::Old
             } else {
                 Phase::New
             },
-            move || crate::wiring::settings_wiring::refresh(ui),
+            move || crate::wiring::settings_wiring::refresh(ui.app),
         );
     });
 }
-pub fn live_target(ui: Ui, channel: usize) -> Option<Target> {
+pub fn live_target(app: crate::SharedUi, channel: usize) -> Option<Target> {
     let key = crate::wiring::runtime_owner::schedule().channel_key(channel)?;
     if crate::wiring::data::combined::active(&crate::wiring::runtime_owner::runtime()) {
         let (source, id) =
             crate::wiring::data::combined::owner(&crate::wiring::runtime_owner::runtime(), &key)?;
         Some(Target::live(source.0, id))
     } else {
-        Some(Target::live(ui.app.library.shown.get_untracked()?.0, key))
+        Some(Target::live(app.library.shown.get_untracked()?.0, key))
     }
 }
 /// Runs `start` once live `channel` may play: at once, or after its PIN
 /// (never when the PIN is canceled). `start` still plays through
 /// [`allow_play`], which then admits it.
 pub fn admitted(ui: Ui, channel: usize, start: impl FnOnce() + 'static) {
-    match live_target(ui, channel) {
+    match live_target(ui.app, channel) {
         Some(target) if !crate::wiring::runtime_owner::runtime().parental_allowed(&target) => {
-            request(ui, target, start)
+            request(ui.screens, target, start)
         }
         _ => start(),
     }
@@ -158,7 +163,7 @@ pub fn admitted(ui: Ui, channel: usize, start: impl FnOnce() + 'static) {
 /// Synchronous gate is fed from a complete native membership snapshot at boot
 /// and after every catalog change; the player also checks before resolution.
 pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
-    let Some(target) = live_target(ui, channel) else {
+    let Some(target) = live_target(ui.app, channel) else {
         return true;
     };
     if crate::wiring::runtime_owner::runtime().parental_allowed(&target) {
@@ -173,7 +178,7 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
             if let Some(pending) =
                 crate::playback::player::PendingArchive::capture(&*schedule, channel, start, offset)
             {
-                request(ui, target, move || {
+                request(ui.screens, target, move || {
                     if let Some((channel, playback)) =
                         pending.remap(&*crate::wiring::runtime_owner::schedule())
                     {
@@ -186,14 +191,14 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
                 });
             }
         }
-        crate::Playback::Live => request(ui, target, move || ui.play(channel, playback)),
+        crate::Playback::Live => request(ui.screens, target, move || ui.play(channel, playback)),
     }
     false
 }
 pub fn block(ui: Ui, target: Target, blocked: bool) {
-    request(ui, Target::settings(), move || {
+    request(ui.screens, Target::settings(), move || {
         if !crate::wiring::runtime_owner::runtime().parental_has_pin() {
-            show(ui, Target::settings(), Phase::New, move || {
+            show(ui.screens, Target::settings(), Phase::New, move || {
                 block(ui, target, blocked)
             });
             return;
@@ -215,7 +220,7 @@ pub fn block(ui: Ui, target: Target, blocked: bool) {
             }
             match owner.parental_set_blocked(target, blocked).await {
                 Ok(()) => {
-                    crate::wiring::settings_wiring::refresh(ui);
+                    crate::wiring::settings_wiring::refresh(ui.app);
                     notify_message(if blocked {
                         "Content blocked"
                     } else {
@@ -228,10 +233,10 @@ pub fn block(ui: Ui, target: Target, blocked: bool) {
         });
     });
 }
-pub fn manage(ui: Ui) {
-    request(ui, Target::settings(), move || {
+pub fn manage(screens: crate::ScreensUi) {
+    request(screens, Target::settings(), move || {
         let blocks = crate::wiring::runtime_owner::runtime().parental_blocked_targets();
-        ui.screens.parental.set(Some(Open {
+        screens.parental.set(Some(Open {
             state: PromptState::new(Phase::Unlock, Target::settings(), Some(blocks)),
             done: Rc::new(RefCell::new(None)),
             recovery_input: element_ref(),
@@ -252,7 +257,7 @@ fn manage_pick(ui: Ui, index: usize) {
         .parental
         .with_untracked(|o| o.as_ref()?.state.blocks.as_ref()?.get(index).cloned());
     if let Some(target) = target {
-        finish(ui);
+        finish(ui.screens);
         block(ui, target, false);
     } else {
         crate::wiring::runtime_owner::runtime().parental_lock();
@@ -262,7 +267,7 @@ fn manage_pick(ui: Ui, index: usize) {
     }
 }
 pub fn enforce(ui: Ui) {
-    crate::playback::external_player::enforce(ui);
+    crate::playback::external_player::enforce(ui.cast);
     let denied = ui.screens.vod.with_untracked(|s| {
         s.cards
             .iter()
@@ -307,8 +312,8 @@ pub fn enforce(ui: Ui) {
         }
     }
     for surface in 0..crate::playback::player::SURFACES {
-        if let Some((channel, _)) = crate::playback::player::target(ui, surface)
-            && let Some(target) = live_target(ui, channel)
+        if let Some((channel, _)) = crate::playback::player::target(ui.playback, surface)
+            && let Some(target) = live_target(ui.app, channel)
             && !crate::wiring::runtime_owner::runtime().parental_allowed(&target)
         {
             crate::playback::player::stop_surface(ui, surface);
@@ -321,10 +326,10 @@ pub fn bind(ui: Ui) {
 pub fn key(ui: Ui, action: Action) {
     match action {
         Action::Back => close(ui),
-        Action::MoveUp => move_focus(ui, -vertical_step(ui)),
-        Action::MoveDown => move_focus(ui, vertical_step(ui)),
-        Action::MoveLeft => move_focus(ui, -1),
-        Action::MoveRight => move_focus(ui, 1),
+        Action::MoveUp => move_focus(ui.screens, -vertical_step(ui)),
+        Action::MoveDown => move_focus(ui.screens, vertical_step(ui)),
+        Action::MoveLeft => move_focus(ui.screens, -1),
+        Action::MoveRight => move_focus(ui.screens, 1),
         Action::Select => {
             let at = ui
                 .screens
@@ -337,7 +342,7 @@ pub fn key(ui: Ui, action: Action) {
 }
 pub fn remote(ui: Ui, key: RemoteKey) {
     ui.chrome.input.set(crate::Input::Keys);
-    if committing(ui) && key != RemoteKey::Back {
+    if committing(ui.screens) && key != RemoteKey::Back {
         return;
     }
     if ui
@@ -346,8 +351,8 @@ pub fn remote(ui: Ui, key: RemoteKey) {
         .with_untracked(|o| o.as_ref().is_some_and(|o| o.state.blocks.is_some()))
     {
         match key {
-            RemoteKey::Up => move_focus(ui, -1),
-            RemoteKey::Down => move_focus(ui, 1),
+            RemoteKey::Up => move_focus(ui.screens, -1),
+            RemoteKey::Down => move_focus(ui.screens, 1),
             RemoteKey::Ok => {
                 let at = ui
                     .screens
@@ -371,9 +376,9 @@ pub fn remote(ui: Ui, key: RemoteKey) {
         RemoteKey::Left => self::key(ui, Action::MoveLeft),
         RemoteKey::Right => self::key(ui, Action::MoveRight),
         RemoteKey::Ok => {
-            if cancel_focused(ui) {
+            if cancel_focused(ui.screens) {
                 close(ui);
-            } else if phase(ui)
+            } else if phase(ui.screens)
                 .is_some_and(|p| matches!(p, Phase::Recovery | Phase::RecoveryNotice))
             {
                 let at = ui
@@ -404,16 +409,16 @@ pub fn remote(ui: Ui, key: RemoteKey) {
     }
 }
 fn vertical_step(ui: Ui) -> isize {
-    if managing(ui)
-        || phase(ui).is_some_and(|p| matches!(p, Phase::Recovery | Phase::RecoveryNotice))
+    if managing(ui.screens)
+        || phase(ui.screens).is_some_and(|p| matches!(p, Phase::Recovery | Phase::RecoveryNotice))
     {
         1
     } else {
         3
     }
 }
-fn move_focus(ui: Ui, step: isize) {
-    ui.screens.parental.update(|o| {
+fn move_focus(screens: crate::ScreensUi, step: isize) {
+    screens.parental.update(|o| {
         if let Some(o) = o {
             let count = o.state.blocks.as_ref().map_or_else(
                 || match o.state.dialog.phase {
@@ -426,16 +431,16 @@ fn move_focus(ui: Ui, step: isize) {
             o.state.dialog.move_focus(step, count);
         }
     });
-    if phase(ui) == Some(Phase::Recovery) && !focused(ui, 0) {
-        if let Some(input) = recovery_input(ui) {
+    if phase(screens) == Some(Phase::Recovery) && !focused(screens, 0) {
+        if let Some(input) = recovery_input(screens) {
             input.blur();
         }
         dismiss_keyboard();
     }
 }
 fn activate(ui: Ui, index: usize) {
-    if busy(ui) {
-        if cancel_focused(ui) {
+    if busy(ui.screens) {
+        if cancel_focused(ui.screens) {
             close(ui);
         }
         return;
@@ -448,12 +453,14 @@ fn activate(ui: Ui, index: usize) {
         manage_pick(ui, index);
         return;
     }
-    if phase(ui).is_some_and(|phase| matches!(phase, Phase::Recovery | Phase::RecoveryNotice)) {
-        if phase(ui) == Some(Phase::Recovery) && index == 0 {
-            if let Some(input) = recovery_input(ui) {
+    if phase(ui.screens)
+        .is_some_and(|phase| matches!(phase, Phase::Recovery | Phase::RecoveryNotice))
+    {
+        if phase(ui.screens) == Some(Phase::Recovery) && index == 0 {
+            if let Some(input) = recovery_input(ui.screens) {
                 input.focus();
             }
-        } else if cancel_focused(ui) {
+        } else if cancel_focused(ui.screens) {
             close(ui);
         } else {
             submit(ui);
@@ -500,7 +507,7 @@ fn submit(ui: Ui) {
     });
     match submission {
         Submission::None => {}
-        Submission::Done => finish(ui),
+        Submission::Done => finish(ui.screens),
         submission => crate::wiring::tasks::spawn_in_app(async move {
             let owner = crate::wiring::runtime_owner::runtime();
             let result = match submission {
@@ -544,7 +551,7 @@ fn submit(ui: Ui) {
                         }
                     });
                     if !resumed {
-                        finish(ui);
+                        finish(ui.screens);
                     }
                 }
                 Ok(Some(code)) => {
@@ -572,13 +579,13 @@ fn submit(ui: Ui) {
         }),
     }
 }
-fn phase(ui: Ui) -> Option<Phase> {
-    ui.screens
+fn phase(screens: crate::ScreensUi) -> Option<Phase> {
+    screens
         .parental
         .with(|o| o.as_ref().map(|o| o.state.dialog.phase))
 }
-fn label(ui: Ui) -> String {
-    ui.screens.parental.with(|o| {
+fn label(screens: crate::ScreensUi) -> String {
+    screens.parental.with(|o| {
         o.as_ref().map_or(String::new(), |o| {
             if o.state.blocks.is_some() {
                 return "Blocked content".into();
@@ -604,13 +611,13 @@ fn display_target(target: &Target) -> String {
 fn notify_message(message: &str) {
     crate::chrome::toast::notify(tr(message));
 }
-fn focused(ui: Ui, index: usize) -> bool {
-    ui.screens
+fn focused(screens: crate::ScreensUi, index: usize) -> bool {
+    screens
         .parental
         .with(|o| o.as_ref().is_some_and(|o| o.state.dialog.focus == index))
 }
-fn cancel_focused(ui: Ui) -> bool {
-    ui.screens.parental.with(|o| {
+fn cancel_focused(screens: crate::ScreensUi) -> bool {
+    screens.parental.with(|o| {
         o.as_ref().is_some_and(|o| {
             let cancel = o.state.blocks.as_ref().map_or_else(
                 || match o.state.dialog.phase {
@@ -624,8 +631,8 @@ fn cancel_focused(ui: Ui) -> bool {
         })
     })
 }
-fn managing(ui: Ui) -> bool {
-    ui.screens
+fn managing(screens: crate::ScreensUi) -> bool {
+    screens
         .parental
         .with(|o| o.as_ref().is_some_and(|o| o.state.blocks.is_some()))
 }
@@ -664,7 +671,7 @@ fn manager(ui: Ui, size: Scale) -> View {
                 ui,
                 size,
                 label,
-                move || focused(ui, at.index()),
+                move || focused(ui.screens, at.index()),
                 move || manage_pick(ui, at.index()),
             )
         })
@@ -673,8 +680,8 @@ fn manager(ui: Ui, size: Scale) -> View {
         .h(move || size.px(count().clamp(1, 6) as f32 * 52.0)),
     )
 }
-fn busy(ui: Ui) -> bool {
-    ui.screens
+fn busy(screens: crate::ScreensUi) -> bool {
+    screens
         .parental
         .with(|o| o.as_ref().is_some_and(|o| o.state.dialog.busy))
 }
@@ -700,10 +707,10 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
                     ui,
                     size,
                     text,
-                    move || focused(ui, index),
+                    move || focused(ui.screens, index),
                     move || activate(ui, index),
                 )
-                .disabled(move || busy(ui))
+                .disabled(move || busy(ui.screens))
                 .test_id(if index == 11 {
                     "parental-continue"
                 } else {
@@ -713,7 +720,7 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
             );
         }
         keypad = keypad.child(scrolling.control(cells, move || {
-            (row * 3..row * 3 + 3).any(|index| focused(ui, index))
+            (row * 3..row * 3 + 3).any(|index| focused(ui.screens, index))
         }));
     }
     keypad.child(
@@ -722,45 +729,45 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
                 ui,
                 size,
                 crate::chrome::i18n::tr("Forgot PIN?"),
-                move || focused(ui, 12),
+                move || focused(ui.screens, 12),
                 move || activate(ui, 12),
             )
-            .disabled(move || busy(ui)),
-            move || focused(ui, 12),
+            .disabled(move || busy(ui.screens)),
+            move || focused(ui.screens, 12),
         ),
     )
 }
 fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     use crate::chrome::i18n::tr;
-    let recovery = recovery_input(ui).unwrap_or_else(element_ref);
+    let recovery = recovery_input(ui.screens).unwrap_or_else(element_ref);
     view().gap(px(8.0))
         .child(ui_kit::body(size,move||ui.screens.parental.with(|o|o.as_ref()
             .map_or(String::new(),|o|if o.state.dialog.busy {tr("Checking…").into()}
                 else {let message=o.state.dialog.message.as_str();tr(message).into()}))))
-        .child(when(move||phase(ui)==Some(Phase::RecoveryNotice),move||{
+        .child(when(move||phase(ui.screens)==Some(Phase::RecoveryNotice),move||{
             view().gap(px(8.0))
                 .child(ui_kit::body(size,tr("Keep this recovery code private. A new code replaces the previous code.")))
                 .child(ui_kit::body(size,move||ui.screens.parental.with(|o|o.as_ref()
                     .map_or(String::new(),|o|o.state.dialog.recovery.to_string()))))
-                .child(scrolling.control(ui_kit::button(ui,size,tr("I saved the code"),move||focused(ui,0),move||finish(ui)),move||focused(ui,0)))
+                .child(scrolling.control(ui_kit::button(ui,size,tr("I saved the code"),move||focused(ui.screens,0),move||finish(ui.screens)),move||focused(ui.screens,0)))
         }))
-        .child(when(move||phase(ui)==Some(Phase::Recovery),move||{
+        .child(when(move||phase(ui.screens)==Some(Phase::Recovery),move||{
             view().gap(px(8.0)).child(scrolling.control(view().child(ui_kit::field(size,input())
                 .test_id("parental-recovery-input").element_ref(&recovery).masked(true).max_length(32)
                 .on_focus(move||ui.screens.parental.update(|o|{if let Some(o)=o{o.state.dialog.focus=0;}}))
                 .label(move || tr("Recovery code").to_owned())
-                .border(px(1.0)).border_color(move||ui_kit::field_border(ui,focused(ui,0)))
-                .disabled(move || busy(ui))
+                .border(px(1.0)).border_color(move||ui_kit::field_border(ui,focused(ui.screens,0)))
+                .disabled(move || busy(ui.screens))
                 .auto_correct(false).auto_capitalize(AutoCapitalize::None)
                 .placeholder(tr("Recovery code"))
                 .on_change(move|text:&str|ui.screens.parental.update(|o|{
                     if let Some(o)=o {o.state.dialog.recovery.clear();
                         o.state.dialog.recovery.push_str(&text.to_ascii_lowercase());}
-                })).on_submit(move|_:&str|{submit(ui);dismiss_keyboard();})),move||focused(ui,0)))
-                .child(scrolling.control(ui_kit::button(ui,size,tr("Continue"),move||focused(ui,1),move||submit(ui))
-                    .disabled(move||busy(ui)),move||focused(ui,1)))
+                })).on_submit(move|_:&str|{submit(ui);dismiss_keyboard();})),move||focused(ui.screens,0)))
+                .child(scrolling.control(ui_kit::button(ui,size,tr("Continue"),move||focused(ui.screens,1),move||submit(ui))
+                    .disabled(move||busy(ui.screens)),move||focused(ui.screens,1)))
         }))
-        .child(when(move||phase(ui).is_some_and(|p|
+        .child(when(move||phase(ui.screens).is_some_and(|p|
             !matches!(p,Phase::Recovery|Phase::RecoveryNotice)),move||keypad(ui,size,scrolling)))
 }
 pub fn layer(ui: Ui) -> View {
@@ -772,20 +779,20 @@ pub fn layer(ui: Ui) -> View {
         .items_center()
         .justify_center()
         .bg(tint(0, 0xD8))
-        .opacity(move || if is_open(ui) { 1.0_f32 } else { 0.0 })
+        .opacity(move || if is_open(ui.screens) { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
-            if is_open(ui) {
+            if is_open(ui.screens) {
                 PointerEvents::Auto
             } else {
                 PointerEvents::None
             }
         })
-        .accessibility_elements_hidden(move || !is_open(ui))
+        .accessibility_elements_hidden(move || !is_open(ui.screens))
         .child(when(
-            move || is_open(ui),
+            move || is_open(ui.screens),
             move || {
                 let scrolling = ui_kit::FocusScroll::new();
-                let current_phase = computed(move || phase(ui));
+                let current_phase = computed(move || phase(ui.screens));
                 effect(move || {
                     current_phase.get();
                     scrolling.reset();
@@ -804,12 +811,15 @@ pub fn layer(ui: Ui) -> View {
                     .rounded(px(crate::theme::RADIUS_LARGE))
                     .bg(move || tint(ui.app.theme.with(|t| t.background.panel), 255))
                     .child(ui_kit::heading(size, move || {
-                        let title = label(ui);
+                        let title = label(ui.screens);
                         crate::chrome::i18n::tr(&title).to_owned()
                     }))
-                    .child(when(move || managing(ui), move || manager(ui, size)))
                     .child(when(
-                        move || !managing(ui),
+                        move || managing(ui.screens),
+                        move || manager(ui, size),
+                    ))
+                    .child(when(
+                        move || !managing(ui.screens),
                         move || {
                             scrolling
                                 .view()
@@ -823,11 +833,11 @@ pub fn layer(ui: Ui) -> View {
                             ui,
                             size,
                             crate::chrome::i18n::tr("Cancel"),
-                            move || cancel_focused(ui),
+                            move || cancel_focused(ui.screens),
                             move || close(ui),
                         )
                         .test_id("parental-cancel")
-                        .disabled(move || committing(ui))
+                        .disabled(move || committing(ui.screens))
                         .flex_shrink_0(),
                     )
             },

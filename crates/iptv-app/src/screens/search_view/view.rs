@@ -12,13 +12,13 @@ use crate::chrome::scale::Scale;
 use crate::chrome::ui_kit;
 use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
 
-fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.screens.search.with(|s| s.as_ref().map(f))
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Screen) -> R) -> Option<R> {
+    screens.search.with(|s| s.as_ref().map(f))
 }
 
 /// A row's mark: the focus while the keys are shown.
-fn mark(ui: Ui, focused: bool) -> Mark {
-    Mark::of(focused && ui.keys_shown(), false)
+fn mark(chrome: crate::ChromeUi, focused: bool) -> Mark {
+    Mark::of(focused && chrome.keys_shown(), false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
@@ -42,12 +42,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             search_again(ui);
         }
     });
-    when(move || is_open(ui), move || screen(ui))
+    when(move || is_open(ui.screens), move || screen(ui))
 }
 
 fn screen(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    let idle = computed(move || state(ui, |s| s.state.phase() == Phase::Idle).unwrap_or(true));
+    let idle =
+        computed(move || state(ui.screens, |s| s.state.phase() == Phase::Idle).unwrap_or(true));
     ui_kit::screen(ui, size)
         .style_when(move || compact_header(size), move |s| s.px(size.px(16.0)))
         .test_id("search-screen")
@@ -65,7 +66,7 @@ fn screen(ui: Ui) -> impl IntoElement {
 }
 
 fn hint(ui: Ui) -> &'static str {
-    let Some((phase, editing)) = state(ui, |s| {
+    let Some((phase, editing)) = state(ui.screens, |s| {
         (
             s.state.phase(),
             s.state.keyboard_visible() && *s.state.focus() == Focus::Input,
@@ -83,7 +84,7 @@ fn hint(ui: Ui) -> &'static str {
     }
     let idle = phase == Phase::Idle;
     // Search and add: a result goes to multiview.
-    let add = pick::picking(ui);
+    let add = pick::picking(ui.screens);
     match (ui.keys_shown(), idle) {
         (true, true) => tr("OK type   ▼ recent searches   Back close"),
         (true, false) if add => {
@@ -112,7 +113,7 @@ fn compact_header(size: Scale) -> bool {
 fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let field = element_ref();
     let want_keyboard = computed(move || {
-        state(ui, |s| {
+        state(ui.screens, |s| {
             s.state.keyboard_visible() && *s.state.focus() == Focus::Input
         })
         .unwrap_or(false)
@@ -122,7 +123,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         move || want_keyboard.get(),
         move || apply(ui, SearchAction::KeyboardHidden),
     );
-    let field_focused = move || state(ui, |s| *s.state.focus() == Focus::Input).unwrap_or(false);
+    let field_focused =
+        move || state(ui.screens, |s| *s.state.focus() == Focus::Input).unwrap_or(false);
     let compact = move || compact_header(size);
     // Change the field's grid position without remounting the native editor.
     view()
@@ -138,7 +140,7 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         .gap(move || size.px(12.0))
         .child(
             ui_kit::title(size, move || {
-                if pick::picking(ui) {
+                if pick::picking(ui.screens) {
                     tr("Search and add")
                 } else {
                     tr("Search")
@@ -156,7 +158,9 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 .col_end(move || if compact() { -1_i16 } else { 3 })
                 .min_w(px(0.0))
                 .label(move || tr("Channel, number or program"))
-                .value(move || state(ui, |s| s.state.query().to_owned()).unwrap_or_default())
+                .value(move || {
+                    state(ui.screens, |s| s.state.query().to_owned()).unwrap_or_default()
+                })
                 .placeholder(move || tr("Channel, number or program"))
                 .auto_focus(want_keyboard.get_untracked())
                 .auto_capitalize(AutoCapitalize::None)
@@ -172,19 +176,19 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 .py(move || size.px(ui_kit::FIELD_PAD_Y - 2.0))
                 .border_color(move || ui_kit::field_border(ui, field_focused()))
                 .on_change(move |text: &str| {
-                    let same = state(ui, |s| s.state.query() == text).unwrap_or(true);
+                    let same = state(ui.screens, |s| s.state.query() == text).unwrap_or(true);
                     if !same {
                         apply(ui, SearchAction::Type(text.to_owned()));
                     }
                 })
                 .on_submit(move |_: &str| apply(ui, SearchAction::Ok))
                 .on_focus(move || {
-                    if !state(ui, |s| s.state.keyboard_visible()).unwrap_or(true) {
+                    if !state(ui.screens, |s| s.state.keyboard_visible()).unwrap_or(true) {
                         apply(ui, SearchAction::ShowKeyboard);
                     }
                 })
                 .on_blur(move || {
-                    if state(ui, |s| s.state.keyboard_visible()).unwrap_or(false) {
+                    if state(ui.screens, |s| s.state.keyboard_visible()).unwrap_or(false) {
                         apply(ui, SearchAction::KeyboardHidden);
                     }
                 }),
@@ -203,15 +207,16 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn history(ui: Ui, size: Scale) -> impl IntoElement {
-    let count = move || state(ui, |s| s.state.history().len()).unwrap_or(0);
-    let entry =
-        move |i: usize| state(ui, |s| s.state.history().entries().get(i).cloned()).flatten();
+    let count = move || state(ui.screens, |s| s.state.history().len()).unwrap_or(0);
+    let entry = move |i: usize| {
+        state(ui.screens, |s| s.state.history().entries().get(i).cloned()).flatten()
+    };
     let row = move |at: Position| {
         let focused = move || {
             let e = entry(at.index());
-            e.is_some() && state(ui, |s| s.state.focus().clone()) == e.map(Focus::History)
+            e.is_some() && state(ui.screens, |s| s.state.focus().clone()) == e.map(Focus::History)
         };
-        let mark = move || mark(ui, focused());
+        let mark = move || mark(ui.chrome, focused());
         list_rows::row(size, ROW, mark)
             .on_press(move || {
                 ui.touched();
@@ -228,7 +233,7 @@ fn history(ui: Ui, size: Scale) -> impl IntoElement {
         .flex_1()
         .gap(move || size.px(8.0))
         .child(ui_kit::heading(size, move || {
-            if !options(&crate::wiring::settings_wiring::read(ui)).show_history {
+            if !options(&crate::wiring::settings_wiring::read(ui.app)).show_history {
                 ""
             } else if count() == 0 {
                 tr("No recent searches yet")
@@ -244,11 +249,15 @@ fn history(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn tab_button(ui: Ui, tab: Tab, size: Scale) -> impl IntoElement {
-    let selected = move || state(ui, |s| s.state.tab() == tab).unwrap_or(false);
+    let selected = move || state(ui.screens, |s| s.state.tab() == tab).unwrap_or(false);
     let focused =
-        move || selected() && state(ui, |s| *s.state.focus() == Focus::Tabs) == Some(true);
-    let label =
-        move || state(ui, |s| tab_label(tab, s.state.count(tab), s.programs)).unwrap_or_default();
+        move || selected() && state(ui.screens, |s| *s.state.focus() == Focus::Tabs) == Some(true);
+    let label = move || {
+        state(ui.screens, |s| {
+            tab_label(tab, s.state.count(tab), s.programs)
+        })
+        .unwrap_or_default()
+    };
     ui_kit::tab(ui, size, label, selected, focused, move || {
         apply(ui, SearchAction::ShowTab(tab));
     })
@@ -257,8 +266,8 @@ fn tab_button(ui: Ui, tab: Tab, size: Scale) -> impl IntoElement {
 /// The filter row below the tabs: finished programs that cannot be
 /// replayed, listed or not (#282).
 fn filter_button(ui: Ui, size: Scale) -> impl IntoElement {
-    let on = move || state(ui, |s| s.state.past_without_replay()).unwrap_or(false);
-    let focused = move || state(ui, |s| *s.state.focus() == Focus::Filter) == Some(true);
+    let on = move || state(ui.screens, |s| s.state.past_without_replay()).unwrap_or(false);
+    let focused = move || state(ui.screens, |s| *s.state.focus() == Focus::Filter) == Some(true);
     ui_kit::tab(
         ui,
         size,
@@ -275,8 +284,8 @@ fn filter_button(ui: Ui, size: Scale) -> impl IntoElement {
     .test_id("search-filter-past")
 }
 
-fn status(ui: Ui) -> String {
-    state(ui, |s| match s.state.phase() {
+fn status(screens: crate::ScreensUi) -> String {
+    state(screens, |s| match s.state.phase() {
         Phase::Typing => tr("Searching…").to_owned(),
         Phase::NoResults => trf(
             "Nothing found for “{query}”",
@@ -288,8 +297,8 @@ fn status(ui: Ui) -> String {
 }
 
 /// The result at `i` of the shown tab, with its identity.
-fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgramHit>)> {
-    state(ui, |s| match s.state.tab() {
+fn result_at(screens: crate::ScreensUi, i: usize) -> Option<(ResultId, Option<ProgramHit>)> {
+    state(screens, |s| match s.state.tab() {
         Tab::Channels => s
             .state
             .channels()
@@ -320,11 +329,15 @@ fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgramHit>)> {
 
 fn results(ui: Ui, size: Scale) -> impl IntoElement {
     let list = element_ref();
-    let count = move || state(ui, |s| s.state.count(s.state.tab())).unwrap_or(0);
+    let count = move || state(ui.screens, |s| s.state.count(s.state.tab())).unwrap_or(0);
     let focused_index = computed(move || {
-        let focus = state(ui, |s| s.state.focus().clone())?;
-        (0..count())
-            .find(|&i| result_at(ui, i).map(|r| Focus::Result(r.0)).as_ref() == Some(&focus))
+        let focus = state(ui.screens, |s| s.state.focus().clone())?;
+        (0..count()).find(|&i| {
+            result_at(ui.screens, i)
+                .map(|r| Focus::Result(r.0))
+                .as_ref()
+                == Some(&focus)
+        })
     });
     effect(move || {
         if let Some(i) = focused_index.get()
@@ -351,16 +364,16 @@ fn results(ui: Ui, size: Scale) -> impl IntoElement {
                         .child(tab_button(ui, Tab::Programs, size)),
                 )
                 .child(when(
-                    move || !status(ui).is_empty(),
+                    move || !status(ui.screens).is_empty(),
                     move || {
-                        ui_kit::caption(size, move || status(ui))
+                        ui_kit::caption(size, move || status(ui.screens))
                             .style_when(move || !compact_header(size), |s| s.flex_1())
                             .number_of_lines(move || if compact_header(size) { 2_u32 } else { 1 })
                     },
                 )),
         )
         .child(when(
-            move || state(ui, |s| s.state.filter_shown()).unwrap_or(false),
+            move || state(ui.screens, |s| s.state.filter_shown()).unwrap_or(false),
             move || view().flex_row().flex_wrap().child(filter_button(ui, size)),
         ))
         .child(
@@ -377,14 +390,14 @@ fn result_row(
     focused_index: Memo<Option<usize>>,
     size: Scale,
 ) -> impl IntoElement {
-    let item = move || result_at(ui, at.index());
+    let item = move || result_at(ui.screens, at.index());
     // Program titles in the grid's type, channel names in the column's.
     let family = move || match item() {
         Some((_, Some(_))) => CONDENSED,
         _ => SANS,
     };
     let focused = move || focused_index.get() == Some(at.index());
-    let mark = move || mark(ui, focused());
+    let mark = move || mark(ui.chrome, focused());
     let line1 = move || match item() {
         Some((ResultId::Channel(id), _)) => {
             let schedule = crate::wiring::runtime_owner::schedule();

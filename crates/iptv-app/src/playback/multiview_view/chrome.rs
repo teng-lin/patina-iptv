@@ -37,15 +37,15 @@ fn target() -> f32 {
     }
 }
 
-fn panel(ui: Ui) -> Rgba {
-    tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA)
+fn panel(app: crate::SharedUi) -> Rgba {
+    tint(app.theme.with(|t| t.background.panel), PANEL_ALPHA)
 }
 
 /// Add screen (or the device's limit) and Exit multiview, at the top
 /// center.
 pub fn toolbar(ui: Ui) -> impl IntoElement {
     let shown = computed(move || multiview::chrome_shows(ui));
-    let limit = move || with_state(ui, device_limit).flatten();
+    let limit = move || with_state(ui.playback, device_limit).flatten();
     let pill = move |name: &'static str, act: fn(Ui), add: bool| {
         view()
             .role(AccessibilityRole::Button)
@@ -77,7 +77,7 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
         move || {
             view()
                 .accessibility_elements_hidden(move || {
-                    with_state(ui, |state| state.dialog().is_some()).unwrap_or(false)
+                    with_state(ui.playback, |state| state.dialog().is_some()).unwrap_or(false)
                 })
                 .absolute()
                 .top(px(12.0))
@@ -94,7 +94,7 @@ pub fn toolbar(ui: Ui) -> impl IntoElement {
                         .px(px(8.0))
                         .py(px(6.0))
                         .rounded(px(RADIUS_LARGE))
-                        .bg(move || panel(ui))
+                        .bg(move || panel(ui.app))
                         .on_mouse_enter(move |_: &MouseEvent| {
                             crate::playback::play_bar::hover(ui, true)
                         })
@@ -133,18 +133,19 @@ fn under_toolbar(tile: (f32, f32, f32, f32), buttons_w: f32, width: f32) -> bool
 /// (or reduce) and remove buttons, with two or more tiles while the
 /// pointer chrome shows.
 pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
-    let several = move || with_state(ui, |m| m.tiles().len() > 1).unwrap_or(false);
+    let several = move || with_state(ui.playback, |m| m.tiles().len() > 1).unwrap_or(false);
     let shown = computed(move || multiview::chrome_shows(ui) && several());
     let name = move || {
         ui.app.data_version.get();
-        with_state(ui, |m| {
+        with_state(ui.playback, |m| {
             m.tiles().get(index).map(|t| channel_name(t.channel))
         })
         .flatten()
         .unwrap_or_default()
     };
-    let enlarged = move || with_state(ui, |m| m.enlarged() == Some(index)).unwrap_or(false);
-    let heard = move || with_state(ui, |m| m.heard_index() == index).unwrap_or(true);
+    let enlarged =
+        move || with_state(ui.playback, |m| m.enlarged() == Some(index)).unwrap_or(false);
+    let heard = move || with_state(ui.playback, |m| m.heard_index() == index).unwrap_or(true);
     let size = target();
     let buttons_w = move || {
         let count = if heard() { 2.0 } else { 3.0 };
@@ -152,7 +153,7 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
     };
     // From the tile's left edge: at its top right, unless the toolbar is there.
     let left = move || {
-        let rect = multiview::tile_rect(ui, index).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let rect = multiview::tile_rect(ui.playback, index).unwrap_or((0.0, 0.0, 0.0, 0.0));
         if under_toolbar(rect, buttons_w(), window().width.0) {
             INSET
         } else {
@@ -167,7 +168,7 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
             .rounded(px(size / 2.0))
             .items_center()
             .justify_center()
-            .bg(move || panel(ui))
+            .bg(move || panel(ui.app))
             .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 3)))
             .on_press(move || act(ui, index))
             .child(
@@ -225,7 +226,7 @@ pub fn tile_buttons(ui: Ui, index: usize) -> impl IntoElement {
 pub fn hint(ui: Ui) -> impl IntoElement {
     let shown = move || {
         ui.keys_shown()
-            && with_state(ui, |m| {
+            && with_state(ui.playback, |m| {
                 m.hint() && m.dialog().is_none() && m.pick().is_none()
             })
             .unwrap_or(false)
@@ -243,7 +244,7 @@ pub fn hint(ui: Ui) -> impl IntoElement {
                     .px(px(14.0))
                     .py(px(5.0))
                     .rounded(px(RADIUS_LARGE))
-                    .bg(move || panel(ui))
+                    .bg(move || panel(ui.app))
                     .text_size(px(OSD_BADGE))
                     .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA)),
             )

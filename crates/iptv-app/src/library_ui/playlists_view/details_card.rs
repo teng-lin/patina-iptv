@@ -15,14 +15,16 @@ use crate::wiring::data::Activity;
 use crate::{Ui, rgb};
 
 pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
-    let Some((kind, params)) = state(ui, |s| s.details().map(|f| (f.kind(), f.params()))).flatten()
+    let Some((kind, params)) =
+        state(ui.screens, |s| s.details().map(|f| (f.kind(), f.params()))).flatten()
     else {
         return view();
     };
-    let checking = move || state(ui, |s| s.details().is_some_and(|f| f.checking)).unwrap_or(false);
+    let checking =
+        move || state(ui.screens, |s| s.details().is_some_and(|f| f.checking)).unwrap_or(false);
     // The latest first: a notice from the last key, then the check.
     let status = move || {
-        if let Some(n) = state(ui, |s| s.notice()).flatten() {
+        if let Some(n) = state(ui.screens, |s| s.notice()).flatten() {
             return (words::notice(n).to_owned(), true);
         }
         match ui.app.library.activity.with(|a| a.get(&id).cloned()) {
@@ -41,19 +43,25 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         }
     };
     let row = move |p: Param| {
-        let focused = move || state(ui, |s| s.details().is_some_and(|f| f.focus == Some(p)));
+        let focused = move || {
+            state(ui.screens, |s| {
+                s.details().is_some_and(|f| f.focus == Some(p))
+            })
+        };
         let value = move || {
-            state(ui, |s| s.details().map(|f| words::param_value(f, p)))
-                .flatten()
-                .unwrap_or_default()
+            state(ui.screens, |s| {
+                s.details().map(|f| words::param_value(f, p))
+            })
+            .flatten()
+            .unwrap_or_default()
         };
         let error = move || {
-            state(ui, |s| s.details().and_then(|f| f.error))
+            state(ui.screens, |s| s.details().and_then(|f| f.error))
                 .flatten()
                 .filter(|(at, _)| *at == p)
                 .map(|(_, e)| crate::library_ui::wizard_view::words::field_error(e))
         };
-        let mark = move || mark(ui, focused().unwrap_or(false));
+        let mark = move || mark(ui.chrome, focused().unwrap_or(false));
         // Two lines, and a third for a problem with the detail.
         let pitch = move || ROW_TWO + if error().is_some() { 18.0 } else { 0.0 };
         list_rows::row_with(size, pitch, mark)
@@ -72,8 +80,12 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                 },
             ))
     };
-    let check_focused =
-        move || state(ui, |s| s.details().is_some_and(|f| f.focus.is_none())).unwrap_or(false);
+    let check_focused = move || {
+        state(ui.screens, |s| {
+            s.details().is_some_and(|f| f.focus.is_none())
+        })
+        .unwrap_or(false)
+    };
     let check_label = move || {
         if checking() {
             tr("Checking…")
@@ -91,7 +103,7 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         .child(view().h(move || size.px(4.0)))
         .children(params.iter().copied().map(row))
         .child(when(
-            move || state(ui, |s| s.details().is_some_and(|f| {
+            move || state(ui.screens, |s| s.details().is_some_and(|f| {
                 f.params().iter().any(|p| p.is_link() && f.value(*p).trim().to_ascii_lowercase().starts_with("http://"))
             })).unwrap_or(false),
             move || ui_kit::caption(size, tr("Not encrypted: HTTP can expose your login and viewing activity.")),

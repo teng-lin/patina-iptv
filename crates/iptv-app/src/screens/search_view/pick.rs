@@ -30,16 +30,14 @@ pub fn open_to_pick(ui: Ui) {
 }
 
 /// Whether the screen picks for multiview.
-pub fn picking(ui: Ui) -> bool {
-    ui.screens
-        .search
-        .with(|s| s.as_ref().is_some_and(|s| s.pick))
+pub fn picking(screens: crate::ScreensUi) -> bool {
+    screens.search.with(|s| s.as_ref().is_some_and(|s| s.pick))
 }
 
 /// Chooses result `id` while picking for multiview: its channel becomes a
 /// new tile and the screen closes. `false` when not picking.
 pub(super) fn choose(ui: Ui, id: &ResultId) -> bool {
-    if !untracked(|| picking(ui)) {
+    if !untracked(|| picking(ui.screens)) {
         return false;
     }
     let schedule = crate::wiring::runtime_owner::schedule();

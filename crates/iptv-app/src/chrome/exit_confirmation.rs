@@ -17,9 +17,10 @@ pub(crate) fn offered(host: Host) -> bool {
     host.platform == Platform::Android && host.form_factor == FormFactor::Tv
 }
 
-pub(crate) fn enabled(ui: Ui) -> bool {
+pub(crate) fn enabled(app: crate::SharedUi) -> bool {
     offered(crate::wiring::device::host())
-        && crate::wiring::settings_wiring::read(ui).bool(keys::DOUBLE_BACK_TO_EXIT, &Target::Global)
+        && crate::wiring::settings_wiring::read(app)
+            .bool(keys::DOUBLE_BACK_TO_EXIT, &Target::Global)
 }
 
 /// Consume the first Back. A second Back in the window falls through the

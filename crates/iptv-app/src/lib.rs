@@ -332,6 +332,8 @@ pub(crate) struct ChromeUi {
     /// (`input.rs`).
     pub back_guard: Signal<iptv_nav::BackGuard>,
     exit_deadline: Signal<Option<u64>>,
+    /// Side effects wired by `Ui::new` when any control is touched or clicked.
+    on_touch: Stored<Option<Rc<dyn Fn()>>>,
 }
 
 impl SharedUi {
@@ -352,10 +354,45 @@ impl SharedUi {
         }
     }
 
-    fn now_ms(&self) -> u64 {
+    /// Tracks the programs on screen: a new schedule or a day paged in.
+    /// The value changes with either.
+    pub fn guide_data(&self) -> u64 {
+        self.data_version.get() << 32 | (self.guide_pages.get() & 0xFFFF_FFFF)
+    }
+
+    /// Milliseconds since the app started, on the engine's clock (a
+    /// test's manual clock moves it with the timers).
+    pub fn now_ms(&self) -> u64 {
         nsh_core::time::now()
             .saturating_duration_since(self.epoch)
             .as_millis() as u64
+    }
+}
+
+impl ChromeUi {
+    pub(crate) fn keys_shown(&self) -> bool {
+        self.input.get().key_hints()
+    }
+
+    /// Visible ways back (`iptv_presentation::input_mode::InputMode::back_controls`):
+    /// always on tablets and desktops, including after a keyboard is used;
+    /// on TVs and terminals only once touch or a pointer is used.
+    pub(crate) fn back_controls(&self) -> bool {
+        let remote_back = matches!(
+            idiom(),
+            nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
+        );
+        self.input.get().back_controls(remote_back)
+    }
+
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
+    pub(crate) fn touched(&self) {
+        self.exit_deadline.set(None);
+        if let Some(hook) = self.on_touch.with(|slot| slot.clone()) {
+            hook();
+        }
+        self.input.set(self.last_press.get_untracked());
     }
 }
 
@@ -467,8 +504,20 @@ impl Ui {
                 store_failure_scroll: ui_kit::FocusScroll::new(),
                 back_guard: signal(iptv_nav::BackGuard::default()),
                 exit_deadline: signal(None),
+                on_touch: stored(None),
             },
         };
+        ui.chrome.on_touch.with(|slot| {
+            *slot = Some(Rc::new(move || {
+                // PIN entry continues the choice that opened the prompt. Dismissing
+                // the prompt cancels it in `parental_view::abort`.
+                if ui.top_overlay() != Some(overlays::Overlay::Parental) {
+                    external_player::cancel_pending(ui.cast);
+                }
+                ui.playback.pending_zap.set(None);
+                browse_playback::activity(ui);
+            }));
+        });
         player_panels::bind_auto_hide(app, ui.playback);
         ui
     }
@@ -478,11 +527,17 @@ impl Ui {
     /// Tracks the programs on screen: a new schedule or a day paged in.
     /// The value changes with either.
     pub fn guide_data(&self) -> u64 {
-        self.app.data_version.get() << 32 | (self.app.guide_pages.get() & 0xFFFF_FFFF)
+        self.app.guide_data()
     }
 
     pub fn keys_shown(&self) -> bool {
-        self.chrome.input.get().key_hints()
+        self.chrome.keys_shown()
+    }
+
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
+    pub fn touched(&self) {
+        self.chrome.touched();
     }
 
     /// Whether lists are edited by dragging with visible Save and Cancel
@@ -500,11 +555,7 @@ impl Ui {
     /// always on tablets and desktops, including after a keyboard is used;
     /// on TVs and terminals only once touch or a pointer is used.
     pub fn back_controls(&self) -> bool {
-        let remote_back = matches!(
-            idiom(),
-            nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
-        );
-        self.chrome.input.get().back_controls(remote_back)
+        self.chrome.back_controls()
     }
 
     /// A foreground UI surface color. In guide mode the opaque colors are
@@ -514,7 +565,7 @@ impl Ui {
     pub fn surface(&self, rgb_hex: u32) -> Rgba {
         let alpha = match self.chrome.mode.get() {
             // `appearance.ui_transparency`
-            ViewMode::Overlay => theme::overlay_alpha(&settings_wiring::read(*self)),
+            ViewMode::Overlay => theme::overlay_alpha(&settings_wiring::read(self.app)),
             ViewMode::Guide | ViewMode::Fullscreen => 0x00,
         };
         tint(rgb_hex, alpha)
@@ -698,7 +749,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     let groups = element_ref();
     let channel = computed(move || ui.guide.focus.with(|f| f.channel));
     let group = computed(move || ui.guide.focus.with(|f| f.group));
-    let shown = computed(move || lists::columns_shown(ui));
+    let shown = computed(move || lists::columns_shown(ui.guide));
     // Keys scroll only when the focus comes within EDGE rows of the
     // viewport's edge (touch scrolls on its own).
     const EDGE: usize = 2;
@@ -726,7 +777,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     // The groups column shows the selected group when it opens or moves.
     effect(move || {
         if shown.get()
-            && let Some(position) = lists::visible_entries(ui).position(group.get())
+            && let Some(position) = lists::visible_entries(ui.app).position(group.get())
         {
             groups.scroll_to_index(position as u32, percentage(0.5), px(0.0), false);
         }
@@ -762,7 +813,10 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         .child(video::layer(ui, 0))
         .children((1..player::SURFACES).map(move |s| {
             when(
-                move || multiview::mounted(ui, s) || desktop::player_windows::mounted(ui, s),
+                move || {
+                    multiview::mounted(ui.playback, s)
+                        || desktop::player_windows::mounted(ui.playback, s)
+                },
                 move || video::layer(ui, s),
             )
         }))
@@ -775,8 +829,8 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
 /// Everything over the video: the guide, the full-screen tap catcher,
 /// the player panels and every screen and popup. None of it shows in the
 /// picture-in-picture window.
-pub(crate) fn guide_chrome_pointer_events(ui: Ui) -> PointerEvents {
-    if organization_view::guide_order_open(ui) {
+pub(crate) fn guide_chrome_pointer_events(screens: crate::ScreensUi) -> PointerEvents {
+    if organization_view::guide_order_open(screens) {
         PointerEvents::None
     } else {
         PointerEvents::Auto
@@ -785,7 +839,7 @@ pub(crate) fn guide_chrome_pointer_events(ui: Ui) -> PointerEvents {
 
 fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
     let fullscreen = move || ui.chrome.mode.get() == ViewMode::Fullscreen;
-    let shown = move || pip::ui_shown(ui);
+    let shown = move || pip::ui_shown(ui.playback);
     let gesture = touch_zap::Gesture::new();
     view()
         .test_id("app-ui")
@@ -812,7 +866,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
                 .opacity(move || if fullscreen() { 0.0_f32 } else { 1.0 })
                 .pointer_events(move || {
                     if fullscreen()
-                        || (organization_view::is_open(ui)
+                        || (organization_view::is_open(ui.screens)
                             && !(organization_view::guide_order_accessible(ui)
                                 && ui.drag_editing()))
                     {
@@ -829,8 +883,8 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
                         .child(rail::column(ui))
                         .child(
                             when(
-                                move || organization_view::group_column_order_open(ui),
-                                move || view().w(move || px(panels::groups_width(ui))),
+                                move || organization_view::group_column_order_open(ui.screens),
+                                move || view().w(move || px(panels::groups_width(ui.guide))),
                             )
                             .otherwise(move || panels::group_column(ui, groups)),
                         )
@@ -841,7 +895,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             // Made again when live video turns into a replay or back: only
             // live video has the channel actions (`touch_zap.rs`).
             when(
-                move || touch_zap::changes_channel(ui),
+                move || touch_zap::changes_channel(ui.playback),
                 move || video_catcher(ui, true, gesture),
             )
             .otherwise(move || video_catcher(ui, false, gesture)),
@@ -887,7 +941,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         // from (the first run's welcome screen too); mounted only while it
         // is asked.
         .child(nsh_core::prelude::when(
-            move || chooser::is_open(ui, true),
+            move || chooser::is_open(ui.screens, true),
             move || chooser::layer(ui, true),
         ))
         .child(toast::layer())
@@ -904,7 +958,7 @@ fn video_catcher(ui: Ui, live: bool, gesture: touch_zap::Gesture) -> View {
     let catcher = view()
         .test_id("video")
         .accessibility_elements_hidden(move || {
-            !fullscreen() || ui.any_overlay_open() || multiview::is_open(ui)
+            !fullscreen() || ui.any_overlay_open() || multiview::is_open(ui.playback)
         })
         .absolute()
         .inset_0()
@@ -949,11 +1003,11 @@ fn toggle_panels(ui: Ui) {
         return;
     }
     // An iPad's tap on the video beside the channel list closes it.
-    if IOS && untracked(|| channels_view::is_open(ui)) {
-        channels_view::close(ui);
+    if IOS && untracked(|| channels_view::is_open(ui.playback)) {
+        channels_view::close(ui.playback);
         return;
     }
-    if untracked(|| multiview::is_open(ui)) {
+    if untracked(|| multiview::is_open(ui.playback)) {
         // Beside the tiles: the menu closes first.
         if multiview::dismiss(ui) {
             return;
@@ -1055,8 +1109,8 @@ fn bind_back(ui: Ui) {
             || ui.screens.chooser.with(Option::is_some)
             || ui.screens.editor.with(Option::is_some)
             || ui.guide.focus.with(|f| f.hint)
-            || channels_view::is_open(ui)
-            || multiview_picker::is_open(ui);
+            || channels_view::is_open(ui.playback)
+            || multiview_picker::is_open(ui.playback);
         (
             ui.chrome.mode.get(),
             ui.guide.focus.with(|f| f.pane),
@@ -1073,16 +1127,16 @@ fn bind_back(ui: Ui) {
                 _ => false,
             };
         let double_back = rail_root
-            && exit_confirmation::enabled(ui)
+            && exit_confirmation::enabled(ui.app)
             && lifecycle() == nsh_core::platform::Lifecycle::Active
             && !ui.playback.channel_number.with(|entry| entry.active());
         if !double_back {
             ui.chrome.exit_deadline.set(None);
         }
         let leaves = match top {
-            Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui),
+            Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui.screens),
             Some(overlays::Overlay::StoreStartupFailure) => {
-                startup_view::store_failure_back_leaves(ui)
+                startup_view::store_failure_back_leaves(ui.chrome)
             }
             _ => rail_root,
         } && !ui.playback.channel_number.with(|entry| entry.active())
@@ -1106,7 +1160,7 @@ fn bind_back(ui: Ui) {
 /// first run's welcome screen, the store failure screen) opens the prompt
 /// instead, over every other layer.
 pub(crate) fn go_back(ui: Ui) -> bool {
-    external_player::cancel_pending(ui);
+    external_player::cancel_pending(ui.cast);
     if ui.playback.channel_number.with(|entry| entry.active()) {
         ui.playback.channel_number.update(|entry| {
             entry.take();
@@ -1130,38 +1184,40 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             ui.guide.focus.with(|f| f.pane),
             panels || menu,
         ) {
-            _ if top == Some(Overlay::QuitConfirm) => desktop::quit_confirm::back(ui),
+            _ if top == Some(Overlay::QuitConfirm) => desktop::quit_confirm::back(ui.chrome),
             _ if top == Some(Overlay::Leave) => {
                 chooser::close(ui);
                 true
             }
-            _ if top == Some(Overlay::StoreStartupFailure) => startup_view::store_failure_back(ui),
+            _ if top == Some(Overlay::StoreStartupFailure) => {
+                startup_view::store_failure_back(ui.chrome)
+            }
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
                 true
             }
             _ if top == Some(Overlay::CastPairing) => {
-                cast_pairing::close(ui);
+                cast_pairing::close(ui.cast);
                 true
             }
-            _ if top == Some(Overlay::RestoreReview) => backup::back(ui),
+            _ if top == Some(Overlay::RestoreReview) => backup::back(ui.screens),
             _ if top == Some(Overlay::AppUpdateNotice) => {
-                settings_view::updates::dismiss_notice(ui);
+                settings_view::updates::dismiss_notice(ui.screens);
                 true
             }
             _ if top == Some(Overlay::AppUpdate) => {
-                settings_view::updates::close(ui);
+                settings_view::updates::close(ui.screens);
                 true
             }
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
             _ if top == Some(Overlay::Vod) => vod_view::back(ui),
-            _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
+            _ if top == Some(Overlay::Recordings) => recordings_view::back(ui.screens),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
             _ if top == Some(Overlay::GuideRepair) => guide_repair_view::back(ui),
             _ if top == Some(Overlay::GuideInspection) => guide_inspect_view::back(ui),
-            _ if top == Some(Overlay::RemoteEditor) => remote_editor::back(ui),
+            _ if top == Some(Overlay::RemoteEditor) => remote_editor::back(ui.screens),
             _ if top == Some(Overlay::Organization) => organization_view::back(ui),
-            _ if top == Some(Overlay::CustomGroups) => custom_groups::back(ui),
+            _ if top == Some(Overlay::CustomGroups) => custom_groups::back(ui.screens),
             _ if top == Some(Overlay::Playlists) => playlists_view::back(ui),
             _ if top == Some(Overlay::Settings) => settings_view::back(ui),
             _ if top == Some(Overlay::GuideAssign) => guide_assign_view::back(ui),
@@ -1208,9 +1264,9 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             // A movie or an episode: back to its details (#147).
             (ViewMode::Fullscreen, _, false) if vod_view::return_from_player(ui) => true,
             // A dialog closes, else the active tile goes full screen.
-            _ if multiview::is_open(ui) => multiview::back(ui),
+            _ if multiview::is_open(ui.playback) => multiview::back(ui),
             // A tile watched full screen: back to the grid as it was.
-            _ if multiview::detour(ui) => multiview::resume(ui),
+            _ if multiview::detour(ui.playback) => multiview::resume(ui),
             (ViewMode::Fullscreen, _, true) => {
                 ui.playback.panels.update(|p| p.hide());
                 ui.playback

@@ -14,7 +14,7 @@ use crate::{Playback, Ui, ViewMode};
 /// whose channel went is removed, and with none left nothing plays.
 /// `false` without a session.
 pub fn follow(ui: Ui) -> bool {
-    if !session(ui) {
+    if !session(ui.playback) {
         return false;
     }
     let schedule = crate::wiring::runtime_owner::schedule();
@@ -172,11 +172,11 @@ pub fn collapse(ui: Ui) {
     }
     // A list picking a tile (Search and add, the channel picker) goes
     // with the session: a pick would find none.
-    if untracked(|| crate::screens::search_view::picking(ui)) {
+    if untracked(|| crate::screens::search_view::picking(ui.screens)) {
         crate::screens::search_view::close(ui);
     }
-    if untracked(|| crate::playback::multiview_picker::is_open(ui)) {
-        crate::playback::multiview_picker::close(ui);
+    if untracked(|| crate::playback::multiview_picker::is_open(ui.playback)) {
+        crate::playback::multiview_picker::close(ui.playback);
     }
     match heard {
         None => {}

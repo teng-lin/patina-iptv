@@ -43,8 +43,8 @@ fn warning_label(choice: WarningChoice) -> &'static str {
     }
 }
 
-fn with_state<T>(ui: Ui, f: impl FnOnce(&State) -> T) -> Option<T> {
-    ui.playback.multiview.with(|m| m.as_ref().map(f))
+fn with_state<T>(playback: crate::PlaybackUi, f: impl FnOnce(&State) -> T) -> Option<T> {
+    playback.multiview.with(|m| m.as_ref().map(f))
 }
 
 /// Why no more tiles fit, while none does.
@@ -82,13 +82,13 @@ fn tile_status(ui: Ui, surface: usize) -> TileStatus {
         })
 }
 
-fn dialog_is(ui: Ui, f: impl Fn(&Dialog) -> bool) -> bool {
-    with_state(ui, |m| m.dialog().is_some_and(&f)).unwrap_or(false)
+fn dialog_is(playback: crate::PlaybackUi, f: impl Fn(&Dialog) -> bool) -> bool {
+    with_state(playback, |m| m.dialog().is_some_and(&f)).unwrap_or(false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
-    let open = move || multiview::is_open(ui);
-    let tiles = move || with_state(ui, |m| m.tiles().len()).unwrap_or(0);
+    let open = move || multiview::is_open(ui.playback);
+    let tiles = move || with_state(ui.playback, |m| m.tiles().len()).unwrap_or(0);
     view()
         .test_id("multiview-ui")
         .accessibility_elements_hidden(move || !open() || ui.any_overlay_open())
@@ -112,11 +112,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .child(chrome::toolbar(ui))
                 .child(chrome::hint(ui))
                 .child(when(
-                    move || dialog_is(ui, |d| matches!(d, Dialog::Options { .. })),
+                    move || dialog_is(ui.playback, |d| matches!(d, Dialog::Options { .. })),
                     move || menu::panel(ui),
                 ))
                 .child(when(
-                    move || dialog_is(ui, |d| matches!(d, Dialog::Warning { .. })),
+                    move || dialog_is(ui.playback, |d| matches!(d, Dialog::Warning { .. })),
                     move || warning(ui),
                 ))
         }))
@@ -125,14 +125,20 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 /// Tile `index`: its frame, status, channel and pause mark, and its
 /// pointer buttons.
 fn tile(ui: Ui, index: usize) -> impl IntoElement {
-    let rect = move || multiview::tile_rect(ui, index).unwrap_or((0.0, 0.0, 0.0, 0.0));
-    let surface = move || with_state(ui, |m| m.tiles().get(index).map(|t| t.surface)).flatten();
-    let channel = move || with_state(ui, |m| m.tiles().get(index).map(|t| t.channel)).flatten();
-    let active = move || with_state(ui, |m| m.active_index() == index).unwrap_or(false);
-    let paused =
-        move || with_state(ui, |m| m.tiles().get(index).is_some_and(|t| t.paused)).unwrap_or(false);
-    let several = move || with_state(ui, |m| m.tiles().len() > 1).unwrap_or(false);
-    let heard = move || with_state(ui, |m| m.heard_index() == index).unwrap_or(false);
+    let rect = move || multiview::tile_rect(ui.playback, index).unwrap_or((0.0, 0.0, 0.0, 0.0));
+    let surface =
+        move || with_state(ui.playback, |m| m.tiles().get(index).map(|t| t.surface)).flatten();
+    let channel =
+        move || with_state(ui.playback, |m| m.tiles().get(index).map(|t| t.channel)).flatten();
+    let active = move || with_state(ui.playback, |m| m.active_index() == index).unwrap_or(false);
+    let paused = move || {
+        with_state(ui.playback, |m| {
+            m.tiles().get(index).is_some_and(|t| t.paused)
+        })
+        .unwrap_or(false)
+    };
+    let several = move || with_state(ui.playback, |m| m.tiles().len() > 1).unwrap_or(false);
+    let heard = move || with_state(ui.playback, |m| m.heard_index() == index).unwrap_or(false);
     let accent = move || ui.app.theme.with(|t| t.accent.main);
     let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     let status = move || surface().map_or(TileStatus::Playing, |s| tile_status(ui, s));
@@ -153,7 +159,7 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
             ..Default::default()
         })
         .accessibility_elements_hidden(move || {
-            with_state(ui, |state| state.dialog().is_some()).unwrap_or(false)
+            with_state(ui.playback, |state| state.dialog().is_some()).unwrap_or(false)
         })
         .absolute()
         .left(move || px(rect().0))
@@ -286,8 +292,8 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
 }
 
 /// The warning's title, message, choices and which is focused.
-fn warning_content(ui: Ui) -> (String, String, usize) {
-    let content = with_state(ui, |m| match m.dialog() {
+fn warning_content(playback: crate::PlaybackUi) -> (String, String, usize) {
+    let content = with_state(playback, |m| match m.dialog() {
         Some(Dialog::Warning { allowed, focus, .. }) => (
             trf(
                 "{count, plural, one {Your account allows # stream at once} \
@@ -305,7 +311,7 @@ fn warning_content(ui: Ui) -> (String, String, usize) {
 /// The connection warning, centered over a dimmed screen; its choices in
 /// a row.
 fn warning(ui: Ui) -> impl IntoElement {
-    let content = computed(move || warning_content(ui));
+    let content = computed(move || warning_content(ui.playback));
     let panel = move || tint(ui.app.theme.with(|t| t.background.panel), 0xF0);
     let accent = move || ui.app.theme.with(|t| t.accent.main);
     let choice = move |i: usize| {

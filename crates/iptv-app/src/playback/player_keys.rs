@@ -35,7 +35,7 @@ pub(crate) fn remap(
     let replay = matches!(
         ui.playback.playback.get_untracked(),
         Playback::CatchUp { .. }
-    ) || crate::playback::on_demand::active(*ui);
+    ) || crate::playback::on_demand::active(ui.playback);
     let action = if replay && ctx == Context::Player {
         seek_key(seek_scheme(), key, action)
     } else {
@@ -50,11 +50,9 @@ pub(crate) fn remap(
 
 /// Whether `key` seeks now (in a replay, under the panels' Player context):
 /// it then has no long press, so holding it repeats the step.
-pub(crate) fn seeks(ui: &Ui, ctx: Context, key: RemoteKey) -> bool {
-    let replay = matches!(
-        ui.playback.playback.get_untracked(),
-        Playback::CatchUp { .. }
-    ) || crate::playback::on_demand::active(*ui);
+pub(crate) fn seeks(ui: crate::PlaybackUi, ctx: Context, key: RemoteKey) -> bool {
+    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
+        || crate::playback::on_demand::active(ui);
     replay && ctx == Context::Player && seek_arrows(seek_scheme()).contains(&key)
 }
 
@@ -64,11 +62,9 @@ fn seek_scheme() -> &'static str {
 
 /// Seeking in a replay: whether OK plays and pauses (the arrows seek, as
 /// in a media player) instead of showing the card.
-fn ok_pauses(ui: Ui) -> bool {
-    let replay = matches!(
-        ui.playback.playback.get_untracked(),
-        Playback::CatchUp { .. }
-    ) || crate::playback::on_demand::active(ui);
+fn ok_pauses(ui: crate::PlaybackUi) -> bool {
+    let replay = matches!(ui.playback.get_untracked(), Playback::CatchUp { .. })
+        || crate::playback::on_demand::active(ui);
     replay && !seek_arrows(seek_scheme()).is_empty()
 }
 
@@ -95,22 +91,22 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat
             }
         }
         // The legacy cards remain available through a custom binding.
-        Action::ShowPanels if crate::playback::player::failed(&ui) => {
+        Action::ShowPanels if crate::playback::player::failed(ui.playback) => {
             crate::playback::player::retry(ui)
         }
-        Action::ShowPanels if crate::playback::seek::pending(ui) => {
+        Action::ShowPanels if crate::playback::seek::pending(ui.playback) => {
             crate::playback::seek::commit_now(ui)
         }
-        Action::ShowPanels if ok_pauses(ui) => {
+        Action::ShowPanels if ok_pauses(ui.playback) => {
             crate::playback::player::toggle_pause(ui);
             ui.update_panels(|p, now| p.show_info(now));
         }
         Action::ShowPanels => ui.update_panels(|p, now| p.show_card(now)),
         Action::ShowControls if !fullscreen => return false,
         Action::ShowControls if nsh_core::prelude::idiom() == nsh_core::platform::Idiom::Tv => {
-            if key == RemoteKey::Ok && crate::playback::player::failed(&ui) {
+            if key == RemoteKey::Ok && crate::playback::player::failed(ui.playback) {
                 crate::playback::player::retry(ui);
-            } else if key == RemoteKey::Ok && crate::playback::seek::pending(ui) {
+            } else if key == RemoteKey::Ok && crate::playback::seek::pending(ui.playback) {
                 crate::playback::seek::commit_now(ui);
             } else {
                 crate::playback::play_bar::remote(ui);
@@ -172,8 +168,8 @@ pub(crate) fn stop_playback(ui: Ui) {
         crate::screens::casting::stop(ui);
         return;
     }
-    crate::playback::external_player::stop(ui);
-    crate::playback::interruption::viewer_acted(ui);
+    crate::playback::external_player::stop(ui.cast);
+    crate::playback::interruption::viewer_acted(ui.playback);
     log::info!("iptv player: stopped by the viewer");
     stopped(ui);
 }

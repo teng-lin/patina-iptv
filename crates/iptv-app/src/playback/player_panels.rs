@@ -38,7 +38,7 @@ impl Ui {
     /// a live channel, the card with its seek bar for a replay.
     pub fn show_playing(&self) {
         let live = self.playback.playback.get_untracked() == Playback::Live
-            && !crate::playback::on_demand::active(*self);
+            && !crate::playback::on_demand::active(self.playback);
         self.update_panels(|p, now| {
             if live {
                 p.show_banner(now);
@@ -77,7 +77,9 @@ fn label(ui: Ui, control: Control) -> String {
             tr("Record")
         }
         .to_owned(),
-        Multiview if crate::playback::multiview::detour(ui) => tr("Back to multiview").to_owned(),
+        Multiview if crate::playback::multiview::detour(ui.playback) => {
+            tr("Back to multiview").to_owned()
+        }
         // Disabled with its reason (a TV at the account's limit, #279).
         Multiview => with(
             tr("Multiview"),
@@ -174,7 +176,7 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
             main && (crate::wiring::capabilities::record_now().offered()
                 || crate::screens::recordings_view::recording_active(ui))
         }
-        Control::Recordings => main && crate::wiring::capabilities::recordings_library(ui),
+        Control::Recordings => main && crate::wiring::capabilities::recordings_library(ui.screens),
         Control::Search => main,
         // As the device and its window offer it (#279): a phone upright, a
         // tablet in split screen, an iPad and a browser TV leave it out.
@@ -207,7 +209,8 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
                             .is_some_and(crate::screens::recordings_view::available)))
         }
         Control::Recordings => {
-            ui.playback.player_surface == 0 && crate::wiring::capabilities::recordings_library(ui)
+            ui.playback.player_surface == 0
+                && crate::wiring::capabilities::recordings_library(ui.screens)
         }
         Control::Search => ui.playback.player_surface == 0,
         Control::ChannelList | Control::Favorite | Control::Scaling | Control::SleepTimer => true,
@@ -223,7 +226,9 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
 
 /// The panels as shown: hidden outside full screen and in multiview.
 fn shown(ui: Ui) -> Shown {
-    if ui.chrome.mode.get() == ViewMode::Fullscreen && !crate::playback::multiview::is_open(ui) {
+    if ui.chrome.mode.get() == ViewMode::Fullscreen
+        && !crate::playback::multiview::is_open(ui.playback)
+    {
         ui.playback.panels.with(|p| p.shown)
     } else {
         Shown::Hidden
@@ -319,7 +324,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         let size = crate::chrome::scale::Scale::new();
                         crate::chrome::ui_kit::card(ui, size, 620.0)
                             .child(crate::chrome::ui_kit::title(size, move || {
-                                if let Some(title) = crate::screens::vod_view::title(ui) {
+                                if let Some(title) = crate::screens::vod_view::title(ui.playback) {
                                     return title;
                                 }
                                 ui.playback.player.recorded.with(|r| {
@@ -515,7 +520,7 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
     pill(
         ui,
         move || {
-            let detour = crate::playback::multiview::detour(ui);
+            let detour = crate::playback::multiview::detour(ui.playback);
             words::quick_label(action, is_favorite(ui), detour).to_owned()
         },
         focused,

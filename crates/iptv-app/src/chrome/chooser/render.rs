@@ -4,7 +4,7 @@ use super::*;
 /// The choosers' layer: `leave` for the question before leaving, over
 /// every screen; else the others, over the video. Each shows only its own.
 pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
-    let open = move || is_open(ui, leave);
+    let open = move || is_open(ui.screens, leave);
     let overlay = if leave {
         crate::chrome::overlays::Overlay::Leave
     } else {
@@ -65,7 +65,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
         // Clear of the play bar while it shows.
         .pb(move || {
             px(if crate::playback::play_bar::shows(ui) {
-                crate::playback::play_bar::height(ui) + 16.0
+                crate::playback::play_bar::height(ui.playback) + 16.0
             } else {
                 40.0
             })
@@ -159,7 +159,7 @@ fn row(ui: Ui, size: Scale, at: Position) -> View {
                     Kind::History | Kind::AirPlay | Kind::CastEnded | Kind::More | Kind::Leave => {
                         false
                     }
-                    Kind::Volume => volume_index(ui) == index,
+                    Kind::Volume => volume_index(ui.playback) == index,
                     _ => c.list.selected == index,
                 };
                 Some((label, checked, c.list.focus == index))

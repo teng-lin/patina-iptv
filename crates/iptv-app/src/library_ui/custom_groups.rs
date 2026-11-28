@@ -19,14 +19,14 @@ use iptv_providers::ContentId;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
-fn read<R>(ui: Ui, f: impl FnOnce(&Open) -> R) -> Option<R> {
-    ui.screens.custom_groups.read(f)
+fn read<R>(screens: crate::ScreensUi, f: impl FnOnce(&Open) -> R) -> Option<R> {
+    screens.custom_groups.read(f)
 }
-fn update(ui: Ui, f: impl FnOnce(&mut Open)) {
-    ui.screens.custom_groups.update(f);
+fn update(screens: crate::ScreensUi, f: impl FnOnce(&mut Open)) {
+    screens.custom_groups.update(f);
 }
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.custom_groups.is_open()
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.custom_groups.is_open()
 }
 fn request<R: Send + 'static>(
     ui: Ui,
@@ -37,7 +37,7 @@ fn request<R: Send + 'static>(
     let result = operation;
     crate::wiring::tasks::spawn_in_app(async move {
         let result = result.await;
-        if ui.screens.custom_groups.is_current(generation) && is_open(ui) {
+        if ui.screens.custom_groups.is_current(generation) && is_open(ui.screens) {
             done(ui, result);
         }
     });
@@ -56,7 +56,7 @@ fn mutate<R: Send + 'static>(
         if result.is_ok() {
             data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
         }
-        if ui.screens.custom_groups.is_current(generation) && is_open(ui) {
+        if ui.screens.custom_groups.is_current(generation) && is_open(ui.screens) {
             done(ui, result);
         }
     });
@@ -80,7 +80,7 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
                     && t.id.starts_with("custom:")
             })
     {
-        crate::screens::parental_view::protected_settings(ui, move || {
+        crate::screens::parental_view::protected_settings(ui.screens, move || {
             open_with(ui, source, members)
         });
         return;
@@ -91,24 +91,24 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
         crate::runtime::commands::custom_groups(&crate::wiring::runtime_owner::runtime(), source),
         move |ui, result| match result {
             Ok(groups) => {
-                update(ui, |s| s.reload_groups(groups));
+                update(ui.screens, |s| s.reload_groups(groups));
                 if let Some(scope) = members {
                     show_members(ui, scope);
                 }
             }
             Err(error) => {
                 log::warn!("iptv custom groups: {error}");
-                close(ui);
+                close(ui.screens);
             }
         },
     );
 }
-fn close(ui: Ui) {
+fn close(screens: crate::ScreensUi) {
     dismiss_keyboard();
-    ui.screens.custom_groups.close();
+    screens.custom_groups.close();
 }
 fn reload(ui: Ui) {
-    let Some((source, scope)) = read(ui, |s| (s.source, s.scope.clone())) else {
+    let Some((source, scope)) = read(ui.screens, |s| (s.source, s.scope.clone())) else {
         return;
     };
     request(
@@ -120,9 +120,9 @@ fn reload(ui: Ui) {
         ),
         |ui, result| {
             if let Ok((groups, rows)) = result {
-                update(ui, |s| s.reload_members(groups, rows));
+                update(ui.screens, |s| s.reload_members(groups, rows));
             } else {
-                update(ui, |s| {
+                update(ui.screens, |s| {
                     s.status = tr("The list could not be reloaded. Reopen it and try again.").into()
                 });
             }
@@ -134,14 +134,14 @@ fn report(ui: Ui, result: Result<(), Error>) {
         Ok(()) => {
             reload(ui);
         }
-        Err(_) => update(ui, |s| {
+        Err(_) => update(ui.screens, |s| {
             s.status = tr("The change could not be saved. Reopen the list and try again.").into()
         }),
     }
 }
 fn show_members(ui: Ui, scope: ChannelScope) {
     ui.screens.custom_groups.next_request();
-    let Some(source) = read(ui, |s| s.source) else {
+    let Some(source) = read(ui.screens, |s| s.source) else {
         return;
     };
     let loaded_scope = scope.clone();
@@ -153,60 +153,61 @@ fn show_members(ui: Ui, scope: ChannelScope) {
             loaded_scope,
         ),
         move |ui, result| match result {
-            Ok(rows) => update(ui, |s| s.enter_members(scope, rows)),
+            Ok(rows) => update(ui.screens, |s| s.enter_members(scope, rows)),
             Err(error) => report(ui, Err(error)),
         },
     );
 }
-pub fn back(ui: Ui) -> bool {
-    ui.screens.custom_groups.next_request();
-    let Some((editing, root)) = read(ui, |s| (s.editing.is_some(), s.page == Page::Groups)) else {
+pub fn back(screens: crate::ScreensUi) -> bool {
+    screens.custom_groups.next_request();
+    let Some((editing, root)) = read(screens, |s| (s.editing.is_some(), s.page == Page::Groups))
+    else {
         return false;
     };
     if editing {
-        cancel_text(ui);
+        cancel_text(screens);
     } else if root {
-        close(ui);
+        close(screens);
     } else {
-        update(ui, Open::back_page);
+        update(screens, Open::back_page);
     }
     true
 }
-fn begin_text(ui: Ui, kind: Text) {
-    update(ui, |s| s.begin_text(kind));
+fn begin_text(screens: crate::ScreensUi, kind: Text) {
+    update(screens, |s| s.begin_text(kind));
 }
-fn cancel_text(ui: Ui) {
-    update(ui, |s| s.editing = None);
+fn cancel_text(screens: crate::ScreensUi) {
+    update(screens, |s| s.editing = None);
     dismiss_keyboard();
 }
-fn text(ui: Ui) -> String {
-    read(ui, |s| {
+fn text(screens: crate::ScreensUi) -> String {
+    read(screens, |s| {
         s.editing.as_ref().map(|e| e.1.clone()).unwrap_or_default()
     })
     .unwrap_or_default()
 }
-fn set_text(ui: Ui, value: &str) {
-    update(ui, |s| {
+fn set_text(screens: crate::ScreensUi, value: &str) {
+    update(screens, |s| {
         if let Some(e) = s.editing.as_mut() {
             e.1 = value.into();
         }
     });
 }
 fn commit_text(ui: Ui) {
-    let Some(s) = read(ui, Clone::clone) else {
+    let Some(s) = read(ui.screens, Clone::clone) else {
         return;
     };
     let Some((kind, value)) = s.editing else {
         return;
     };
     if kind == Text::Filter {
-        update(ui, |s| s.members.filter(value));
-        cancel_text(ui);
+        update(ui.screens, |s| s.members.filter(value));
+        cancel_text(ui.screens);
         return;
     }
     let name = value.trim();
     if name.is_empty() {
-        update(ui, |s| s.status = tr("Enter a group name.").into());
+        update(ui.screens, |s| s.status = tr("Enter a group name.").into());
         return;
     }
     let name = name.to_owned();
@@ -224,8 +225,8 @@ fn commit_text(ui: Ui) {
         ),
         |ui, result| {
             if result.is_ok() {
-                cancel_text(ui);
-                update(ui, |s| s.status = tr("Group saved.").into());
+                cancel_text(ui.screens);
+                update(ui.screens, |s| s.status = tr("Group saved.").into());
             }
             report(ui, result);
         },
@@ -297,7 +298,7 @@ fn labels(s: &Open) -> Vec<String> {
     }
 }
 fn act(ui: Ui, index: usize) {
-    let Some(s) = read(ui, Clone::clone) else {
+    let Some(s) = read(ui.screens, Clone::clone) else {
         return;
     };
     let removing = match s.page {
@@ -315,23 +316,23 @@ fn act(ui: Ui, index: usize) {
         if crate::wiring::runtime_owner::runtime().parental_explicitly_blocked(&target)
             && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
         {
-            crate::screens::parental_view::protected_settings(ui, move || act(ui, index));
+            crate::screens::parental_view::protected_settings(ui.screens, move || act(ui, index));
             return;
         }
     }
     match s.page {
         Page::Groups => match index {
-            0 => begin_text(ui, Text::Create),
+            0 => begin_text(ui.screens, Text::Create),
             1 => show_members(ui, ChannelScope::All),
             _ => {
                 if let Some(g) = s.groups.get(index - 2) {
-                    update(ui, |s| s.show_page(Page::Detail(g.id), 0));
+                    update(ui.screens, |s| s.show_page(Page::Detail(g.id), 0));
                 }
             }
         },
         Page::Detail(g) => match index {
             0 => show_members(ui, ChannelScope::Custom(g)),
-            1 => begin_text(ui, Text::Rename(g)),
+            1 => begin_text(ui.screens, Text::Rename(g)),
             2 => crate::library_ui::organization_view::open_mode(
                 ui,
                 s.source,
@@ -339,17 +340,19 @@ fn act(ui: Ui, index: usize) {
                 None,
                 iptv_presentation::organization::Mode::Reorder,
             ),
-            3 => update(ui, |s| s.show_page(Page::Delete(g), 0)),
+            3 => update(ui.screens, |s| s.show_page(Page::Delete(g), 0)),
             _ => {
-                back(ui);
+                back(ui.screens);
             }
         },
         Page::Members => match index {
-            0 => begin_text(ui, Text::Filter),
-            1 => update(ui, |s| s.members.select_filtered()),
-            2 => update(ui, |s| s.members.selected.clear()),
+            0 => begin_text(ui.screens, Text::Filter),
+            1 => update(ui.screens, |s| s.members.select_filtered()),
+            2 => update(ui.screens, |s| s.members.selected.clear()),
             3 | 4 if !s.members.selected.is_empty() => {
-                update(ui, |s| s.show_page(Page::Destination(index == 4), 0));
+                update(ui.screens, |s| {
+                    s.show_page(Page::Destination(index == 4), 0)
+                });
             }
             5 if s.origin().is_some() => {
                 let ids: Vec<_> = s
@@ -374,7 +377,7 @@ fn act(ui: Ui, index: usize) {
         },
         Page::Destination(moving) => {
             if index == 0 {
-                begin_text(ui, Text::Create);
+                begin_text(ui.screens, Text::Create);
                 return;
             }
             let Some(target) = s
@@ -405,7 +408,7 @@ fn act(ui: Ui, index: usize) {
                 ),
                 move |ui, result| match result {
                     Ok(count) => {
-                        update(ui, |s| {
+                        update(ui.screens, |s| {
                             let count = [("count", count.into())];
                             let status = if moving {
                                 trf(
@@ -430,7 +433,7 @@ fn act(ui: Ui, index: usize) {
         }
         Page::Delete(g) => {
             if index == 0 {
-                back(ui);
+                back(ui.screens);
             } else {
                 mutate(
                     ui,
@@ -441,7 +444,7 @@ fn act(ui: Ui, index: usize) {
                     ),
                     |ui, result| {
                         if result.is_ok() {
-                            update(ui, |s| s.show_page(Page::Groups, 0));
+                            update(ui.screens, |s| s.show_page(Page::Groups, 0));
                         }
                         report(ui, result);
                     },
@@ -451,13 +454,13 @@ fn act(ui: Ui, index: usize) {
     }
 }
 pub fn key(ui: Ui, action: Action) {
-    let Some((editing, control, focus)) = read(ui, |s| {
+    let Some((editing, control, focus)) = read(ui.screens, |s| {
         (s.editing.is_some(), s.control, s.members.focus.clone())
     }) else {
         return;
     };
     if action == Action::Back {
-        back(ui);
+        back(ui.screens);
         return;
     }
     if editing {
@@ -471,20 +474,20 @@ pub fn key(ui: Ui, action: Action) {
             if let Some(index) = control {
                 act(ui, index);
             } else if let Some(id) = focus {
-                update(ui, |s| s.members.toggle(&id));
+                update(ui.screens, |s| s.members.toggle(&id));
             }
         }
         Action::MoveUp | Action::MoveDown => {
             let by = if action == Action::MoveDown { 1 } else { -1 };
-            let count = read(ui, |s| labels(s).len()).unwrap_or(0);
-            update(ui, |s| s.step(by, count));
+            let count = read(ui.screens, |s| labels(s).len()).unwrap_or(0);
+            update(ui.screens, |s| s.step(by, count));
         }
         _ => {}
     }
 }
 fn entry_sheet(ui: Ui) -> impl IntoElement {
     use std::rc::Rc;
-    let filter = read(ui, |s| {
+    let filter = read(ui.screens, |s| {
         s.editing.as_ref().is_some_and(|e| e.0 == Text::Filter)
     })
     .unwrap_or(false);
@@ -500,11 +503,11 @@ fn entry_sheet(ui: Ui) -> impl IntoElement {
             placeholder: tr("Enter text"),
             keyboard: KeyboardType::Default,
             masked: false,
-            current: Rc::new(move || text(ui)),
-            note: Rc::new(move || read(ui, |s| s.status.clone()).unwrap_or_default()),
-            set: Rc::new(move |value| set_text(ui, value)),
+            current: Rc::new(move || text(ui.screens)),
+            note: Rc::new(move || read(ui.screens, |s| s.status.clone()).unwrap_or_default()),
+            set: Rc::new(move |value| set_text(ui.screens, value)),
             done: commit_text,
-            cancel: cancel_text,
+            cancel: |ui| cancel_text(ui.screens),
         },
     )
 }
@@ -535,19 +538,19 @@ fn summary(s: &Open) -> String {
 }
 
 /// Whether the page shows a group's members under its controls.
-fn on_members_page(ui: Ui) -> bool {
-    read(ui, |s| s.page == Page::Members).unwrap_or(false)
+fn on_members_page(screens: crate::ScreensUi) -> bool {
+    read(screens, |s| s.page == Page::Members).unwrap_or(false)
 }
 
 /// Row `at` of the page's controls (its actions and the groups).
 fn control_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     let label = move || {
-        read(ui, |s| {
+        read(ui.screens, |s| {
             labels(s).get(at.index()).cloned().unwrap_or_default()
         })
         .unwrap_or_default()
     };
-    let focused = move || read(ui, |s| s.control == Some(at.index())).unwrap_or(false);
+    let focused = move || read(ui.screens, |s| s.control == Some(at.index())).unwrap_or(false);
     ui_kit::action(ui, size, label, focused, 0xFFFFFF, move || {
         act(ui, at.index())
     })
@@ -558,9 +561,9 @@ fn control_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
 /// Row `at` of the members shown: its name, checked while selected. A
 /// press focuses the member and toggles its selection.
 fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
-    let item = move || read(ui, |s| s.members.visible_at(at.index()).cloned()).flatten();
+    let item = move || read(ui.screens, |s| s.members.visible_at(at.index()).cloned()).flatten();
     let is_selected = move || {
-        read(ui, |s| {
+        read(ui.screens, |s| {
             item().is_some_and(|r| s.members.selected.contains(&r.id))
         })
         .unwrap_or(false)
@@ -575,7 +578,7 @@ fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     };
     let focused = move || {
         item().is_some_and(|r| {
-            read(ui, |s| {
+            read(ui.screens, |s| {
                 s.control.is_none() && s.members.focus.as_ref() == Some(&r.id)
             })
             .unwrap_or(false)
@@ -583,7 +586,7 @@ fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     };
     let toggle = move || {
         if let Some(row) = item() {
-            update(ui, |s| s.toggle_member_row(&row.id));
+            update(ui.screens, |s| s.toggle_member_row(&row.id));
         }
     };
     ui_kit::action(ui, size, label, focused, 0xFFFFFF, toggle)
@@ -599,8 +602,8 @@ fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         .test_id(&format!("custom-member-{}", at.index()))
 }
 
-fn contents_hidden(ui: Ui) -> bool {
-    read(ui, |screen| screen.editing.is_some()).unwrap_or(false)
+fn contents_hidden(screens: crate::ScreensUi) -> bool {
+    read(screens, |screen| screen.editing.is_some()).unwrap_or(false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
@@ -610,12 +613,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     let size = Scale::new();
     when(
-        move || is_open(ui),
+        move || is_open(ui.screens),
         move || {
             let controls = element_ref();
             let members = element_ref();
             effect(move || {
-                if let Some((control, member)) = read(ui, |s| {
+                if let Some((control, member)) = read(ui.screens, |s| {
                     (
                         s.control,
                         s.members
@@ -637,45 +640,51 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     crate::chrome::overlays::Overlay::CustomGroups.accessibility_covered(ui)
                 })
                 .child(
-                    ui_kit::header(ui, size, tr("Custom groups"), close)
-                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                    ui_kit::header(ui, size, tr("Custom groups"), |ui| close(ui.screens))
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                 )
                 .child(
                     ui_kit::caption(size, tr(CAPTION))
-                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                 )
                 .child(
                     ui_kit::body(size, move || {
-                        read(ui, |s| s.status.clone()).unwrap_or_default()
+                        read(ui.screens, |s| s.status.clone()).unwrap_or_default()
                     })
-                    .accessibility_elements_hidden(move || contents_hidden(ui)),
+                    .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                 )
                 .child(
-                    ui_kit::heading(size, move || read(ui, summary).unwrap_or_default())
-                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                    ui_kit::heading(size, move || read(ui.screens, summary).unwrap_or_default())
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                 )
                 .child(
                     virtual_list(
-                        move || read(ui, |s| labels(s).len()).unwrap_or(0),
+                        move || read(ui.screens, |s| labels(s).len()).unwrap_or(0),
                         move |at| control_row(ui, size, at),
                     )
                     .element_ref(&controls)
-                    .accessibility_elements_hidden(move || contents_hidden(ui))
+                    .accessibility_elements_hidden(move || contents_hidden(ui.screens))
                     .estimated_item_size(crate::guide::list_rows::pitch(
                         size,
                         crate::guide::list_rows::ROW,
                     ))
-                    .h(move || size.px(if on_members_page(ui) { 260.0 } else { 480.0 })),
+                    .h(move || {
+                        size.px(if on_members_page(ui.screens) {
+                            260.0
+                        } else {
+                            480.0
+                        })
+                    }),
                 )
                 .child(when(
-                    move || on_members_page(ui),
+                    move || on_members_page(ui.screens),
                     move || {
                         virtual_list(
-                            move || read(ui, |s| s.members.visible_len()).unwrap_or(0),
+                            move || read(ui.screens, |s| s.members.visible_len()).unwrap_or(0),
                             move |at| member_row(ui, size, at),
                         )
                         .element_ref(&members)
-                        .accessibility_elements_hidden(move || contents_hidden(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens))
                         .estimated_item_size(crate::guide::list_rows::pitch(
                             size,
                             crate::guide::list_rows::ROW,
@@ -684,7 +693,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     },
                 ))
                 .child(when(
-                    move || read(ui, |s| s.editing.is_some()).unwrap_or(false),
+                    move || read(ui.screens, |s| s.editing.is_some()).unwrap_or(false),
                     move || entry_sheet(ui),
                 ))
         },

@@ -200,7 +200,7 @@ impl Pan {
         if held {
             return;
         }
-        let next = focused(ui)
+        let next = focused(ui.guide)
             .2
             .then(|| iptv_presentation::browse_playback::PanAnchor::new(channel, &focus));
         if next.is_some() || ui.guide.pan_anchor.with_untracked(Option::is_some) {
@@ -306,9 +306,9 @@ impl Pan {
 }
 
 /// The focused row, its program's start, and whether that airs now.
-fn focused(ui: Ui) -> (usize, i32, bool) {
-    let view = crate::guide::lists::view(ui.guide);
-    ui.guide.focus.with_untracked(|f| {
+fn focused(ui: crate::GuideUi) -> (usize, i32, bool) {
+    let view = crate::guide::lists::view(ui);
+    ui.focus.with_untracked(|f| {
         let p = f.program(&view);
         (
             f.channel,

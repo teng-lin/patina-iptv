@@ -71,7 +71,9 @@ pub fn channel_width() -> f32 {
 /// overlay's alpha (`appearance.ui_transparency`).
 pub(crate) fn fill(ui: Ui, rgb_hex: u32) -> Rgba {
     let alpha = match ui.chrome.mode.get() {
-        ViewMode::Overlay => crate::theme::overlay_alpha(&crate::wiring::settings_wiring::read(ui)),
+        ViewMode::Overlay => {
+            crate::theme::overlay_alpha(&crate::wiring::settings_wiring::read(ui.app))
+        }
         ViewMode::Guide | ViewMode::Fullscreen => 0xFF,
     };
     tint(rgb_hex, alpha)
@@ -84,7 +86,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let pan = Pan::new(ui, width);
     let drag = organization_view::reorder_drag::DragList::new(ui, size, rows).guide(channel_width);
     let now = computed(move || ui.guide.focus.with(|f| f.now));
-    let order_scope = computed(move || organization_view::guide_order_scope(ui));
+    let order_scope = computed(move || organization_view::guide_order_scope(ui.screens));
     let order_keys = computed(move || {
         order_scope.with(|scope| {
             scope
@@ -98,9 +100,9 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         }
     });
     let order = computed(move || {
-        order_keys.with(|keys| organization_view::guide_order(ui, keys.as_ref()?))
+        order_keys.with(|keys| organization_view::guide_order(ui.screens, keys.as_ref()?))
     });
-    let order_focus = computed(move || organization_view::guide_order_focus(ui));
+    let order_focus = computed(move || organization_view::guide_order_focus(ui.screens));
     let count = computed(move || {
         order.with(|order| {
             order
@@ -122,7 +124,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let column: fn() -> f32 = channel_width;
     // Rows are numbered by place: the list's length is its widest number.
     let number_w = computed(move || {
-        crate::wiring::settings_wiring::read(ui);
+        crate::wiring::settings_wiring::read(ui.app);
         if crate::wiring::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
             crate::guide::numbers::column_width(
                 ui.guide.list.with(|l| l.len()),
@@ -148,7 +150,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                 rows.scroll_to_index(row as u32, percentage(0.5), px(0.0), false);
             }
         } else if was_reordering {
-            scroll_to_focused_row(ui, rows);
+            scroll_to_focused_row(ui.guide, rows);
         }
     });
     let list_body = pan::panning(view(), pan)
@@ -190,7 +192,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                         crate::playback::browse_playback::dragged(ui)
                     })
                     .on_viewable_items_change(move |v: &ViewableItems| {
-                        if !organization_view::guide_order_open(ui) {
+                        if !organization_view::guide_order_open(ui.screens) {
                             ui.guide.visible_rows.set(v.viewable);
                         }
                     })
@@ -351,13 +353,13 @@ fn scroll_to_focus_on_new_list(ui: Ui, list: ElementRef, order_focus: Memo<Optio
         ui.app.data_version.get();
         ui.guide.list.with(|_| ());
         if order_focus.get_untracked().is_none() {
-            scroll_to_focused_row(ui, list);
+            scroll_to_focused_row(ui.guide, list);
         }
     });
 }
 
-fn scroll_to_focused_row(ui: Ui, list: ElementRef) {
-    let row = ui.guide.focus.with_untracked(|f| f.channel);
+fn scroll_to_focused_row(guide: crate::GuideUi, list: ElementRef) {
+    let row = guide.focus.with_untracked(|f| f.channel);
     list.scroll_to_index(
         row.saturating_sub(2) as u32,
         percentage(0.0),
@@ -410,7 +412,7 @@ fn row(
     // the focus without the cells' dimming running again).
     let now = computed(move || ui.guide.focus.with(|f| f.now));
     let selected = computed(move || {
-        if organization_view::guide_order_open(ui) {
+        if organization_view::guide_order_open(ui.screens) {
             return None;
         }
         ui.guide_data();
@@ -441,9 +443,11 @@ fn row(
             view()
                 .flex_1()
                 .overflow_hidden()
-                .accessibility_elements_hidden(move || organization_view::guide_order_open(ui))
+                .accessibility_elements_hidden(move || {
+                    organization_view::guide_order_open(ui.screens)
+                })
                 .pointer_events(move || {
-                    if organization_view::guide_order_open(ui) {
+                    if organization_view::guide_order_open(ui.screens) {
                         PointerEvents::None
                     } else {
                         PointerEvents::Auto

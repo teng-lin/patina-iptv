@@ -14,18 +14,18 @@ use nsh_core::Checked;
 use nsh_core::prelude::*;
 use std::time::Duration;
 
-fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.screens.guide_repair.with(|s| s.as_ref().map(f))
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Screen) -> R) -> Option<R> {
+    screens.guide_repair.with(|s| s.as_ref().map(f))
 }
-fn update(ui: Ui, f: impl FnOnce(&mut Screen)) {
-    ui.screens.guide_repair.update(|s| {
+fn update(screens: crate::ScreensUi, f: impl FnOnce(&mut Screen)) {
+    screens.guide_repair.update(|s| {
         if let Some(s) = s {
             f(s);
         }
     });
 }
 fn count(ui: Ui) {
-    let pending = state(ui, |s| {
+    let pending = state(ui.screens, |s| {
         if s.outcome.is_none() {
             s.request.mappings.len()
         } else {
@@ -39,21 +39,21 @@ fn count(ui: Ui) {
         }
     });
 }
-fn cancel(ui: Ui) {
-    ui.screens.guide_repair_cancel.with(|token| {
+fn cancel(screens: crate::ScreensUi) {
+    screens.guide_repair_cancel.with(|token| {
         if let Some(token) = token.take() {
             token.cancel();
         }
     });
 }
 fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
-    cancel(ui);
+    cancel(ui.screens);
     let control = InspectionControl {
         timeout: Duration::from_secs(15),
         ..Default::default()
     };
     let mut accepted = None;
-    update(ui, |s| {
+    update(ui.screens, |s| {
         let generation = s.begin();
         accepted = Some((s.clone(), generation, control.clone()));
     });
@@ -66,12 +66,12 @@ fn accepts(screen: &Screen, generation: u64, cancel: &iptv_import::CancelToken) 
     !cancel.is_canceled() && screen.accepts(generation)
 }
 fn finish(
-    ui: Ui,
+    screens: crate::ScreensUi,
     generation: u64,
     cancel: &iptv_import::CancelToken,
     result: model::Result<Reply>,
 ) {
-    update(ui, |s| finish_screen(s, generation, cancel, result));
+    update(screens, |s| finish_screen(s, generation, cancel, result));
 }
 fn finish_screen(
     screen: &mut Screen,
@@ -90,17 +90,17 @@ fn release(preview: Option<model::Preview>) {
 }
 fn invalidate(ui: Ui) {
     let mut old = None;
-    update(ui, |s| old = s.invalidate());
+    update(ui.screens, |s| old = s.invalidate());
     release(old);
     count(ui);
 }
-pub fn is_open(ui: Ui) -> bool {
-    state(ui, |s| s.open).unwrap_or(false)
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    state(screens, |s| s.open).unwrap_or(false)
 }
 pub fn close(ui: Ui) {
-    cancel(ui);
+    cancel(ui.screens);
     let mut old = None;
-    update(ui, |s| old = s.close());
+    update(ui.screens, |s| old = s.close());
     release(old);
     count(ui);
 }
@@ -108,23 +108,23 @@ pub fn back(ui: Ui) -> bool {
     close(ui);
     true
 }
-fn dismiss_inspection_input(ui: Ui) {
-    ui.screens.guide_inspect.update(|s| {
+fn dismiss_inspection_input(screens: crate::ScreensUi) {
+    screens.guide_inspect.update(|s| {
         if let Some(s) = s {
             s.typing = false;
         }
     });
     crate::chrome::input::dismiss_keyboard();
 }
-pub fn reopen(ui: Ui) {
-    dismiss_inspection_input(ui);
-    update(ui, Screen::reopen);
+pub fn reopen(screens: crate::ScreensUi) {
+    dismiss_inspection_input(screens);
+    update(screens, Screen::reopen);
 }
 
 pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindow) {
-    dismiss_inspection_input(ui);
-    if state(ui, |s| s.busy).unwrap_or(false) {
-        cancel(ui);
+    dismiss_inspection_input(ui.screens);
+    if state(ui.screens, |s| s.busy).unwrap_or(false) {
+        cancel(ui.screens);
     }
     // Concurrent selections share the current screen lifetime. Closing,
     // clearing, or starting a new operation cancels every old selection.
@@ -155,7 +155,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
                 return;
             }
         };
-        if state(ui, |s| {
+        if state(ui.screens, |s| {
             s.request.source != channel.source
                 && s.outcome.is_none()
                 && !s.request.mappings.is_empty()
@@ -165,7 +165,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
             crate::chrome::toast::notify(tr("Finish the current guide changes first"));
             return;
         }
-        if state(ui, |s| {
+        if state(ui.screens, |s| {
             s.request.source != channel.source || s.outcome.is_some()
         })
         .unwrap_or(true)
@@ -175,20 +175,20 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
                 .set(Some(Screen::new(channel.source, window)));
         }
         invalidate(ui);
-        update(ui, |s| {
+        update(ui.screens, |s| {
             s.add(info, target);
         });
         count(ui);
     });
 }
 pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
-    dismiss_inspection_input(ui);
-    if state(ui, |s| {
+    dismiss_inspection_input(ui.screens);
+    if state(ui.screens, |s| {
         s.outcome.is_none() && !s.request.mappings.is_empty()
     })
     .unwrap_or(false)
     {
-        reopen(ui);
+        reopen(ui.screens);
         return;
     }
     ui.screens
@@ -201,7 +201,7 @@ pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
     let owner = crate::wiring::runtime_owner::runtime();
     crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.recent_guide_repairs(source, 20, control).await;
-        finish(ui, generation, &cancel, result.map(Reply::History));
+        finish(ui.screens, generation, &cancel, result.map(Reply::History));
     });
 }
 fn preview(ui: Ui) {
@@ -216,13 +216,13 @@ fn preview(ui: Ui) {
     crate::wiring::tasks::spawn_in_app(async move {
         match owner.preview_guide_repair(screen.request, control).await {
             Ok(preview) => {
-                if state(ui, |s| accepts(s, generation, &cancel)).unwrap_or(false) {
-                    finish(ui, generation, &cancel, Ok(Reply::Preview(preview)));
+                if state(ui.screens, |s| accepts(s, generation, &cancel)).unwrap_or(false) {
+                    finish(ui.screens, generation, &cancel, Ok(Reply::Preview(preview)));
                 } else {
                     let _ = owner.release_guide_repair_plan(&preview.id, preview.digest);
                 }
             }
-            Err(error) => finish(ui, generation, &cancel, Err(error)),
+            Err(error) => finish(ui.screens, generation, &cancel, Err(error)),
         }
     });
 }
@@ -233,7 +233,7 @@ fn request_settings_pin(ui: Ui, retry: fn(Ui)) -> bool {
         == "blocked_content_and_settings"
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed();
     if required {
-        crate::screens::parental_view::protected_settings(ui, move || retry(ui));
+        crate::screens::parental_view::protected_settings(ui.screens, move || retry(ui));
     }
     required
 }
@@ -247,7 +247,12 @@ fn apply(ui: Ui) {
     };
     let cancel = control.cancel.clone();
     let Some(preview) = screen.preview else {
-        finish(ui, generation, &cancel, Err(model::Error::PlanMissing));
+        finish(
+            ui.screens,
+            generation,
+            &cancel,
+            Err(model::Error::PlanMissing),
+        );
         return;
     };
     let owner = crate::wiring::runtime_owner::runtime();
@@ -262,7 +267,7 @@ fn apply(ui: Ui) {
             }
             Err(error) => Err(error),
         };
-        finish(ui, generation, &cancel, result);
+        finish(ui.screens, generation, &cancel, result);
         count(ui);
     });
 }
@@ -272,13 +277,18 @@ fn status(ui: Ui, id: Option<String>) {
     };
     let cancel = control.cancel.clone();
     let Some(id) = id.or_else(|| screen.commit_id()) else {
-        finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
+        finish(
+            ui.screens,
+            generation,
+            &cancel,
+            Err(model::Error::CommitMissing),
+        );
         return;
     };
     let owner = crate::wiring::runtime_owner::runtime();
     crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.guide_repair_operation(id).await;
-        finish(ui, generation, &cancel, result.map(Reply::Status));
+        finish(ui.screens, generation, &cancel, result.map(Reply::Status));
     });
 }
 fn verify(ui: Ui) {
@@ -287,7 +297,12 @@ fn verify(ui: Ui) {
     };
     let cancel = control.cancel.clone();
     let Some(id) = screen.commit_id() else {
-        finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
+        finish(
+            ui.screens,
+            generation,
+            &cancel,
+            Err(model::Error::CommitMissing),
+        );
         return;
     };
     let owner = crate::wiring::runtime_owner::runtime();
@@ -295,7 +310,7 @@ fn verify(ui: Ui) {
         let result = owner
             .verify_guide_repair(id, screen.request.window, control)
             .await;
-        finish(ui, generation, &cancel, result.map(Reply::Verified));
+        finish(ui.screens, generation, &cancel, result.map(Reply::Verified));
     });
 }
 fn undo(ui: Ui) {
@@ -307,17 +322,22 @@ fn undo(ui: Ui) {
     };
     let cancel = control.cancel.clone();
     let Some(id) = screen.commit_id() else {
-        finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
+        finish(
+            ui.screens,
+            generation,
+            &cancel,
+            Err(model::Error::CommitMissing),
+        );
         return;
     };
     let owner = crate::wiring::runtime_owner::runtime();
     crate::wiring::tasks::spawn_in_app(async move {
         let result = owner.undo_guide_repair(id, control).await;
-        finish(ui, generation, &cancel, result.map(Reply::Undone));
+        finish(ui.screens, generation, &cancel, result.map(Reply::Undone));
     });
 }
 fn page(ui: Ui, indirect: bool) {
-    let Some(screen) = state(ui, Clone::clone) else {
+    let Some(screen) = state(ui.screens, Clone::clone) else {
         return;
     };
     let Some(preview) = screen.preview else {
@@ -340,23 +360,23 @@ fn page(ui: Ui, indirect: bool) {
         effects,
         model::MAX_PREVIEW_PAGE,
     ) {
-        Ok(preview) => update(ui, |s| s.set_page(preview, mapping, effects)),
-        Err(error) => update(ui, |s| s.report_error(Some(error))),
+        Ok(preview) => update(ui.screens, |s| s.set_page(preview, mapping, effects)),
+        Err(error) => update(ui.screens, |s| s.report_error(Some(error))),
     }
 }
 fn activate(ui: Ui, row: Row) {
-    if state(ui, |s| s.busy).unwrap_or(true) && row != Row::Back {
+    if state(ui.screens, |s| s.busy).unwrap_or(true) && row != Row::Back {
         return;
     }
-    update(ui, |s| s.focus_row(row.clone()));
+    update(ui.screens, |s| s.focus_row(row.clone()));
     match row {
         Row::Mapping(key) => {
             invalidate(ui);
-            update(ui, |s| s.toggle_replacement(&key));
+            update(ui.screens, |s| s.toggle_replacement(&key));
         }
         Row::Remove(key) => {
             invalidate(ui);
-            update(ui, |s| {
+            update(ui.screens, |s| {
                 s.remove(&key);
             });
             count(ui);
@@ -371,16 +391,16 @@ fn activate(ui: Ui, row: Row) {
         Row::MoreIndirect => page(ui, true),
         Row::SelectMore | Row::Back => close(ui),
         Row::Clear => {
-            cancel(ui);
+            cancel(ui.screens);
             invalidate(ui);
-            update(ui, Screen::clear);
+            update(ui.screens, Screen::clear);
             count(ui);
         }
         Row::Cancel => {
-            if let Some(id) = state(ui, Screen::commit_id).flatten() {
+            if let Some(id) = state(ui.screens, Screen::commit_id).flatten() {
                 let result =
                     crate::wiring::runtime_owner::runtime().cancel_guide_repair_operation(&id);
-                update(ui, |s| s.report_error(result.err()));
+                update(ui.screens, |s| s.report_error(result.err()));
                 status(ui, Some(id));
             }
         }
@@ -388,12 +408,12 @@ fn activate(ui: Ui, row: Row) {
 }
 pub fn key(ui: Ui, action: Action) {
     match action {
-        Action::MoveUp => update(ui, |s| s.move_focus(-1)),
-        Action::MoveDown => update(ui, |s| s.move_focus(1)),
-        Action::PageUp => update(ui, |s| s.move_focus(-8)),
-        Action::PageDown => update(ui, |s| s.move_focus(8)),
+        Action::MoveUp => update(ui.screens, |s| s.move_focus(-1)),
+        Action::MoveDown => update(ui.screens, |s| s.move_focus(1)),
+        Action::PageUp => update(ui.screens, |s| s.move_focus(-8)),
+        Action::PageDown => update(ui.screens, |s| s.move_focus(8)),
         Action::Select => {
-            if let Some(row) = state(ui, |s| s.focus.clone()) {
+            if let Some(row) = state(ui.screens, |s| s.focus.clone()) {
                 activate(ui, row);
             }
         }
@@ -433,7 +453,7 @@ fn error(error: &model::Error) -> &'static str {
 }
 fn title(ui: Ui, row: &Row) -> String {
     match row {
-        Row::Mapping(key) => state(ui, |s| {
+        Row::Mapping(key) => state(ui.screens, |s| {
             s.names
                 .iter()
                 .find(|(id, _, _)| id == key)
@@ -444,7 +464,7 @@ fn title(ui: Ui, row: &Row) -> String {
         Row::Remove(key) => format!(
             "{} · {}",
             tr("Remove"),
-            state(ui, |s| s
+            state(ui.screens, |s| s
                 .names
                 .iter()
                 .find(|(id, _, _)| id == key)
@@ -462,7 +482,7 @@ fn title(ui: Ui, row: &Row) -> String {
         Row::SelectMore => tr("Keep selecting channels").into(),
         Row::Clear => tr("Clear").into(),
         Row::Back => tr("Back").into(),
-        Row::History(id) => state(ui, |s| {
+        Row::History(id) => state(ui.screens, |s| {
             s.history.iter().find(|h| h.id == *id).map(|h| {
                 format!(
                     "{} · {}",
@@ -475,9 +495,9 @@ fn title(ui: Ui, row: &Row) -> String {
         .unwrap_or_default(),
     }
 }
-fn detail(ui: Ui, row: &Row) -> String {
+fn detail(screens: crate::ScreensUi, row: &Row) -> String {
     match row {
-        Row::Mapping(key) => state(ui, |s| {
+        Row::Mapping(key) => state(screens, |s| {
             let request = s.request.mappings.iter().find(|r| r.channel == *key)?;
             let before = s
                 .preview
@@ -505,10 +525,10 @@ fn detail(ui: Ui, row: &Row) -> String {
 }
 fn outcome(ui: Ui, size: Scale) -> impl IntoElement {
     when(
-        move || state(ui, |s| s.outcome.is_some()).unwrap_or(false),
+        move || state(ui.screens, |s| s.outcome.is_some()).unwrap_or(false),
         move || {
             ui_kit::caption(size, move || {
-                state(ui, |s| {
+                state(ui.screens, |s| {
                     if s.outcome.as_ref().is_some_and(|o| o.commit.undone) {
                         tr("Guide changes undone")
                     } else if s.verification.as_ref().is_some_and(|v| v.verified_coverage) {
@@ -531,10 +551,10 @@ fn outcome(ui: Ui, size: Scale) -> impl IntoElement {
 }
 fn summary(ui: Ui, size: Scale) -> impl IntoElement {
     when(
-        move || state(ui, |s| s.preview.is_some()).unwrap_or(false),
+        move || state(ui.screens, |s| s.preview.is_some()).unwrap_or(false),
         move || {
             ui_kit::caption(size, move || {
-                state(ui, |s| {
+                state(ui.screens, |s| {
                     s.preview.as_ref().map(|p| {
                         format!(
                             "{}: {} · {}: {}",
@@ -555,17 +575,22 @@ fn summary(ui: Ui, size: Scale) -> impl IntoElement {
 fn feeds(ui: Ui, size: Scale) -> impl IntoElement {
     when(
         move || {
-            state(ui, |s| {
+            state(ui.screens, |s| {
                 s.preview.as_ref().is_some_and(|p| !p.feeds.is_empty())
             })
             .unwrap_or(false)
         },
         move || {
             virtual_list(
-                move || state(ui, |s| s.preview.as_ref().map_or(0, |p| p.feeds.len())).unwrap_or(0),
+                move || {
+                    state(ui.screens, |s| {
+                        s.preview.as_ref().map_or(0, |p| p.feeds.len())
+                    })
+                    .unwrap_or(0)
+                },
                 move |at| {
                     let feed = move || {
-                        state(ui, |s| {
+                        state(ui.screens, |s| {
                             s.preview
                                 .as_ref()
                                 .and_then(|p| p.feeds.get(at.index()).cloned())
@@ -620,7 +645,7 @@ fn feeds(ui: Ui, size: Scale) -> impl IntoElement {
 fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
     when(
         move || {
-            state(ui, |s| {
+            state(ui.screens, |s| {
                 s.preview.as_ref().is_some_and(|p| !p.indirect.is_empty())
             })
             .unwrap_or(false)
@@ -628,11 +653,14 @@ fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
         move || {
             virtual_list(
                 move || {
-                    state(ui, |s| s.preview.as_ref().map_or(0, |p| p.indirect.len())).unwrap_or(0)
+                    state(ui.screens, |s| {
+                        s.preview.as_ref().map_or(0, |p| p.indirect.len())
+                    })
+                    .unwrap_or(0)
                 },
                 move |at| {
                     let item = move || {
-                        state(ui, |s| {
+                        state(ui.screens, |s| {
                             s.preview
                                 .as_ref()
                                 .and_then(|p| p.indirect.get(at.index()).cloned())
@@ -668,8 +696,9 @@ fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
 }
 fn rows(ui: Ui, size: Scale) -> impl IntoElement {
     let list = element_ref();
-    let focused =
-        computed(move || state(ui, |s| s.rows().iter().position(|r| *r == s.focus)).flatten());
+    let focused = computed(move || {
+        state(ui.screens, |s| s.rows().iter().position(|r| *r == s.focus)).flatten()
+    });
     effect(move || {
         if let Some(index) = focused.get()
             && ui.keys_shown()
@@ -678,13 +707,14 @@ fn rows(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     virtual_list(
-        move || state(ui, |s| s.rows().len()).unwrap_or(0),
+        move || state(ui.screens, |s| s.rows().len()).unwrap_or(0),
         move |at| {
-            let row = move || state(ui, |s| s.rows().get(at.index()).cloned()).flatten();
+            let row = move || state(ui.screens, |s| s.rows().get(at.index()).cloned()).flatten();
             let mark = move || {
                 Mark::of(
                     ui.keys_shown()
-                        && state(ui, |s| row().is_some_and(|r| s.focus == r)).unwrap_or(false),
+                        && state(ui.screens, |s| row().is_some_and(|r| s.focus == r))
+                            .unwrap_or(false),
                     false,
                 )
             };
@@ -700,7 +730,7 @@ fn rows(ui: Ui, size: Scale) -> impl IntoElement {
                 .accessibility_state(move || AccessibilityState {
                     checked: if let Some(Row::Mapping(key)) = row() {
                         Some(
-                            if state(ui, |s| {
+                            if state(ui.screens, |s| {
                                 s.request
                                     .mappings
                                     .iter()
@@ -727,7 +757,7 @@ fn rows(ui: Ui, size: Scale) -> impl IntoElement {
                 )
                 .child(
                     ui_kit::detail(size, move || {
-                        row().map(|r| detail(ui, &r)).unwrap_or_default()
+                        row().map(|r| detail(ui.screens, &r)).unwrap_or_default()
                     })
                     .text_color(move || mark().secondary()),
                 )
@@ -746,7 +776,7 @@ fn rows(ui: Ui, size: Scale) -> impl IntoElement {
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     when(
-        move || is_open(ui),
+        move || is_open(ui.screens),
         move || {
             let screen = ui_kit::screen(ui, size)
                 .test_id("guide-repair-screen")
@@ -760,7 +790,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     close,
                 ))
                 .child(ui_kit::caption(size, move || {
-                    state(ui, |s| {
+                    state(ui.screens, |s| {
                         format!(
                             "{} — {}",
                             crate::guide::clock::label(
@@ -779,14 +809,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     tr("Program coverage does not verify channel identity")
                 }));
             let screen = screen.child(when(
-                move || state(ui, |s| s.busy).unwrap_or(false),
+                move || state(ui.screens, |s| s.busy).unwrap_or(false),
                 move || ui_kit::body(size, move || tr("Loading…")),
             ));
             let screen = screen.child(when(
-                move || state(ui, |s| s.error.is_some()).unwrap_or(false),
+                move || state(ui.screens, |s| s.error.is_some()).unwrap_or(false),
                 move || {
                     ui_kit::body(size, move || {
-                        state(ui, |s| s.error.as_ref().map(error))
+                        state(ui.screens, |s| s.error.as_ref().map(error))
                             .flatten()
                             .unwrap_or_default()
                     })
@@ -796,7 +826,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             let screen = screen.child(outcome(ui, size)).child(summary(ui, size));
             let screen = screen.child(when(
                 move || {
-                    state(ui, |s| {
+                    state(ui.screens, |s| {
                         s.preview.as_ref().is_some_and(|p| !p.indirect_complete)
                     })
                     .unwrap_or(false)
@@ -810,10 +840,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             let screen = screen.child(feeds(ui, size)).child(indirect(ui, size));
             screen
                 .child(when(
-                    move || state(ui, |s| s.verification.is_some()).unwrap_or(false),
+                    move || state(ui.screens, |s| s.verification.is_some()).unwrap_or(false),
                     move || {
                         ui_kit::caption(size, move || {
-                            state(ui, |s| {
+                            state(ui.screens, |s| {
                                 s.verification.as_ref().map(|v| {
                                     format!(
                                         "{}: {} / {}",

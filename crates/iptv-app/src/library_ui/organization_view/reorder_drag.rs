@@ -75,7 +75,7 @@ impl DragList {
         let mut grabbed = None;
         self.ui.touched();
         batch(|| {
-            update(self.ui, |screen| {
+            update(self.ui.screens, |screen| {
                 if screen.saving {
                     return;
                 }
@@ -120,7 +120,7 @@ impl DragList {
             let Some(drag) = drag else { return };
             let top = drag.y + self.scroll.get_untracked() - drag.grab_offset;
             let to = (top / self.pitch()).round().max(0.0) as usize;
-            update(self.ui, |screen| {
+            update(self.ui.screens, |screen| {
                 if !screen.saving
                     && let Some(order) = screen.editor.reorder.as_mut()
                     && order.selected().is_some_and(|item| item.id == drag.id)
@@ -135,7 +135,7 @@ impl DragList {
         let mut drag = None;
         self.active.update(|active| drag = active.take());
         let Some(drag) = drag else { return };
-        update(self.ui, |screen| {
+        update(self.ui.screens, |screen| {
             screen.dragging = false;
             if let Some(order) = screen.editor.reorder.as_mut()
                 && order.selected().is_some_and(|item| item.id == drag.id)
@@ -168,7 +168,7 @@ impl DragList {
         if step == 0.0 {
             return;
         }
-        let count = state(self.ui, |s| s.editor.rows().len()).unwrap_or(0);
+        let count = state(self.ui.screens, |s| s.editor.rows().len()).unwrap_or(0);
         let max = (count as f32 * self.pitch() - height).max(0.0);
         let current = self.scroll.get_untracked();
         let next = (current + step * MAX_SCROLL_STEP).clamp(0.0, max);
@@ -179,8 +179,8 @@ impl DragList {
 
     fn can_grab(self) -> bool {
         self.ui.drag_editing()
-            && reordering(self.ui)
-            && !contents_hidden(self.ui)
+            && reordering(self.ui.screens)
+            && !contents_hidden(self.ui.screens)
             && (self.column.is_none() || super::guide_order_accessible(self.ui))
     }
 
@@ -227,7 +227,7 @@ impl DragList {
         let viewport = element_ref();
         effect(move || {
             let closed = self.column.is_some() && !super::guide_order_accessible(self.ui);
-            if (closed || contents_hidden(self.ui)) && self.active() {
+            if (closed || contents_hidden(self.ui.screens)) && self.active() {
                 untracked(|| self.finish(closed));
             }
         });
@@ -277,7 +277,8 @@ impl DragList {
                         .bottom(px(0.0))
                         .w(move || size.px(GRIP_COLUMN))
                         .max_h(move || {
-                            let count = state(self.ui, |s| s.editor.rows().len()).unwrap_or(0);
+                            let count =
+                                state(self.ui.screens, |s| s.editor.rows().len()).unwrap_or(0);
                             px(count as f32 * self.pitch())
                         })
                         .focusable(false)

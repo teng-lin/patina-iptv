@@ -75,20 +75,20 @@ pub(crate) fn bind(ui: Ui) {
     effect(move || {
         if guide.get().is_some() {
             // A mode change can schedule this effect before the playback effect.
-            flush(ui);
+            flush(ui.playback);
             crate::wiring::runtime_owner::runtime().refresh_watch_order();
         }
     });
 }
 
-pub(crate) fn flush(ui: Ui) {
-    if let Some(mut session) = ui.playback.player.watching.replace(None) {
+pub(crate) fn flush(playback: crate::PlaybackUi) {
+    if let Some(mut session) = playback.player.watching.replace(None) {
         session.save();
     }
 }
 
-pub(crate) fn reset(ui: Ui) {
-    ui.playback.player.watching.with(|watching| {
+pub(crate) fn reset(playback: crate::PlaybackUi) {
+    playback.player.watching.with(|watching| {
         if let Some(session) = watching {
             session.time = WatchTime::default();
         }
