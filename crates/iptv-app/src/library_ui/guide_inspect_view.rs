@@ -1,5 +1,5 @@
 //! Existing guide-source workflow's read-only coverage/candidate inspection.
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 use crate::runtime::model::{InspectionControl, ProbeRequest, ProbeTarget};
 use crate::{
     Ui,
@@ -478,7 +478,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     let field = element_ref();
-    crate::chrome::input::bind_field_focus(field, move || {
+    crate::chrome::input_kit::bind_field_focus(field, move || {
         state(ui.screens, |s| s.typing).unwrap_or(false)
     });
     when(
@@ -487,7 +487,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("guide-inspection-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::GuideInspection.accessibility_covered(ui)
+                    crate::chrome::overlay::Overlay::GuideInspection.accessibility_covered(ui)
                 })
                 .child(ui_kit::header(
                     ui,

@@ -333,7 +333,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .test_id("wizard-layer")
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::Wizard.accessibility_covered(ui)
+                    crate::chrome::overlay::Overlay::Wizard.accessibility_covered(ui)
                 })
                 .child(dynamic(move || {
                     let shown = screen.get();

@@ -172,7 +172,7 @@ pub(super) fn cell(
         };
         ui.touched();
         if focus_program(p) {
-            crate::chrome::menu_view::open_timeline_context(ui);
+            crate::wiring::navigation::open_timeline_context(ui);
         }
     };
     view()

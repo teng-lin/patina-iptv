@@ -209,13 +209,13 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 .on_long_press(move || {
                     ui.touched();
                     if let Some(entry) = entry() {
-                        crate::chrome::menu_view::open_group_options(ui, entry);
+                        crate::wiring::navigation::open_group_options(ui, entry);
                     }
                 })
                 .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
                     ui.touched();
                     if let Some(entry) = entry() {
-                        crate::chrome::menu_view::open_group_options(ui, entry);
+                        crate::wiring::navigation::open_group_options(ui, entry);
                     }
                 })
                 .child(list_rows::name(size, name).flex_1().text_color(color))

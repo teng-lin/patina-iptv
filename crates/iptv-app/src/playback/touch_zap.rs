@@ -145,7 +145,7 @@ pub(crate) fn zap(ui: Ui, direction: Direction) {
     // details), which are about the channel it leaves: they go, so the
     // player owns input again and the pending zap tunes.
     if ui.screens.chooser.with_untracked(Option::is_some) {
-        crate::chrome::chooser::close(ui);
+        crate::wiring::navigation::close_chooser(ui);
     }
     if ui.screens.description.with_untracked(Option::is_some) {
         ui.screens.description.set(None);

@@ -44,7 +44,7 @@ const WHITE: u32 = 0xFFFFFF;
 const PANEL_ALPHA: u8 = 0xE0;
 /// Volume and window full screen are the app's on the desktop only
 /// (Linux and macOS; Android keeps the system volume).
-const DESKTOP: bool = crate::chrome::desktop::DESKTOP;
+const DESKTOP: bool = crate::host::DESKTOP;
 
 /// Whether the device has a pointer for the bar: anything but a TV (its
 /// remote has the panels) and a terminal.
@@ -256,8 +256,8 @@ pub fn layer(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
                     ui.overlay_open(|overlay| {
                         !matches!(
                             overlay,
-                            crate::chrome::overlays::Overlay::Chooser
-                                | crate::chrome::overlays::Overlay::Description
+                            crate::chrome::overlay::Overlay::Chooser
+                                | crate::chrome::overlay::Overlay::Description
                         )
                     })
                 })
@@ -625,7 +625,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
             expanded: (control == Control::More).then(|| {
                 ui.screens.chooser.with(|c| {
                     c.as_ref()
-                        .is_some_and(|c| c.kind == crate::chrome::chooser::Kind::More)
+                        .is_some_and(|c| c.kind == crate::wiring::navigation::ChooserKind::More)
                 })
             }),
             pressed: match control {
@@ -838,7 +838,9 @@ pub(crate) fn activate(
         return;
     }
     log::info!("iptv play bar: {}", control_label(control));
-    use crate::chrome::chooser::{self, Kind};
+    use crate::wiring::navigation::{
+        ChooserKind as Kind, close_chooser, open_chooser, open_more_chooser,
+    };
     // Keep the current reading or selection position when the user adjusts
     // playback beneath a popup. Opening another surface replaces that popup.
     if matches!(
@@ -855,7 +857,7 @@ pub(crate) fn activate(
             | Control::Volume
     ) {
         if ui.screens.description.with_untracked(Option::is_some) {
-            crate::chrome::menu_view::close(ui);
+            crate::wiring::navigation::close_menu(ui);
             if control == Control::Details {
                 return;
             }
@@ -865,7 +867,7 @@ pub(crate) fn activate(
             .chooser
             .with_untracked(|c| c.as_ref().map(|c| c.kind))
         {
-            chooser::close(ui);
+            close_chooser(ui);
             if matches!(
                 (control, kind),
                 (Control::More, Kind::More)
@@ -878,7 +880,7 @@ pub(crate) fn activate(
     }
     match control {
         Control::Mute => crate::playback::media::toggle_mute(ui),
-        Control::More => chooser::open_more(
+        Control::More => open_more_chooser(
             ui.screens,
             layout(ui)
                 .more
@@ -888,7 +890,7 @@ pub(crate) fn activate(
             target_window,
         ),
         Control::Listen => crate::wiring::listen::listen(ui),
-        Control::Volume => chooser::open(ui, Kind::Volume),
+        Control::Volume => open_chooser(ui, Kind::Volume),
         Control::PreviousChannel => {
             crate::playback::touch_zap::zap(ui, iptv_presentation::touch_zap::Direction::Previous)
         }
@@ -915,11 +917,11 @@ pub(crate) fn activate(
         }
         Control::Tracks => {
             if let Some(kind) = untracked(|| tracks(ui)) {
-                chooser::open(ui, Kind::Track(kind));
+                open_chooser(ui, Kind::Track(kind));
             }
         }
         Control::Details => details(ui),
-        Control::Picture => chooser::open(ui, Kind::Picture),
+        Control::Picture => open_chooser(ui, Kind::Picture),
         Control::Channels => {
             crate::screens::channels_view::open(ui, ListMode::Overlay);
             ui.playback.play_bar.update(PlayBar::hide);

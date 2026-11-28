@@ -19,6 +19,12 @@ const CACHE_BYTES: usize = 8 << 20;
 const IMAGE_SIDE: u32 = 8192;
 const IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
 
+/// Shown where a channel has no logo (an image needs a source).
+pub(crate) fn no_logo() -> String {
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E"
+        .to_owned()
+}
+
 /// Encoded size alone does not bound a raster decoder's allocation. Read its
 /// header before handing bytes to any native backend. SVG uses NSH's bounded
 /// parser/rasterizer, which also disables external resources.
@@ -134,7 +140,7 @@ async fn fetch(network: Arc<dyn Network>, url: String, wanted: Reply) -> Option<
         Some(net) => download(&net, &url).await,
         None => None,
     }
-    .unwrap_or_else(crate::guide::grid::no_logo);
+    .unwrap_or_else(no_logo);
     cache().insert(url, value.clone());
     let _ = wanted.send(value.clone());
     Some(value)
@@ -157,7 +163,7 @@ async fn download(net: &Client, url: &str) -> Option<String> {
 /// A recycled view changes its URL reactively; a late response must never
 /// overwrite the new channel's artwork. Queueing and network work are bounded.
 pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String {
-    let shown = signal(crate::guide::grid::no_logo());
+    let shown = signal(no_logo());
     let generation = signal(0u64);
     effect(move || {
         let url = url();
@@ -168,7 +174,7 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
             shown.set(value);
             return;
         }
-        shown.set(crate::guide::grid::no_logo());
+        shown.set(no_logo());
         if url.len() > 16 * 1024 || !(url.starts_with("http://") || url.starts_with("https://")) {
             return;
         }

@@ -181,7 +181,7 @@ pub fn key(ui: Ui, action: Action) {
             if let Some(list) = ui.playback.channels.get_untracked() {
                 match list.pane {
                     ListPane::Groups => {
-                        crate::chrome::menu_view::open_group_options(ui, list.entry);
+                        crate::wiring::navigation::open_group_options(ui, list.entry);
                     }
                     ListPane::Channels => open_channel_menu(ui, list.row),
                 }
@@ -221,7 +221,7 @@ fn open_channel_menu(ui: Ui, row: usize) {
                 }
             });
             crate::playback::browse_playback::hold(ui);
-            crate::chrome::menu_view::open_channel(ui, channel);
+            crate::wiring::navigation::open_channel_menu(ui, channel);
         });
     }
 }
@@ -359,7 +359,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .inset_0()
         .flex_row()
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::ChannelList.accessibility_hidden(ui)
+            crate::chrome::overlay::Overlay::ChannelList.accessibility_hidden(ui)
         })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
@@ -425,7 +425,7 @@ fn entry_row(
             if !crate::playback::multiview::picking(ui.playback)
                 && let Some(entry) = visible()
             {
-                crate::chrome::menu_view::open_group_options(ui, entry);
+                crate::wiring::navigation::open_group_options(ui, entry);
             }
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
@@ -433,7 +433,7 @@ fn entry_row(
             if !crate::playback::multiview::picking(ui.playback)
                 && let Some(entry) = visible()
             {
-                crate::chrome::menu_view::open_group_options(ui, entry);
+                crate::wiring::navigation::open_group_options(ui, entry);
             }
         })
         .child(
@@ -476,7 +476,7 @@ pub(crate) fn group_more(
             current()
                 && allowed()
                 && !ui.keys_shown()
-                && crate::chrome::menu_view::has_group_options(ui.app, entry())
+                && crate::wiring::navigation::has_group_options(ui.app, entry())
         },
         move || {
             view()
@@ -501,7 +501,7 @@ pub(crate) fn group_more(
                         },
                         move || {
                             ui.touched();
-                            crate::chrome::menu_view::open_group_options(ui, entry());
+                            crate::wiring::navigation::open_group_options(ui, entry());
                         },
                     )
                     .test_id("group-more"),
@@ -515,7 +515,7 @@ const GROUP_MORE: f32 = 28.0;
 /// The room a group's name leaves at its end for the ⋯ on its row:
 /// `shown` when [`group_more`]'s row and `allowed` conditions hold.
 pub(crate) fn group_more_room(ui: Ui, shown: bool, entry: usize) -> f32 {
-    if shown && !ui.keys_shown() && crate::chrome::menu_view::has_group_options(ui.app, entry) {
+    if shown && !ui.keys_shown() && crate::wiring::navigation::has_group_options(ui.app, entry) {
         GROUP_MORE + 4.0
     } else {
         0.0

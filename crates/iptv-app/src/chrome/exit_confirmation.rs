@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use iptv_core::capabilities::{FormFactor, Host, Platform};
+use iptv_core::capabilities::Host;
 use iptv_settings::{Target, keys};
 use nsh_core::prelude::*;
 
@@ -14,7 +14,7 @@ fn prompt() -> &'static str {
 }
 
 pub(crate) fn offered(host: Host) -> bool {
-    host.platform == Platform::Android && host.form_factor == FormFactor::Tv
+    crate::chrome::input_kit::double_back_offered(host)
 }
 
 pub(crate) fn enabled(app: crate::SharedUi) -> bool {

@@ -114,7 +114,7 @@ fn dismiss_inspection_input(screens: crate::ScreensUi) {
             s.typing = false;
         }
     });
-    crate::chrome::input::dismiss_keyboard();
+    crate::chrome::input_kit::dismiss_keyboard();
 }
 pub fn reopen(screens: crate::ScreensUi) {
     dismiss_inspection_input(screens);
@@ -781,7 +781,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             let screen = ui_kit::screen(ui, size)
                 .test_id("guide-repair-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::GuideRepair.accessibility_covered(ui)
+                    crate::chrome::overlay::Overlay::GuideRepair.accessibility_covered(ui)
                 })
                 .child(ui_kit::header(
                     ui,

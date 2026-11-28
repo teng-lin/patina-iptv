@@ -18,7 +18,7 @@
 //! accounts hidden. State: `state.rs`; wording: `words.rs`.
 
 use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 
 use iptv_presentation::library::epg_sources as state;
 mod words;
@@ -265,7 +265,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("guide-sources-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::GuideSources.accessibility_covered(ui)
+                    crate::chrome::overlay::Overlay::GuideSources.accessibility_covered(ui)
                 })
                 .child(header(ui, size).accessibility_elements_hidden(move || contents_hidden(ui)))
                 .child(

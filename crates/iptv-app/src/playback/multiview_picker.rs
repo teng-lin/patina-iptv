@@ -286,7 +286,7 @@ fn screen(ui: Ui) -> impl IntoElement {
     });
     ui_kit::screen(ui, size)
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::ChannelPicker.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::ChannelPicker.accessibility_covered(ui)
         })
         .test_id("multiview-picker")
         .child(header(ui, size))
@@ -347,7 +347,7 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let editing = computed(move || {
         state(ui.playback, |p| p.keyboard && p.pane == Pane::Search).unwrap_or(false)
     });
-    crate::chrome::input::bind_field_focus(field, move || editing.get());
+    crate::chrome::input_kit::bind_field_focus(field, move || editing.get());
     crate::chrome::keyboard::on_dismissed(
         move || editing.get(),
         move || update(ui.playback, ChannelPicker::keyboard_hidden),

@@ -14,7 +14,7 @@
 use iptv_presentation::library::guide_assign as state;
 
 use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 use crate::runtime::model::{GuideChannel, SourceId};
 use iptv_nav::Action;
 use nsh_core::element::input;
@@ -193,7 +193,7 @@ fn panel(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     view()
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::GuideAssign.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::GuideAssign.accessibility_covered(ui)
         })
         .absolute()
         .inset_0()
@@ -377,7 +377,7 @@ fn channel_detail(screens: crate::ScreensUi, c: &GuideChannel) -> String {
 fn search_field(ui: Ui, size: Scale, focused: Memo<Option<usize>>) -> impl IntoElement {
     let field = element_ref();
     let typing = computed(move || state(ui.screens, Picker::typing).unwrap_or(false));
-    crate::chrome::input::bind_field_focus(field, move || typing.get());
+    crate::chrome::input_kit::bind_field_focus(field, move || typing.get());
     view().h(move || size.px(ROW_TWO)).justify_center().child(
         ui_kit::field(size, input())
             .element_ref(&field)

@@ -93,7 +93,7 @@ pub fn can_enter(ui: Ui) -> bool {
 /// The desktops: their window can (Android's host reports its own), and
 /// closes when nothing plays any more or multiview opens.
 pub fn bind(ui: Ui) {
-    if !crate::chrome::desktop::DESKTOP {
+    if !crate::host::DESKTOP {
         // Android reports through its persistent player. Other hosts have no
         // native PiP implementation to acknowledge availability later.
         if !crate::host::ANDROID {
@@ -144,7 +144,7 @@ pub fn enter(ui: Ui) {
         return;
     }
     log::info!("iptv pip: asked to enter");
-    if crate::chrome::desktop::DESKTOP {
+    if crate::host::DESKTOP {
         report(ui, true);
     }
 }
@@ -175,7 +175,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
             ui.chrome
                 .mode
                 .apply(crate::chrome::mode::Action::PipBackToApp);
-            crate::chrome::desktop::focus_main();
+            crate::wiring::navigation::focus_main();
         }
         Exit::Close => crate::playback::player_keys::stop_playback(ui),
     }
@@ -248,8 +248,8 @@ fn entered(ui: Ui) {
     ui.playback
         .play_bar
         .update(iptv_presentation::play_bar::PlayBar::hide);
-    crate::chrome::chooser::close(ui);
-    crate::chrome::menu_view::close(ui);
+    crate::wiring::navigation::close_chooser(ui);
+    crate::wiring::navigation::close_menu(ui);
     if ui.playback.channels.with_untracked(Option::is_some) {
         crate::screens::channels_view::close(ui.playback);
     }

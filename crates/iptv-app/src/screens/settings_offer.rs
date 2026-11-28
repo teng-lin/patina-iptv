@@ -187,7 +187,9 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
         _ => {}
     }
     let hidden = match key {
-        "general.double_back_to_exit" => !crate::chrome::exit_confirmation::offered(device.host),
+        "general.double_back_to_exit" => {
+            !crate::chrome::input_kit::double_back_offered(device.host)
+        }
         "general.clock" | "guide.after_choosing" => {
             crate::wiring::device::handheld(device.form_factor())
         }
@@ -296,7 +298,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
         return Offer::Hidden;
     }
     // The keyboard or remote settings: only while there are keys (#280).
-    if on_keys_page(key) && crate::chrome::input::keys_for(host).is_none() {
+    if on_keys_page(key) && crate::chrome::input_kit::keys_for(host).is_none() {
         return Offer::Hidden;
     }
     if matches!(key, "guide.autoplay" | "guide.switch_delay") {
@@ -317,7 +319,7 @@ pub fn offer(device: Device, key: &str) -> Offer {
     }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
-        || (key == keys::LONG_PRESS.as_str() && crate::chrome::input::long_press())
+        || (key == keys::LONG_PRESS.as_str() && crate::chrome::input_kit::long_press())
         || (key == keys::PIP_ON_LEAVE.as_str() && crate::playback::pip::offers_on_leave(host))
     {
         Offer::Active
@@ -549,7 +551,7 @@ mod tests {
                 assert_eq!(offer(key), page, "{key} on {device:?}");
             }
             // A hold only where keys report their release.
-            let hold = if has_keys && crate::chrome::input::long_press() {
+            let hold = if has_keys && crate::chrome::input_kit::long_press() {
                 Offer::Active
             } else {
                 Offer::Hidden
@@ -563,7 +565,7 @@ mod tests {
                 assert_eq!(offer(key), zapping, "{key} on {device:?}");
             }
             assert_eq!(
-                crate::chrome::input::keys_for(device.host).is_some(),
+                crate::chrome::input_kit::keys_for(device.host).is_some(),
                 has_keys,
                 "{device:?}"
             );

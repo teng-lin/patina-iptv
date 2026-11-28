@@ -324,7 +324,7 @@ pub(crate) fn open_archive(
 
 /// Archive fallback calls this only after authorization starts playback.
 pub(crate) fn missing_handler(screens: crate::ScreensUi, list: ListId) {
-    crate::chrome::menu_view::offer_external_player_reset(screens, list);
+    crate::wiring::navigation::offer_external_player_reset(screens, list);
     crate::chrome::toast::notify(tr(
         "No external player is installed, so this channel plays here.",
     ));

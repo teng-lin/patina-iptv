@@ -8,7 +8,7 @@ use nsh_core::prelude::*;
 use super::words;
 use crate::{
     Ui,
-    chrome::input::dismiss_keyboard,
+    chrome::input_kit::dismiss_keyboard,
     chrome::ui_kit::entry::{Sheet, panel},
 };
 

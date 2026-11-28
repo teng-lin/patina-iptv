@@ -1,7 +1,7 @@
 //! Custom groups and filtered bulk membership editing. Provider membership
 //! remains imported data; moves are offered only between custom groups.
 use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 
 use crate::runtime::Error;
 use crate::{
@@ -637,7 +637,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("custom-groups-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::CustomGroups.accessibility_covered(ui)
+                    crate::chrome::overlay::Overlay::CustomGroups.accessibility_covered(ui)
                 })
                 .child(
                     ui_kit::header(ui, size, tr("Custom groups"), |ui| close(ui.screens))

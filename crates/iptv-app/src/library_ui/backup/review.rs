@@ -10,7 +10,7 @@ use nsh_core::prelude::*;
 use crate::Ui;
 use crate::chrome::fonts::MEDIUM;
 use crate::chrome::i18n::tr;
-use crate::chrome::overlays::Overlay;
+use crate::chrome::overlay::Overlay;
 use crate::chrome::scale::Scale;
 use crate::chrome::ui_kit::icons::{self, Icon};
 use crate::chrome::ui_kit::{self, FocusScroll};

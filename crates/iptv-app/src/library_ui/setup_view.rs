@@ -46,7 +46,7 @@ pub(crate) fn frame(
                         .gap(move || size.px(12.0))
                         .py(move || size.px(22.0))
                         .child(
-                            ui_kit::title(size, crate::chrome::startup_view::APP_NAME)
+                            ui_kit::title(size, crate::chrome::ui_kit::APP_NAME)
                                 .font_weight(MEDIUM),
                         )
                         .child(ui_kit::body(size, section)),

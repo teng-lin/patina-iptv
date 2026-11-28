@@ -265,7 +265,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .test_id("favorites-editor")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::FavoritesEditor.accessibility_hidden(ui)
+            crate::chrome::overlay::Overlay::FavoritesEditor.accessibility_hidden(ui)
         })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {

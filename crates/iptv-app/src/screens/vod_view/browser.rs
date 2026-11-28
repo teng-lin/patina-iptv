@@ -759,7 +759,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         });
     });
     let field = element_ref();
-    crate::chrome::input::bind_field_focus(field, move || {
+    crate::chrome::input_kit::bind_field_focus(field, move || {
         ui.screens
             .vod
             .with(|s| s.control == Control::Search && s.search_open)
@@ -773,7 +773,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         .test_id("vod-screen")
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Vod.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::Vod.accessibility_covered(ui)
         })
         .child(when(
             move || ui.screens.vod.with(|s| s.shows_navigation()),

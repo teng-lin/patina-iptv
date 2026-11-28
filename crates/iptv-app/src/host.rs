@@ -56,6 +56,9 @@ pub(crate) const LINUX: bool = on(Platform::Linux);
 pub(crate) const MACOS: bool = on(Platform::Macos);
 /// The Windows desktop.
 pub(crate) const WINDOWS: bool = on(Platform::Windows);
+/// The desktop backends, where the app owns the window and the sound:
+/// Linux, macOS and Windows.
+pub(crate) const DESKTOP: bool = LINUX || MACOS || WINDOWS;
 
 /// The video plane is under the whole page (a browser TV package: Tizen's
 /// AVPlay), not a view among the app's layers: everything over a playing

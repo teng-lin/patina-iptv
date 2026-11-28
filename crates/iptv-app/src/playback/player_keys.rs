@@ -117,9 +117,10 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat
         }
         Action::ShowControls => ui.update_panels(|p, now| p.show_controls(now)),
         Action::ShowInfo if fullscreen => ui.update_panels(|p, now| p.show_info(now)),
-        Action::ShowHistory => {
-            crate::chrome::chooser::open(ui, crate::chrome::chooser::Kind::History)
-        }
+        Action::ShowHistory => crate::wiring::navigation::open_chooser(
+            ui,
+            crate::wiring::navigation::ChooserKind::History,
+        ),
         Action::PlayPause => play_pause(ui, key, press),
         // Catch-up seeking (`seek.rs`); nothing to seek in a live stream.
         Action::SeekBack => seek(-crate::playback::seek::steps().rewind),
@@ -142,8 +143,8 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat
 /// Only the toggle key (and the play-bar button) reverses the current state.
 pub(crate) fn play_pause(ui: Ui, key: RemoteKey, press: Press) {
     // Keep an owner's explicit Play-or-pause remapping a toggle.
-    if crate::chrome::remote_editor::media_toggle_override(
-        crate::chrome::input::context(&ui),
+    if crate::wiring::navigation::media_toggle_override(
+        crate::wiring::navigation::input_context(&ui),
         key,
         press,
     ) {
@@ -242,9 +243,10 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
                 .mode
                 .apply(crate::chrome::mode::Action::ReturnToBrowse);
         }
-        QuickAction::History => {
-            crate::chrome::chooser::open(ui, crate::chrome::chooser::Kind::History)
-        }
+        QuickAction::History => crate::wiring::navigation::open_chooser(
+            ui,
+            crate::wiring::navigation::ChooserKind::History,
+        ),
         QuickAction::Channels => crate::screens::channels_view::open(ui, ListMode::Overlay),
         QuickAction::Favorite => press_control(ui, Control::Favorite),
         QuickAction::Multiview => press_control(ui, Control::Multiview),
@@ -254,7 +256,7 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
 
 /// OK (or a tap) on a control-strip button.
 pub fn press_control(ui: Ui, control: Control) {
-    use crate::chrome::chooser::Kind;
+    use crate::wiring::navigation::ChooserKind as Kind;
     ui.update_panels(|p, now| p.touch(now));
     if !crate::playback::player_panels::enabled(ui, control) {
         log::info!("iptv control {control:?} not available");
@@ -274,12 +276,16 @@ pub fn press_control(ui: Ui, control: Control) {
         Control::Search => crate::screens::search_view::open(ui),
         Control::Multiview => crate::playback::multiview::open(ui),
         Control::ChannelList => crate::screens::channels_view::open(ui, ListMode::Overlay),
-        Control::Scaling => crate::chrome::chooser::open(ui, Kind::Picture),
-        Control::SleepTimer => crate::chrome::chooser::open(ui, Kind::Sleep),
-        Control::VideoTracks => crate::chrome::chooser::open(ui, Kind::Track(Track::Video)),
-        Control::AudioTracks => crate::chrome::chooser::open(ui, Kind::Track(Track::Audio)),
-        Control::Captions => crate::chrome::chooser::open(ui, Kind::Track(Track::Text)),
-        Control::AudioOffset => crate::chrome::chooser::open(ui, Kind::AudioDelay),
+        Control::Scaling => crate::wiring::navigation::open_chooser(ui, Kind::Picture),
+        Control::SleepTimer => crate::wiring::navigation::open_chooser(ui, Kind::Sleep),
+        Control::VideoTracks => {
+            crate::wiring::navigation::open_chooser(ui, Kind::Track(Track::Video))
+        }
+        Control::AudioTracks => {
+            crate::wiring::navigation::open_chooser(ui, Kind::Track(Track::Audio))
+        }
+        Control::Captions => crate::wiring::navigation::open_chooser(ui, Kind::Track(Track::Text)),
+        Control::AudioOffset => crate::wiring::navigation::open_chooser(ui, Kind::AudioDelay),
         Control::PictureInPicture => crate::playback::pip::enter(ui),
         Control::Favorite => {
             if let Some(ch) = ui.playback.playing.get() {

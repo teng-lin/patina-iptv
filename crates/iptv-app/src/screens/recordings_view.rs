@@ -995,7 +995,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .inset_0()
                 .test_id("recordings-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::Recordings.accessibility_covered(ui)
+                    crate::chrome::overlay::Overlay::Recordings.accessibility_covered(ui)
                 })
                 .child(library(ui, size))
                 .child(rows::delete_confirmation(ui, size))

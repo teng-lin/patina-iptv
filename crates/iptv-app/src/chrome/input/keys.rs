@@ -4,40 +4,7 @@ use iptv_nav::{Phase, RemoteKey};
 use nsh_core::{KeyEvent, element::SharedString};
 use nsh_tv::RemoteKey as TvKey;
 
-/// Named keyboard bindings, including the keyboard stand-ins for a remote.
-pub(super) const KEYS: &[(&str, RemoteKey)] = &[
-    ("up", RemoteKey::Up),
-    ("down", RemoteKey::Down),
-    ("left", RemoteKey::Left),
-    ("right", RemoteKey::Right),
-    ("enter", RemoteKey::Ok),
-    ("pageup", RemoteKey::PageUp),
-    ("pagedown", RemoteKey::PageDown),
-    // Keyboard stand-ins.
-    ("m", RemoteKey::Menu),
-    ("g", RemoteKey::Guide),
-    ("i", RemoteKey::Info),
-    ("=", RemoteKey::ChannelUp),
-    ("-", RemoteKey::ChannelDown),
-    ("space", RemoteKey::PlayPause),
-    ("p", RemoteKey::Previous),
-    ("n", RemoteKey::Next),
-    ("[", RemoteKey::Rewind),
-    ("]", RemoteKey::FastForward),
-    // A desktop keyboard's own (Ctrl + arrows: Cmd on macOS, where Ctrl
-    // switches spaces).
-    ("home", RemoteKey::Home),
-    ("tab", RemoteKey::Tab),
-    ("shift+tab", RemoteKey::ShiftTab),
-    ("shift+left", RemoteKey::ShiftLeft),
-    ("shift+right", RemoteKey::ShiftRight),
-    ("mod+left", RemoteKey::CtrlLeft),
-    ("mod+right", RemoteKey::CtrlRight),
-    ("/", RemoteKey::Search),
-    ("mod+f", RemoteKey::Search),
-];
-
-pub(super) const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+use super::{DIGITS, KEYS};
 
 /// The most physical keys tracked down at once (missed releases age out).
 const MAX_HELD: usize = 8;

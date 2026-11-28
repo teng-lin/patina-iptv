@@ -93,7 +93,7 @@ impl UpdatePrompts for Prompts {
     }
 
     fn close_after_shutdown(&self) {
-        crate::chrome::desktop::close_after_shutdown(self.0.playback);
+        crate::wiring::navigation::close_after_shutdown(self.0.playback);
     }
 
     fn flush_bookmarks(&self) {
@@ -155,7 +155,7 @@ pub(crate) fn bind(ui: Ui) {
     effect(move || {
         if ui.screens.update_dialog_open.get()
             && lifecycle() != nsh_core::platform::Lifecycle::Background
-            && ui.top_overlay() == Some(crate::chrome::overlays::Overlay::AppUpdate)
+            && ui.top_overlay() == Some(crate::chrome::overlay::Overlay::AppUpdate)
             && snapshot(ui.screens).notice.is_some()
         {
             acknowledge(ui.screens);
@@ -667,7 +667,7 @@ fn panel(ui: Ui) -> View {
         .test_id("app-update-panel")
         .on_press(|| {})
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::AppUpdate.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::AppUpdate.accessibility_covered(ui)
         })
         .child(ui_kit::header(
             ui,
@@ -816,9 +816,9 @@ pub(crate) fn notice_open(ui: Ui) -> bool {
     {
         return false;
     }
-    crate::chrome::overlays::Overlay::ALL
+    crate::chrome::overlay::Overlay::ALL
         .into_iter()
-        .filter(|overlay| *overlay != crate::chrome::overlays::Overlay::AppUpdateNotice)
+        .filter(|overlay| *overlay != crate::chrome::overlay::Overlay::AppUpdateNotice)
         .all(|overlay| !overlay.is_open(ui))
 }
 

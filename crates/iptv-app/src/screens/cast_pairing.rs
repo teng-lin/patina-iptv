@@ -2,7 +2,7 @@
 use crate::{
     Ui,
     chrome::i18n::tr,
-    chrome::overlays::Overlay,
+    chrome::overlay::Overlay,
     chrome::scale::Scale,
     chrome::ui_kit,
     chrome::ui_kit::entry::{frame, sheet_buttons, sheet_field},

@@ -2,7 +2,7 @@
 
 use iptv_presentation::library_recovery::{Action as RecoveryAction, Recovery, Retry};
 
-pub(crate) const APP_NAME: &str = "Patina";
+pub(crate) use crate::chrome::ui_kit::APP_NAME;
 
 /// Patina's startup splash over its artwork (`host::splash_artwork`).
 pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {

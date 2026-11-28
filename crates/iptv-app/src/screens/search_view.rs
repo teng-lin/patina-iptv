@@ -488,7 +488,7 @@ pub fn close(ui: Ui) {
     save_history(ui.screens);
     crate::wiring::runtime_owner::runtime().release_program_index();
     ui.screens.search.set(None);
-    crate::chrome::input::dismiss_keyboard();
+    crate::chrome::input_kit::dismiss_keyboard();
 }
 
 /// The screen is shown and takes the remote.

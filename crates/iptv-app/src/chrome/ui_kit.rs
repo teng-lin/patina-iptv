@@ -109,6 +109,8 @@ pub const HEADING_ROW: f32 = 40.0;
 /// status.
 pub const ROW_THREE: f32 = 80.0;
 /// Problems: a light red.
+pub(crate) const APP_NAME: &str = "Patina";
+
 pub use crate::theme::{ERROR, ERROR_FOCUSED};
 /// A screen's margins (dp at full size).
 pub const MARGIN_X: f32 = 48.0;

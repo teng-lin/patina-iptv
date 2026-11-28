@@ -22,7 +22,7 @@ pub fn save_failure(failure: crate::runtime::model::SaveFailure) -> &'static str
 
 /// Whether the keys set up now are a keyboard's (`input::keys_for`).
 fn keyboard() -> bool {
-    crate::chrome::input::keys_now() == Some(iptv_presentation::capabilities::Keys::Keyboard)
+    crate::chrome::input_kit::keys_now() == Some(iptv_presentation::capabilities::Keys::Keyboard)
 }
 
 /// The name of a settings page (`settings_view::PAGES`). The keys' page

@@ -233,7 +233,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         }),
         seek: Box::new(move || stream.seek.get()),
         picture_size: Box::new(move || {
-            let identity = crate::chrome::chooser::picture_identity(ui.playback, surface);
+            let identity = crate::wiring::navigation::picture_identity(ui.playback, surface);
             ui.app
                 .picture
                 .with(|p| p.for_channel(identity.as_deref()))

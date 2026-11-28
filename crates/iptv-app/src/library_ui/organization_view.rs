@@ -1,6 +1,6 @@
 //! Channel and provider-group organization, including hidden-item recovery.
 use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 use crate::chrome::scale::Scale;
 use crate::chrome::ui_kit::entry::{self, TextSheet};
 use crate::guide::list_rows::{self, Mark, ROW};
@@ -1530,7 +1530,7 @@ pub(crate) fn inline_order_open(screens: crate::ScreensUi) -> bool {
 
 pub(crate) fn guide_order_accessible(ui: Ui) -> bool {
     guide_order_open(ui.screens)
-        && ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
+        && ui.top_overlay() == Some(crate::chrome::overlay::Overlay::Organization)
         && !contents_hidden(ui.screens)
 }
 
@@ -1560,7 +1560,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
         .absolute()
         .inset_0()
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Organization.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1637,7 +1637,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Organization.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1660,7 +1660,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .child(ui_kit::caption(size, move || reorder_hint(ui)))
                 .child(when(
                     move || {
-                        ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
+                        ui.top_overlay() == Some(crate::chrome::overlay::Overlay::Organization)
                             && ui.drag_editing()
                             && reordering(ui.screens)
                             && !contents_hidden(ui.screens)
@@ -1842,7 +1842,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             .inset_0()
                             .test_id("organization-sort")
                             .accessibility_elements_hidden(move || {
-                                crate::chrome::overlays::Overlay::Organization
+                                crate::chrome::overlay::Overlay::Organization
                                     .accessibility_covered(ui)
                             })
                             .child(when(
@@ -1860,7 +1860,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         ui_kit::screen(ui, size)
                             .test_id("organization-screen")
                             .accessibility_elements_hidden(move || {
-                                crate::chrome::overlays::Overlay::Organization
+                                crate::chrome::overlay::Overlay::Organization
                                     .accessibility_covered(ui)
                             })
                             .child(

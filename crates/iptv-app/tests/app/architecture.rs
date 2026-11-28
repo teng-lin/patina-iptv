@@ -78,7 +78,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("chrome/i18n.rs", "WORDING_SETTINGS"), // cfg(test)-only scoped wording preferences.
     ("chrome/i18n/pseudo.rs", "ENABLED"),  // test-support-only pseudolocale environment flag.
     ("chrome/i18n/pseudo.rs", "FIXED"),    // test-support-only immutable expanded catalog.
-    ("chrome/input.rs", "REMOTE_PHASES"),  // test-support-only remote key phase switch.
+    ("chrome/input_kit.rs", "REMOTE_PHASES"), // test-support-only remote key phase switch.
     ("chrome/input.rs", "REPEATS"),        // test-support-only keyboard repeat mirror.
     ("wiring/runtime_owner.rs", "RUNTIME"), // The shell's single application handle.
     ("wiring/runtime_owner.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.

@@ -31,7 +31,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     view()
         .test_id("settings-layer")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Settings.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::Settings.accessibility_covered(ui)
         })
         .absolute()
         .inset_0()

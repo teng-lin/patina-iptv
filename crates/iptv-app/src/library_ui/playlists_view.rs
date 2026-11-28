@@ -16,7 +16,7 @@
 //! wizard's sheet (`ui_kit::entry`). Wording is iptv-rs's own.
 
 use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 
 use iptv_presentation::library::details;
 mod details_card;
@@ -248,7 +248,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::PlaylistOrder(id) => {
-                crate::chrome::menu_view::open_playlist_order(ui.screens, id);
+                crate::wiring::navigation::open_playlist_order(ui.screens, id);
                 Ok(())
             }
             Effect::ReorderGroups(id) | Effect::GroupOrder(id) => {
@@ -509,7 +509,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("playlists-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::Playlists.accessibility_covered(ui)
+                    crate::chrome::overlay::Overlay::Playlists.accessibility_covered(ui)
                 })
                 .child(
                     ui_kit::header(ui, size, move || tr("Playlists"), |ui| close(ui.screens))
@@ -813,7 +813,7 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                 }
                 (Act::GroupOrder, _) => {
                     ui.guide_data();
-                    crate::chrome::menu_view::group_order_label(
+                    crate::wiring::navigation::group_order_label(
                         &iptv_presentation::lists::ListId::Group(format!("playlist:{}", id.0)),
                     )
                 }

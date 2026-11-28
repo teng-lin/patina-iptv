@@ -1,7 +1,7 @@
 //! Parental modal: the core owns PIN entry and transitions; the runtime owns
 //! credentials and access. Callbacks run only after the authoritative gate.
 use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 use crate::runtime::Runtime;
 use crate::wiring::navigation::request;
 use crate::{Ui, chrome::scale::Scale, chrome::ui_kit, tint};

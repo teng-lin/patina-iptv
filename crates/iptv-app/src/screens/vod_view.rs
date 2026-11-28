@@ -892,7 +892,7 @@ enum Watched {
 }
 
 fn where_watched(ui: Ui, series: &Key) -> Watched {
-    use crate::chrome::overlays::Overlay;
+    use crate::chrome::overlay::Overlay;
     let details = ui.top_overlay() == Some(Overlay::Vod)
         && ui
             .screens
@@ -1441,7 +1441,7 @@ fn detail_screen(ui: Ui, size: Scale) -> View {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Vod.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::Vod.accessibility_covered(ui)
         })
         .child(details(ui, size))
         .child(
@@ -1530,7 +1530,7 @@ fn library_screen(ui: Ui, size: Scale) -> View {
     ui_kit::screen(ui, size)
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Vod.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::Vod.accessibility_covered(ui)
         })
         .child(header)
         .child(hint)

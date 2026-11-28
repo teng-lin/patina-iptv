@@ -21,7 +21,7 @@ pub mod player_windows;
 pub(crate) mod quit_confirm;
 /// The desktop backends, where the app owns the window and the sound:
 /// Linux, macOS and Windows.
-pub const DESKTOP: bool = crate::host::LINUX || crate::host::MACOS || crate::host::WINDOWS;
+pub const DESKTOP: bool = crate::host::DESKTOP;
 
 thread_local! {
     static WINDOW: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
@@ -213,7 +213,7 @@ fn recovery(
 }
 
 /// Runs `f` on the app's window; `None` off desktops.
-fn with_window<T>(f: impl FnOnce(&WindowRef) -> T) -> Option<T> {
+pub(crate) fn with_window<T>(f: impl FnOnce(&WindowRef) -> T) -> Option<T> {
     WINDOW.with(|w| w.borrow().as_ref().map(f))
 }
 

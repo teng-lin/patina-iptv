@@ -1,15 +1,13 @@
 //! Remote input: NSH keystrokes → `iptv_nav` keys → short/long presses →
 //! context keymap → actions applied to the app state.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use iptv_core::capabilities::Host;
 use iptv_nav::{
-    Action, BackGuard, Context, Decision, HeldPresses, Keymap, Phase, Press, Profile, RemoteKey,
+    Action, BackGuard, Context, Decision, HeldPresses, Keymap, Phase, Press, RemoteKey,
 };
-use iptv_presentation::capabilities::Keys;
 use nsh_core::keymap::Keystroke;
 use nsh_core::prelude::*;
 use nsh_core::{KeyCapture, KeyEvent};
@@ -24,26 +22,14 @@ mod modal_actions;
 mod number;
 mod player_actions;
 
+#[cfg(feature = "test-support")]
+pub use super::input_kit::use_remote_key_phases;
+pub(crate) use super::input_kit::{
+    DIGITS, KEYS, PROFILE, RemoteFocus, focus_remote_root, holds, keys_now, long_press,
+};
 pub(crate) use back::swallow_back;
 use back::{act, swallow_release};
-use keys::{DIGITS, KEYS, RawKeys};
-
-/// A TV remote's profile (Android, a browser TV) distinguishes a tap from
-/// a held key.
-const REMOTE_KEYS: bool = crate::host::REMOTE_KEYS;
-
-/// Headless scenarios that drive a remote's raw Down/Repeat/Up phases
-/// (`use_remote_key_phases`), set before the app starts.
-#[cfg(feature = "test-support")]
-static REMOTE_PHASES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Test support: take keys as the Android remote does (raw key phases on
-/// the window's root, short and long presses) in this process. Call it
-/// before the app starts.
-#[cfg(feature = "test-support")]
-pub fn use_remote_key_phases() {
-    REMOTE_PHASES.store(true, std::sync::atomic::Ordering::Relaxed);
-}
+use keys::RawKeys;
 
 /// Test support: whether the keyboard binding `name` ("enter") fires on
 /// the platform's auto-repeats now. A headless keyboard sends no repeats;
@@ -70,45 +56,6 @@ mod keyboard_repeats {
         repeats.as_ref()?.get(name).copied()
     }
 }
-
-/// What the connected keys are set up as. iPadOS reports changes through
-/// GCKeyboard, so keyboard settings follow attachment without a rebuild.
-pub(crate) fn keys_for(host: Host) -> Option<Keys> {
-    iptv_presentation::capabilities::keys(host)
-}
-
-/// [`keys_for`] now (reactive).
-pub(crate) fn keys_now() -> Option<Keys> {
-    keys_for(crate::wiring::device::host())
-}
-
-/// Whether keys arrive as a remote's raw phases and tell a tap from a hold.
-pub(crate) fn long_press() -> bool {
-    #[cfg(feature = "test-support")]
-    if REMOTE_PHASES.load(std::sync::atomic::Ordering::Relaxed) {
-        return true;
-    }
-    REMOTE_KEYS
-}
-
-/// Whether `key` tells a tap from a hold: where keys report their
-/// phases ([`long_press`]), but not a keyboard shortcut with a modifier
-/// (`shift+left`), which reports its press only.
-pub(crate) fn holds(key: RemoteKey) -> bool {
-    long_press()
-        && (KEYS.iter().all(|&(_, k)| k != key)
-            || KEYS
-                .iter()
-                .any(|&(name, k)| k == key && !name.contains('+')))
-}
-
-/// Whose keys: a TV remote's on Android, a keyboard's on the desktops
-/// (`iptv_nav::Profile`: one map; the hints name their keys).
-pub(crate) const PROFILE: Profile = if REMOTE_KEYS {
-    Profile::Remote
-} else {
-    Profile::Keyboard
-};
 
 struct Nav {
     keymap: Keymap,
@@ -269,40 +216,6 @@ impl InputScope {
             self.owner.run(|| key_event(self.ui, &self.nav, key, phase));
         }
     }
-}
-
-#[derive(Clone, Copy)]
-struct RemoteFocus(ElementRef);
-
-fn focus_remote_root() {
-    if long_press()
-        && let Some(focus) = use_context::<RemoteFocus>()
-    {
-        focus.0.focus();
-    }
-}
-
-/// Give remote focus back to the app when native editing ends.
-pub(crate) fn dismiss_keyboard() {
-    nsh_core::element::dismiss_keyboard();
-    focus_remote_root();
-}
-
-/// Keep a field in sync with the app's editing mode.
-pub(crate) fn bind_field_focus(field: ElementRef, editing: impl Fn() -> bool + 'static) {
-    let was_editing = Cell::new(false);
-    effect(move || {
-        let editing = editing();
-        let leaving = was_editing.replace(editing) && !editing;
-        if editing {
-            field.focus();
-        } else {
-            field.blur();
-            if leaving {
-                focus_remote_root();
-            }
-        }
-    });
 }
 
 /// Listen on the window's root so a remote works before native focus exists.

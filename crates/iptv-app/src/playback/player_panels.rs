@@ -136,7 +136,7 @@ fn label(ui: Ui, control: Control) -> String {
         ),
         Scaling => with(
             tr("Picture size"),
-            Some(crate::chrome::chooser::picture_name(ui).into()),
+            Some(crate::wiring::navigation::picture_name(ui).into()),
         ),
         SleepTimer => with(
             tr("Sleep timer"),
@@ -554,7 +554,12 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
             ui.app.settings.get();
             crate::wiring::settings::choice(iptv_settings::keys::SEEK_KEYS)
         });
-        words::hint(crate::chrome::input::PROFILE, shown.get(), focused, seek)
+        words::hint(
+            crate::chrome::input_kit::PROFILE,
+            shown.get(),
+            focused,
+            seek,
+        )
     };
     text(words)
         .px(px(8.0))

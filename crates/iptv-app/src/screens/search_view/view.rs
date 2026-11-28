@@ -53,7 +53,7 @@ fn screen(ui: Ui) -> impl IntoElement {
         .style_when(move || compact_header(size), move |s| s.px(size.px(16.0)))
         .test_id("search-screen")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlays::Overlay::Search.accessibility_covered(ui)
+            crate::chrome::overlay::Overlay::Search.accessibility_covered(ui)
         })
         .child(header(ui, size))
         .child(ui_kit::caption(size, move || hint(ui)))
@@ -77,7 +77,7 @@ fn hint(ui: Ui) -> &'static str {
     if matches!(phase, Phase::NoResults | Phase::Typing) {
         return match (editing, ui.keys_shown()) {
             (true, _) => tr("Edit the query or choose Clear"),
-            (false, true) if crate::chrome::desktop::DESKTOP => tr("Enter edit query   Esc close"),
+            (false, true) if crate::host::DESKTOP => tr("Enter edit query   Esc close"),
             (false, true) => tr("OK edit query   Back close"),
             (false, false) => tr("Tap the search field to edit, or choose Clear"),
         };
@@ -118,7 +118,7 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         })
         .unwrap_or(false)
     });
-    crate::chrome::input::bind_field_focus(field, move || want_keyboard.get());
+    crate::chrome::input_kit::bind_field_focus(field, move || want_keyboard.get());
     crate::chrome::keyboard::on_dismissed(
         move || want_keyboard.get(),
         move || apply(ui, SearchAction::KeyboardHidden),

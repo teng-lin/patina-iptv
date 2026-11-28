@@ -14,7 +14,7 @@
 //! own (`words`).
 
 use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::chrome::input_kit::dismiss_keyboard;
 use crate::chrome::toast::notify;
 use crate::wiring::navigation::{request, settings_guarded};
 use crate::wiring::settings_wiring::refresh;
@@ -312,7 +312,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
             set_playlist_visibility(ui, crate::runtime::model::SourceId(id), show);
         }
         Effect::PlaylistActions(id) => settings_guarded(ui.screens, move || {
-            crate::chrome::menu_view::open_playlist_options(
+            crate::wiring::navigation::open_playlist_options(
                 ui.screens,
                 crate::runtime::model::SourceId(id),
             );
@@ -424,7 +424,7 @@ fn run(ui: Ui, key: &'static str) {
                 notify(tr("No playlist on screen"));
             }
         }
-        "remote.customize" => crate::chrome::remote_editor::open(ui.screens),
+        "remote.customize" => crate::wiring::navigation::open_remote_editor(ui.screens),
         // The playlists screen, over the settings screen.
         "playlists.manage" => crate::wiring::navigation::manage_playlists(ui.screens),
         "playlists.show_all" => {

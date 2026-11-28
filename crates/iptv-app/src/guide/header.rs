@@ -242,7 +242,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
             && !crate::library_ui::organization_view::inline_order_open(ui.screens)
         {
             ui.touched();
-            crate::chrome::menu_view::open(ui);
+            crate::wiring::navigation::open_menu(ui);
         }
     };
     view()

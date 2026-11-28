@@ -67,7 +67,7 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                     "routes-closed" => {
                         ui.cast.state.update(|state| state.picker_open = false);
                         if !ui.cast.busy.get_untracked() {
-                            crate::chrome::chooser::close(ui);
+                            crate::wiring::navigation::close_chooser(ui);
                         }
                     }
                     "route-selected" => {
