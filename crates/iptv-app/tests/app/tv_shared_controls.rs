@@ -465,7 +465,12 @@ fn the_rail_reaches_preview_on_desktop_and_tv_without_reopening_video() {
 #[test]
 fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_zap() {
     let Some(home) = isolated!() else { return };
-    let (mut fixture, lifetime) = preview_fixture(home);
+    // No preview autoplay: while the stored library loads, the manual clock
+    // can pass the switch delay and autoplay the synthetic guide's first
+    // channel, a source this scenario did not choose.
+    let (mut fixture, lifetime) = preview_fixture_with(home, |settings| {
+        settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    });
     let app = &mut fixture.app;
     step(app.set_environment("TV digits", |env| env.idiom = Idiom::Tv));
     let player = app
