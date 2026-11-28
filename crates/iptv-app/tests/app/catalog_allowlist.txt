@@ -384,3 +384,7 @@ iptv-app/src/host/web.rs	response exceeds its byte budget
 iptv-app/src/host/web.rs	total request time exceeded
 iptv-runtime/src/network.rs	declared body
 iptv-runtime/src/network.rs	{what} exceeds its byte budget
+
+# Literal Linux firewall CLI commands; shell syntax is not translated.
+iptv-app/src/screens/cast_pairing.rs	sudo firewall-cmd --add-rich-rule='rule family="ipv4" source address="{source}" port port="{port}" protocol="{proto}" accept'
+iptv-app/src/screens/cast_pairing.rs	sudo ufw allow from {source} to any port {port} proto {proto}
