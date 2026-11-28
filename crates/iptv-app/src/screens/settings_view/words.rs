@@ -2,19 +2,19 @@
 //! subsections, settings, commands and choices, and how values read. The
 //! catalog's summaries serve as the rows' descriptions.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use iptv_settings::schema::{IntUnit, TimeUnit, ValueType};
 use iptv_settings::{Section, Setting, Value};
 
 /// A failed save before publication differs from an update whose durability
 /// could not be confirmed. OS details are already recorded by the runtime.
-pub fn save_failure(failure: crate::runtime::model::SaveFailure) -> &'static str {
+pub fn save_failure(failure: iptv_runtime::model::SaveFailure) -> &'static str {
     match failure {
-        crate::runtime::model::SaveFailure::NotPublished => {
+        iptv_runtime::model::SaveFailure::NotPublished => {
             tr("Settings could not be saved. Check storage permissions and try again.")
         }
-        crate::runtime::model::SaveFailure::DurabilityUnconfirmed => tr(
+        iptv_runtime::model::SaveFailure::DurabilityUnconfirmed => tr(
             "Settings updated, but we could not confirm they were saved safely. Check storage and try again.",
         ),
     }
@@ -22,7 +22,7 @@ pub fn save_failure(failure: crate::runtime::model::SaveFailure) -> &'static str
 
 /// Whether the keys set up now are a keyboard's (`input::keys_for`).
 fn keyboard() -> bool {
-    crate::chrome::input::keys_now() == Some(iptv_presentation::capabilities::Keys::Keyboard)
+    crate::kit::input::keys_now() == Some(iptv_presentation::capabilities::Keys::Keyboard)
 }
 
 /// The name of a settings page (`settings_view::PAGES`). The keys' page
@@ -336,7 +336,7 @@ pub fn description(key: &str) -> Option<&'static str> {
 /// The name of a choice (enum variant or palette key).
 pub fn choice(family: &str, variant: &str) -> String {
     if family == "language" {
-        return crate::chrome::i18n::language_name(variant).to_owned();
+        return crate::kit::i18n::language_name(variant).to_owned();
     }
     let name = match (family, variant) {
         ("app_update_frequency", "never") => tr("Never"),
@@ -555,7 +555,7 @@ pub fn value(setting: &Setting, value: &Value) -> String {
             .unwrap_or_else(|| v.clone()),
         Value::Text(t) if t.is_empty() => empty(setting.key).to_owned(),
         Value::Text(t) if setting.key == "general.language" => {
-            let name = crate::chrome::i18n::language_name(t);
+            let name = crate::kit::i18n::language_name(t);
             if name.is_empty() {
                 t.clone()
             } else {
@@ -638,7 +638,7 @@ mod tests {
 #[cfg(test)]
 mod save_failure_tests {
     use super::save_failure;
-    use crate::runtime::model::SaveFailure;
+    use iptv_runtime::model::SaveFailure;
 
     #[test]
     fn publication_distinctions_are_translated_in_every_interface_language() {
@@ -646,7 +646,7 @@ mod save_failure_tests {
         let updated = save_failure(SaveFailure::DurabilityUnconfirmed).to_owned();
         assert_ne!(unsaved, updated);
         for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
-            crate::chrome::i18n::in_language(language.tag, || {
+            crate::kit::i18n::in_language(language.tag, || {
                 let not_published = save_failure(SaveFailure::NotPublished);
                 let durability = save_failure(SaveFailure::DurabilityUnconfirmed);
                 assert_ne!(not_published, unsaved, "{}", language.tag);

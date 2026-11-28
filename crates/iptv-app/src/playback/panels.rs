@@ -2,14 +2,14 @@
 //! layer, the groups column (shown with the rail while either has the
 //! focus) and the geometry of the header (`header.rs`) and its preview.
 
-use crate::chrome::layout::GuideHeader;
 use crate::guide::lists;
+use crate::kit::layout::GuideHeader;
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::chrome::scale::Scale;
 use crate::guide::Pane;
-use crate::guide::list_rows::{self, Mark, ROW};
+use crate::kit::list_rows::{self, Mark, ROW};
+use crate::kit::scale::Scale;
 
 /// The groups column's width at full size (scaled with the guide).
 pub const GROUPS_W: f32 = 260.0;
@@ -17,14 +17,14 @@ pub const GROUPS_W: f32 = 260.0;
 /// The groups column's width now (0 while the guide has the focus).
 pub fn groups_width(ui: crate::GuideUi) -> f32 {
     if crate::guide::lists::columns_shown(ui) {
-        (GROUPS_W * crate::chrome::scale::now()).round()
+        (GROUPS_W * crate::kit::scale::now()).round()
     } else {
         0.0
     }
 }
 /// The preview's margin and corner radius (dp); its geometry and the
-/// header's come from `crate::chrome::layout::GuideHeader`.
-pub use crate::chrome::layout::PREVIEW_MARGIN;
+/// header's come from `crate::kit::layout::GuideHeader`.
+pub use crate::kit::layout::PREVIEW_MARGIN;
 pub const PREVIEW_RADIUS: f32 = 10.0;
 
 /// The header in the window now (reactive): the guide's scale and the
@@ -34,7 +34,7 @@ pub fn guide_header_now() -> GuideHeader {
     GuideHeader::of(
         w.width.0,
         w.height.0,
-        crate::chrome::scale::now(),
+        crate::kit::scale::now(),
         crate::wiring::settings::text_factor(),
     )
 }
@@ -97,7 +97,7 @@ pub fn backdrop(ui: Ui) -> impl IntoElement {
         }));
     }
     let rail_width = move || {
-        let width = crate::chrome::rail::width(ui.guide);
+        let width = crate::guide::rail::width(ui.guide);
         if video_under_page && clear() {
             let w = window();
             let top = safe_area().top.0 + header_now().0;
@@ -209,13 +209,13 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 .on_long_press(move || {
                     ui.touched();
                     if let Some(entry) = entry() {
-                        crate::chrome::menu_view::open_group_options(ui, entry);
+                        crate::wiring::navigation::open_group_options(ui, entry);
                     }
                 })
                 .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
                     ui.touched();
                     if let Some(entry) = entry() {
-                        crate::chrome::menu_view::open_group_options(ui, entry);
+                        crate::wiring::navigation::open_group_options(ui, entry);
                     }
                 })
                 .child(list_rows::name(size, name).flex_1().text_color(color))
@@ -233,7 +233,7 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
         },
     )
     .test_id("guide-groups")
-    .pointer_events(move || crate::guide_chrome_pointer_events(ui.screens))
+    .pointer_events(move || crate::wiring::navigation::guide_chrome_pointer_events(ui.screens))
     .accessibility_elements_hidden(move || !crate::guide::lists::columns_shown(ui.guide))
     .estimated_item_size(list_rows::pitch(size, ROW))
     .element_ref(&groups)

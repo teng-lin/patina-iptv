@@ -131,7 +131,7 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
         0,
     ),
     ("iptv-app/src/library_ui/wizard_view.rs", "button", 2),
-    ("iptv-app/src/chrome/ui_kit/entry.rs", "button", 2),
+    ("iptv-app/src/kit/ui_kit/entry.rs", "button", 2),
 ];
 
 /// Files whose every literal that reads as text is a message shown later
@@ -185,18 +185,18 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/screens/recordings_view.rs", "status_label"),
     ("iptv-app/src/screens/recordings_view.rs", "name"),
     ("iptv-app/src/screens/recordings_view.rs", "message"),
-    ("iptv-app/src/chrome/startup_view.rs", "reason"),
+    ("iptv-app/src/shell/startup_view.rs", "reason"),
     // What `tr` and `trf` hand to the presentation is what they were given.
-    ("iptv-app/src/chrome/i18n.rs", "source"),
+    ("iptv-app/src/kit/i18n.rs", "source"),
     // `key(…)` constants.
     ("iptv-app/src/library_ui/backup.rs", "EXPORT_NOTE"),
     ("iptv-app/src/library_ui/backup.rs", "PENDING_NOTE"),
     ("iptv-app/src/library_ui/backup.rs", "RESTART_NOTE"),
     ("iptv-app/src/library_ui/custom_groups.rs", "CAPTION"),
-    ("iptv-app/src/chrome/remote_editor.rs", "CAPTION"),
+    ("iptv-app/src/shell/remote_editor.rs", "CAPTION"),
     // A backup error's text (MESSAGE_FILES, MESSAGE_CALLS_IN).
     ("iptv-app/src/library_ui/backup.rs", "report"),
-    ("iptv-app/src/lib.rs", "message"),
+    ("iptv-app/src/shell/app.rs", "message"),
     // `RuntimeEvent::Notify` (MESSAGE_TYPES).
     ("iptv-app/src/wiring/runtime_events.rs", "message"),
     // The labels of TRANSLATING_HELPERS.
@@ -209,7 +209,7 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/screens/settings_view/editors.rs", "label"),
     ("iptv-app/src/screens/settings_view/words.rs", "message"),
     ("iptv-app/src/library_ui/wizard_view.rs", "label"),
-    ("iptv-app/src/chrome/ui_kit/entry.rs", "label"),
+    ("iptv-app/src/kit/ui_kit/entry.rs", "label"),
 ];
 
 /// Calls whose text goes to the log, a panic or the platform, never to

@@ -13,9 +13,9 @@
 //! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
 //! own (`words`).
 
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
-use crate::chrome::toast::notify;
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
+use crate::kit::toast::notify;
 use crate::wiring::navigation::{request, settings_guarded};
 use crate::wiring::settings_wiring::refresh;
 
@@ -205,7 +205,7 @@ fn screen_key(action: Action) -> Option<Key> {
 
 /// The stored playlists, as the Playlists page lists them.
 fn playlist_rows() -> Vec<PlaylistRow> {
-    crate::runtime()
+    crate::wiring::runtime_owner::runtime()
         .playlists()
         .unwrap_or_default()
         .into_iter()
@@ -229,15 +229,17 @@ pub(crate) fn playlists_changed(ui: Ui) {
 }
 
 /// Changes playlist visibility from a checkbox after the settings PIN check.
-pub(crate) fn set_playlist_visibility(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
+pub(crate) fn set_playlist_visibility(ui: Ui, id: iptv_runtime::model::SourceId, show: bool) {
     settings_guarded(ui.screens, move || show_playlist(ui, id, show));
 }
 
-fn show_playlist(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
+fn show_playlist(ui: Ui, id: iptv_runtime::model::SourceId, show: bool) {
     crate::wiring::tasks::spawn_in_app(async move {
-        if let Err(e) = crate::wiring::data::update_policy(&crate::runtime(), id, move |policy| {
-            policy.enabled = show
-        })
+        if let Err(e) = crate::wiring::data::update_policy(
+            &crate::wiring::runtime_owner::runtime(),
+            id,
+            move |policy| policy.enabled = show,
+        )
         .await
         {
             log::warn!("iptv settings: the store refused a playlist's check box: {e}");
@@ -309,12 +311,12 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
         // Playlist rows act on the settings as the commands do: behind the
         // PIN while the settings are protected and locked.
         Effect::ShowPlaylist(id, show) => {
-            set_playlist_visibility(ui, crate::runtime::model::SourceId(id), show);
+            set_playlist_visibility(ui, iptv_runtime::model::SourceId(id), show);
         }
         Effect::PlaylistActions(id) => settings_guarded(ui.screens, move || {
-            crate::chrome::menu_view::open_playlist_options(
+            crate::wiring::navigation::open_playlist_options(
                 ui.screens,
-                crate::runtime::model::SourceId(id),
+                iptv_runtime::model::SourceId(id),
             );
         }),
         Effect::Run(key) => run(ui, key),
@@ -344,7 +346,7 @@ pub(crate) fn save_setting(
 }
 
 pub(crate) fn notify_setting_error(error: crate::wiring::settings::SaveError) {
-    use crate::runtime::model::SaveFailure;
+    use iptv_runtime::model::SaveFailure;
     match error {
         crate::wiring::settings::SaveError::ParentalLocked => {
             notify(tr("Unlock parental controls before changing settings"))
@@ -416,7 +418,10 @@ fn run(ui: Ui, key: &'static str) {
         }
         // The combined view chooses a playlist before opening its Guide data.
         "epg.manage_sources" | "epg.add_source" => {
-            crate::wiring::navigation::guide_sources(ui, crate::runtime().shown_source());
+            crate::wiring::navigation::guide_sources(
+                ui,
+                crate::wiring::runtime_owner::runtime().shown_source(),
+            );
         }
         "epg.clear" => {
             let cleared = stored::clear(&crate::wiring::runtime_owner::runtime(), move |deleted| {
@@ -431,16 +436,18 @@ fn run(ui: Ui, key: &'static str) {
                 notify(tr("No playlist on screen"));
             }
         }
-        "remote.customize" => crate::chrome::remote_editor::open(ui.screens),
+        "remote.customize" => crate::wiring::navigation::open_remote_editor(ui.screens),
         // The playlists screen, over the settings screen.
         "playlists.manage" => crate::wiring::navigation::manage_playlists(ui.screens),
         "playlists.show_all" => {
             close(ui.screens);
-            crate::wiring::data::switch_all(&crate::runtime());
+            crate::wiring::data::switch_all(&crate::wiring::runtime_owner::runtime());
         }
         // As the playlists screen's Add: behind the PIN once one is set.
         "playlists.add" => crate::wiring::navigation::add_playlist(ui),
-        "playlists.update_all" => crate::wiring::data::refresh_all(&crate::runtime()),
+        "playlists.update_all" => {
+            crate::wiring::data::refresh_all(&crate::wiring::runtime_owner::runtime())
+        }
         // The playlists in their manual order, the first one focused.
         "playlists.reorder" => crate::wiring::navigation::reorder_playlists(ui),
         other => log::info!("iptv settings: {other} is not implemented yet"),
@@ -578,7 +585,7 @@ fn time_label(unix: i64) -> String {
 
 /// The runtime reports publication semantics; the shell chooses the wording
 /// in the current interface language, including changes made since the save.
-pub(crate) fn save_failed(failure: crate::runtime::model::SaveFailure) {
+pub(crate) fn save_failed(failure: iptv_runtime::model::SaveFailure) {
     notify(words::save_failure(failure));
 }
 

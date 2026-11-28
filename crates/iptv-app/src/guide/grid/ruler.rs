@@ -2,16 +2,16 @@
 //! the channel column. The slot times and the now line's dot slide with
 //! the programs (`pan.rs`).
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 
 use super::BAND;
 use crate::guide::timeline::MARGIN;
 use nsh_core::prelude::*;
 
 use super::{NOW_W, Pan, fill};
-use crate::chrome::fonts::{RULER, SANS};
-use crate::chrome::scale::Scale;
 use crate::guide::{PAST, STEP};
+use crate::kit::fonts::{RULER, SANS};
+use crate::kit::scale::Scale;
 use crate::theme::{RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, clock, tint};
 
@@ -173,7 +173,7 @@ fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
             iptv_presentation::clock::date(
                 unix,
                 crate::guide::clock::offset_minutes(unix),
-                crate::chrome::i18n::clock_style()
+                crate::kit::i18n::clock_style()
             ),
             clock(now)
         )

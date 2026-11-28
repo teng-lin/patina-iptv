@@ -13,7 +13,7 @@
 //! the programs of a band a little wider than the window and slide them,
 //! with the ruler's times and the now line, by one animated offset.
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 use crate::library_ui::organization_view;
 
 mod cell;
@@ -31,9 +31,9 @@ use pan::Pan;
 use iptv_presentation::lists::{FAVORITES, RECENT};
 use nsh_core::prelude::*;
 
-use crate::chrome::fonts::CHANNEL;
-use crate::chrome::scale::Scale;
 use crate::guide::Pane;
+use crate::kit::fonts::CHANNEL;
+use crate::kit::scale::Scale;
 use crate::theme::{RADIUS, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, tint};
 
@@ -63,7 +63,7 @@ const WHITE: u32 = 0xFFFFFF;
 
 /// The channel column's width now (reactive: the window's size).
 pub fn channel_width() -> f32 {
-    let scale = crate::chrome::scale::now();
+    let scale = crate::kit::scale::now();
     (window().width.0 * CHANNEL_SHARE).clamp(CHANNEL_MIN * scale, CHANNEL_MAX * scale)
 }
 
@@ -183,7 +183,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                             )
                         },
                     )
-                    .estimated_item_size(move || px(size.whole(crate::guide::list_rows::ROW)))
+                    .estimated_item_size(move || px(size.whole(crate::kit::list_rows::ROW)))
                     .element_ref(&rows)
                     .on_scroll(move |event: &ScrollEvent| drag.scrolled(*event))
                     // Scrolling the channels never tunes: a preview
@@ -251,7 +251,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
 /// Over an empty list: what it would hold and how to fill it.
 fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
     let empty = move || ui.guide.list.with(|l| l.is_empty());
-    let settings = computed(move || crate::chrome::menu_view::empty_group_settings_available(ui));
+    let settings = computed(move || crate::wiring::navigation::empty_group_settings_available(ui));
     let message = move || match ui.guide.list.with(|l| l.entry()) {
         FAVORITES => tr(
             "No favorite channels yet. Hold OK (or press Menu) on a channel and choose “Add to favorites”, or star channels with “Manage favorites…”.",
@@ -284,13 +284,13 @@ fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
         .child(when(
             move || settings.get(),
             move || {
-                crate::chrome::ui_kit::button(
+                crate::kit::ui_kit::button(
                     ui,
                     size,
                     move || tr("Group settings"),
                     move || ui.guide.focus.with(|f| f.pane == Pane::Guide),
                     move || {
-                        crate::chrome::menu_view::open_empty_group_settings(ui);
+                        crate::wiring::navigation::open_empty_group_settings(ui);
                     },
                 )
             },
@@ -322,7 +322,7 @@ fn hint_card(ui: Ui) -> impl IntoElement {
 /// What the keys do in the guide: a remote's, or a desktop keyboard's
 /// (`iptv_nav::Profile`).
 fn hint_lines() -> [&'static str; 4] {
-    match crate::chrome::input::PROFILE {
+    match crate::kit::input::PROFILE {
         iptv_nav::Profile::Remote => [
             tr("◀  ·  earlier programs, then groups"),
             tr("◀ in the groups  ·  search"),
@@ -429,7 +429,7 @@ fn row(
     let cell = move |i| cell::cell(ui, (at, i), (programs, channel), focus, now, (pan, size));
     view()
         .test_id("guide-row")
-        .h(move || px(size.whole(crate::guide::list_rows::ROW)))
+        .h(move || px(size.whole(crate::kit::list_rows::ROW)))
         .flex_row()
         .child(channel::cell(
             ui,

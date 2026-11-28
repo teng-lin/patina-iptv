@@ -26,7 +26,7 @@ pub fn recordings_library_untracked(screens: crate::ScreensUi) -> bool {
 }
 
 pub fn reason(reason: Reason) -> &'static str {
-    use crate::chrome::i18n::tr;
+    use crate::kit::i18n::tr;
     match reason {
         Reason::Casting => tr("Stop casting to open multiview."),
         Reason::WaitingForPlayer => tr("Waiting for player availability"),

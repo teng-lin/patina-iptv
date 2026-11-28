@@ -15,16 +15,16 @@
 //! action is tappable; a tap beside a sheet closes it. Text entry uses the
 //! wizard's sheet (`ui_kit::entry`). Wording is iptv-rs's own.
 
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input::dismiss_keyboard;
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
 
 use iptv_presentation::library::details;
 mod details_card;
 use iptv_presentation::library::playlists as state;
 mod words;
 
-use crate::runtime::model::SourceId;
 use iptv_nav::Action;
+use iptv_runtime::model::SourceId;
 use nsh_core::prelude::*;
 
 pub use state::Only;
@@ -32,10 +32,10 @@ pub use state::Screen as Open;
 use state::{Act, EditKind, Effect, Item, Key, Layer, Screen};
 pub(crate) use words::masked_link;
 
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::entry::{self, TextSheet};
-use crate::chrome::ui_kit::{self, ERROR, ROW_THREE};
-use crate::guide::list_rows::{self, Mark};
+use crate::kit::list_rows::{self, Mark};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::entry::{self, TextSheet};
+use crate::kit::ui_kit::{self, ERROR, ROW_THREE};
 use crate::wiring::data::{self, Activity, Playlist};
 use crate::{Ui, ViewMode, tint};
 
@@ -91,7 +91,7 @@ pub fn open(ui: Ui) {
     if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
     }
 }
 
@@ -248,7 +248,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::PlaylistOrder(id) => {
-                crate::chrome::menu_view::open_playlist_order(ui.screens, id);
+                crate::wiring::navigation::open_playlist_order(ui.screens, id);
                 Ok(())
             }
             Effect::ReorderGroups(id) | Effect::GroupOrder(id) => {
@@ -367,7 +367,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                     crate::wiring::settings::SaveError::ParentalLocked,
                 );
             } else if changes_library {
-                crate::chrome::toast::notify(tr(
+                crate::kit::toast::notify(tr(
                     "The change could not be saved. Reopen the list and try again.",
                 ));
             }
@@ -509,7 +509,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("playlists-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::Playlists.accessibility_covered(ui)
+                    crate::kit::overlay::Overlay::Playlists.accessibility_covered(ui)
                 })
                 .child(
                     ui_kit::header(ui, size, move || tr("Playlists"), |ui| close(ui.screens))
@@ -813,7 +813,7 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                 }
                 (Act::GroupOrder, _) => {
                     ui.guide_data();
-                    crate::chrome::menu_view::group_order_label(
+                    crate::wiring::navigation::group_order_label(
                         &iptv_presentation::lists::ListId::Group(format!("playlist:{}", id.0)),
                     )
                 }
@@ -923,7 +923,12 @@ fn confirm_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             };
             let shown = !ui.app.library.all.get() && ui.app.library.shown.get() == Some(id);
             let next = shown
-                .then(|| crate::runtime::data::next_playlist_after_deletion(&crate::runtime(), id))
+                .then(|| {
+                    iptv_runtime::data::next_playlist_after_deletion(
+                        &crate::wiring::runtime_owner::runtime(),
+                        id,
+                    )
+                })
                 .flatten();
             (
                 trf("Delete “{name}”?", &[("name", (&p.name).into())]),

@@ -58,7 +58,7 @@ pub fn follow(ui: Ui) -> bool {
         ui.playback.multiview.set(None);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
     }
     true
 }

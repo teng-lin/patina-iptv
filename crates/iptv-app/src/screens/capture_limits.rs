@@ -77,11 +77,11 @@ pub(crate) fn start_notice() -> String {
     let host = nsh_core::prelude::untracked(crate::wiring::device::host);
     let notices = iptv_presentation::capabilities::record_now_notices(host, now());
     if notices.is_empty() {
-        return crate::chrome::i18n::tr("Starting recording").to_owned();
+        return crate::kit::i18n::tr("Starting recording").to_owned();
     }
     let mut said = Vec::with_capacity(notices.len());
     for notice in notices {
-        said.push(crate::chrome::i18n::tr(notice));
+        said.push(crate::kit::i18n::tr(notice));
     }
     said.join(" ")
 }

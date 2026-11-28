@@ -63,7 +63,7 @@ pub fn get() -> Arc<Settings> {
     crate::wiring::runtime_owner::runtime().settings()
 }
 
-pub use crate::runtime::model::SaveError;
+pub use iptv_runtime::model::SaveError;
 /// Loads the saved settings (startup).
 pub fn load() {
     crate::wiring::runtime_owner::runtime().load_settings();
@@ -73,16 +73,16 @@ pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
 }
 
 pub fn flag(key: iptv_settings::keys::BoolKey) -> bool {
-    crate::runtime_owner::runtime().setting_flag(key)
+    crate::wiring::runtime_owner::runtime().setting_flag(key)
 }
 
 pub fn choice(key: iptv_settings::keys::EnumKey) -> &'static str {
-    crate::runtime_owner::runtime().setting_choice(key)
+    crate::wiring::runtime_owner::runtime().setting_choice(key)
 }
 
 /// `remote.long_press`, in ms.
 pub fn long_press_ms() -> u64 {
-    crate::runtime_owner::runtime().long_press_ms()
+    crate::wiring::runtime_owner::runtime().long_press_ms()
 }
 
 /// Playlists are listed in their hand order (`playlists.sort`), which

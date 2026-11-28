@@ -18,7 +18,7 @@ use iptv_presentation::touch_zap::{Direction, Outcome, Swipe};
 use iptv_settings::keys;
 use nsh_core::prelude::*;
 
-use crate::chrome::fonts::OSD_TEXT;
+use crate::kit::fonts::OSD_TEXT;
 use crate::theme::RADIUS_LARGE;
 use crate::{Playback, Ui, ViewMode, channel_name, tint};
 
@@ -145,7 +145,7 @@ pub(crate) fn zap(ui: Ui, direction: Direction) {
     // details), which are about the channel it leaves: they go, so the
     // player owns input again and the pending zap tunes.
     if ui.screens.chooser.with_untracked(Option::is_some) {
-        crate::chrome::chooser::close(ui);
+        crate::wiring::navigation::close_chooser(ui);
     }
     if ui.screens.description.with_untracked(Option::is_some) {
         ui.screens.description.set(None);
@@ -295,11 +295,11 @@ pub(crate) fn actions() -> Vec<nsh_core::AccessibilityActionDef> {
     let mut actions = vec![
         nsh_core::AccessibilityActionDef {
             name: "next_channel".into(),
-            label: Some(crate::chrome::i18n::tr("Next channel").into()),
+            label: Some(crate::kit::i18n::tr("Next channel").into()),
         },
         nsh_core::AccessibilityActionDef {
             name: "previous_channel".into(),
-            label: Some(crate::chrome::i18n::tr("Previous channel").into()),
+            label: Some(crate::kit::i18n::tr("Previous channel").into()),
         },
     ];
     if crate::IOS {

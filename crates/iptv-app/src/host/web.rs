@@ -27,10 +27,10 @@ use iptv_import::{BodyStream, Fetch, FetchError, FetchErrorKind, StreamingRespon
 use iptv_providers::{HttpRequest, HttpResponse};
 use iptv_web::adapters::{HostBody, HostFetch};
 
-use crate::runtime::execution::{Cooperative, CooperativeHost, Task};
+use iptv_runtime::execution::{Cooperative, CooperativeHost, Task};
 
 mod store;
-use crate::runtime::network::{Body, Chunks, Client, NetFuture, Network, NetworkConfig, Transport};
+use iptv_runtime::network::{Body, Chunks, Client, NetFuture, Network, NetworkConfig, Transport};
 
 /// A browser TV is none of the native platforms: one decoder, no
 /// background work, no OS registration (`iptv_core::capabilities::Host`).
@@ -68,15 +68,15 @@ pub(crate) fn detect_linux_firewall() -> super::LinuxFirewall {
 
 /// The runtime's ports on a browser TV. The runtime reads the host's
 /// clocks too: the Worker has no other.
-pub(crate) fn ports(directory: PathBuf, _pairing_label: String) -> crate::runtime::Ports {
-    crate::runtime::time::install(crate::runtime::time::Clock {
+pub(crate) fn ports(directory: PathBuf, _pairing_label: String) -> iptv_runtime::Ports {
+    iptv_runtime::time::install(iptv_runtime::time::Clock {
         monotonic: iptv_web::adapters::monotonic,
         wall: iptv_web::adapters::wall,
     });
-    let mut ports = crate::runtime::Ports::with_adapters(
+    let mut ports = iptv_runtime::Ports::with_adapters(
         directory,
         |_| {
-            Err(crate::runtime::model::StoreError::unavailable(
+            Err(iptv_runtime::model::StoreError::unavailable(
                 "this device has no key store",
             ))
         },
@@ -88,7 +88,7 @@ pub(crate) fn ports(directory: PathBuf, _pairing_label: String) -> crate::runtim
     ports.store_host = Some(Arc::new(store::BrowserStore::default()));
     // One set for the process: the host hands its stored files over once,
     // and every owner after the first sees the writes of those before it.
-    use crate::runtime::file_host::FileHost;
+    use iptv_runtime::file_host::FileHost;
     static FILES: std::sync::OnceLock<Option<Arc<dyn FileHost>>> = std::sync::OnceLock::new();
     ports.file_host = FILES
         .get_or_init(|| {
@@ -103,7 +103,7 @@ pub(crate) fn ports(directory: PathBuf, _pairing_label: String) -> crate::runtim
 /// [`DIRECTORY`] (`iptv_web::adapters::files`).
 struct PageFiles(iptv_web::adapters::files::StoredFiles);
 
-impl crate::runtime::file_host::FileHost for PageFiles {
+impl iptv_runtime::file_host::FileHost for PageFiles {
     fn read(&self, path: &std::path::Path) -> Option<Vec<u8>> {
         self.0.read(&path.to_string_lossy())
     }
@@ -112,7 +112,7 @@ impl crate::runtime::file_host::FileHost for PageFiles {
         &self,
         path: &std::path::Path,
         content: Option<Vec<u8>>,
-    ) -> crate::runtime::file_host::Stored {
+    ) -> iptv_runtime::file_host::Stored {
         Box::pin(self.0.write(&path.to_string_lossy(), content))
     }
 }
@@ -327,19 +327,19 @@ fn package_catalog(tag: &str) -> Option<String> {
 thread_local! {
     /// The root owner's handle, for the page's lifecycle (step 2) and the
     /// headless helpers.
-    static HOST_STOP: std::cell::RefCell<Option<crate::runtime::HostHandle>> =
+    static HOST_STOP: std::cell::RefCell<Option<iptv_runtime::HostHandle>> =
         const { std::cell::RefCell::new(None) };
 }
 
 /// Keeps the root owner's handle. The page's lifecycle does not flush
 /// through it yet (step 2).
-pub(crate) fn flush_on_host_stop(owner: crate::runtime::HostHandle) {
+pub(crate) fn flush_on_host_stop(owner: iptv_runtime::HostHandle) {
     HOST_STOP.with(|stop| *stop.borrow_mut() = Some(owner));
 }
 
 /// The root owner's handle (headless helpers).
 #[cfg(feature = "test-support")]
-pub(crate) fn host_handle() -> Option<crate::runtime::HostHandle> {
+pub(crate) fn host_handle() -> Option<iptv_runtime::HostHandle> {
     HOST_STOP.with(|stop| stop.borrow().clone())
 }
 

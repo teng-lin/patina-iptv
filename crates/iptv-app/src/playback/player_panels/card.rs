@@ -9,8 +9,8 @@ use iptv_presentation::player_info::{StreamFormat, badges, minutes_left};
 use nsh_core::prelude::*;
 
 use super::WHITE;
-use crate::chrome::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT, OSD_TITLE};
 use crate::guide::{Airing, Program};
+use crate::kit::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT, OSD_TITLE};
 use crate::theme::{RADIUS, RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, channel_name, clock, tint};
 
@@ -116,8 +116,8 @@ fn ends(ui: Ui) -> (String, String) {
         _ => {
             let (_, p) = program(ui);
             let at = ui.guide.focus.with(|f| f.now);
-            let left = minutes_left(crate::chrome::i18n::language(), p.start, p.end, at)
-                .unwrap_or_default();
+            let left =
+                minutes_left(crate::kit::i18n::language(), p.start, p.end, at).unwrap_or_default();
             (format!("{}–{}", clock(p.start), clock(p.end)), left)
         }
     }
@@ -215,7 +215,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                 .rounded(px(RADIUS))
                 .bg(tint(WHITE, RESTING_ALPHA))
                 .child(
-                    image(crate::chrome::content_image::source(move || {
+                    image(crate::kit::content_image::source(move || {
                         if crate::playback::on_demand::active(ui.playback) {
                             crate::guide::grid::no_logo()
                         } else {
@@ -270,7 +270,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                             return String::new();
                         }
                         let p = next();
-                        crate::chrome::i18n::trf(
+                        crate::kit::i18n::trf(
                             "Next  {time}  {title}",
                             &[
                                 ("time", (&clock(p.start)).into()),

@@ -1,10 +1,10 @@
 //! The playlists screen's wording (iptv-rs's own).
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
-use crate::runtime::model::ImportErrorKind;
 use iptv_presentation::wizard::{FailureKind, ImportFailure};
 use iptv_providers::model::SourceKind;
+use iptv_runtime::model::ImportErrorKind;
 
 use super::details::{Form, Param};
 use super::state::{Act, Notice};
@@ -316,7 +316,7 @@ pub fn delete_consequences(p: &Playlist, next: Option<&str>, has_other_playlists
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::model::SourceId;
+    use iptv_runtime::model::SourceId;
 
     use super::*;
 
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn rows_and_refresh_failures_follow_the_language() {
-        use crate::chrome::i18n::in_language;
+        use crate::kit::i18n::in_language;
         let mut p = playlist();
         p.kind = SourceKind::M3u;
         p.channels = 3;
@@ -623,7 +623,7 @@ mod tests {
     /// in its own words.
     #[test]
     fn every_refresh_failure_is_told_in_every_language() {
-        use crate::chrome::i18n::in_language;
+        use crate::kit::i18n::in_language;
         use ImportErrorKind as K;
         let stored = [
             K::Network,

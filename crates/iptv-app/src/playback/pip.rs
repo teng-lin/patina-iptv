@@ -93,7 +93,7 @@ pub fn can_enter(ui: Ui) -> bool {
 /// The desktops: their window can (Android's host reports its own), and
 /// closes when nothing plays any more or multiview opens.
 pub fn bind(ui: Ui) {
-    if !crate::chrome::desktop::DESKTOP {
+    if !crate::host::DESKTOP {
         // Android reports through its persistent player. Other hosts have no
         // native PiP implementation to acknowledge availability later.
         if !crate::host::ANDROID {
@@ -125,7 +125,7 @@ pub fn bind(ui: Ui) {
 /// desktops, opens the app's own).
 pub fn enter(ui: Ui) {
     if ui.cast.remote.get_untracked() {
-        crate::chrome::toast::notify(crate::chrome::i18n::tr(
+        crate::kit::toast::notify(crate::kit::i18n::tr(
             "Stop casting to open picture in picture.",
         ));
         return;
@@ -139,12 +139,12 @@ pub fn enter(ui: Ui) {
             .pip
             .with_untracked(|p| iptv_presentation::capabilities::pip(p, playing).reason())
         {
-            crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
+            crate::kit::toast::notify(crate::wiring::capabilities::reason(reason));
         }
         return;
     }
     log::info!("iptv pip: asked to enter");
-    if crate::chrome::desktop::DESKTOP {
+    if crate::host::DESKTOP {
         report(ui, true);
     }
 }
@@ -164,7 +164,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
             if how == Exit::Close {
                 ui.chrome
                     .mode
-                    .apply(crate::chrome::mode::Action::ReturnToBrowse);
+                    .apply(crate::kit::mode::Action::ReturnToBrowse);
             }
         });
         return true;
@@ -172,10 +172,8 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
     report(ui, false);
     match how {
         Exit::BackToApp => {
-            ui.chrome
-                .mode
-                .apply(crate::chrome::mode::Action::PipBackToApp);
-            crate::chrome::desktop::focus_main();
+            ui.chrome.mode.apply(crate::kit::mode::Action::PipBackToApp);
+            crate::wiring::navigation::focus_main();
         }
         Exit::Close => crate::playback::player_keys::stop_playback(ui),
     }
@@ -248,8 +246,8 @@ fn entered(ui: Ui) {
     ui.playback
         .play_bar
         .update(iptv_presentation::play_bar::PlayBar::hide);
-    crate::chrome::chooser::close(ui);
-    crate::chrome::menu_view::close(ui);
+    crate::wiring::navigation::close_chooser(ui);
+    crate::wiring::navigation::close_menu(ui);
     if ui.playback.channels.with_untracked(Option::is_some) {
         crate::screens::channels_view::close(ui.playback);
     }

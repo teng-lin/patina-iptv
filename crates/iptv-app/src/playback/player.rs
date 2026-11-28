@@ -20,7 +20,7 @@
 //! that kept one `last_channel` file, still read when a playlist has none.
 //! It moves to the store's history once the store keeps one for playback.
 
-use crate::chrome::i18n::key;
+use crate::kit::i18n::key;
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -39,14 +39,14 @@ use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
 use crate::guide::{ProgramSelection, Schedule};
-use crate::runtime::Runtime;
-use crate::runtime::model::{ImportErrorKind, ResolveFailure, StreamPurpose};
 use crate::wiring::runtime_owner::runtime;
 use crate::{
     Playback, Ui, ViewMode, guide::lists, playback::browse_playback, playback::external_player,
     screens::parental_view,
 };
 use crate::{playback::seek, screens::recordings_view};
+use iptv_runtime::Runtime;
+use iptv_runtime::model::{ImportErrorKind, ResolveFailure, StreamPurpose};
 
 mod recover;
 pub(crate) mod resume;
@@ -78,7 +78,7 @@ impl Ui {
             ProgramSelection::AlreadyLive => {
                 self.chrome
                     .mode
-                    .apply(crate::chrome::mode::Action::EnterFullscreen);
+                    .apply(crate::kit::mode::Action::EnterFullscreen);
                 self.show_playing();
             }
             ProgramSelection::Live => browse_playback::select(*self),
@@ -107,7 +107,7 @@ impl Ui {
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
         if self.cast.busy.get_untracked() {
-            crate::chrome::toast::notify(crate::chrome::i18n::tr(
+            crate::kit::toast::notify(crate::kit::i18n::tr(
                 "Wait for the current cast request to finish.",
             ));
             return;
@@ -336,7 +336,7 @@ fn later(playback: crate::PlaybackUi, delay: Duration, f: impl FnOnce() + 'stati
 /// start for catch-up: date placeholders describe that instant).
 fn clock(at: Option<i64>) -> Clock {
     let now = crate::guide::clock::wall_unix();
-    crate::runtime::time::playback_clock(now, at)
+    iptv_runtime::time::playback_clock(now, at)
 }
 
 /// Identity and UTC survive a catalog reorder or a different guide epoch.
@@ -490,13 +490,11 @@ pub fn allow_guide_channel(channel: usize) -> bool {
     match crate::wiring::runtime_owner::schedule().channel_block(channel) {
         Block::None => true,
         Block::Channel => {
-            crate::chrome::toast::notify(crate::chrome::i18n::tr(
-                "Unblock this channel to play it.",
-            ));
+            crate::kit::toast::notify(crate::kit::i18n::tr("Unblock this channel to play it."));
             false
         }
         Block::Group => {
-            crate::chrome::toast::notify(crate::chrome::i18n::tr(
+            crate::kit::toast::notify(crate::kit::i18n::tr(
                 "Unblock the group to play this channel.",
             ));
             false
@@ -512,7 +510,7 @@ pub(crate) fn enforce_guide_blocks(ui: Ui, schedule: &dyn Schedule) {
         stop_surface(ui, 0);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
     }
     let mut stopped = false;
     for surface in 0..SURFACES {
@@ -654,7 +652,7 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
     load(ui, 0, session, source);
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::EnterFullscreen);
+        .apply(crate::kit::mode::Action::EnterFullscreen);
 }
 
 /// Plays a movie or an episode on surface 0: full screen, or (`full_screen`
@@ -694,7 +692,7 @@ pub fn play_vod(ui: Ui, playing: iptv_core::vod::Playing, source: PlaySource, fu
     if full_screen {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::EnterFullscreen);
+            .apply(crate::kit::mode::Action::EnterFullscreen);
     }
 }
 
@@ -734,7 +732,7 @@ pub(crate) fn reauthorize(ui: Ui, surface: usize, allowed: bool) {
     let stream = ui.playback.player.stream(surface);
     if !allowed {
         stop_surface(ui, surface);
-        crate::chrome::toast::notify(crate::chrome::i18n::tr(
+        crate::kit::toast::notify(crate::kit::i18n::tr(
             "Provider connection reserved for recording",
         ));
         return;
@@ -814,7 +812,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
                     0,
                     session,
                     ErrorKind::Http(429),
-                    crate::chrome::i18n::tr("Provider connection reserved for recording").into(),
+                    crate::kit::i18n::tr("Provider connection reserved for recording").into(),
                 ),
                 Err(_) => {
                     let allowed = ui.playback.player.vod.with_untracked(|p| {
@@ -831,7 +829,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
                             0,
                             session,
                             ErrorKind::Resolve,
-                            crate::chrome::i18n::tr("On-demand playback unavailable").into(),
+                            crate::kit::i18n::tr("On-demand playback unavailable").into(),
                         );
                     } else {
                         stop_surface(ui, 0);
@@ -922,7 +920,7 @@ fn open_early_resume(ui: Ui, surface: usize, session: u64) {
         let owner = crate::wiring::runtime_owner::runtime();
         let source = iptv_library::SourceId(early.source_id);
         let channel = iptv_providers::ContentId::from_stored(early.key.clone());
-        let allowed = crate::runtime::commands::channel(&owner, source, channel)
+        let allowed = iptv_runtime::commands::channel(&owner, source, channel)
             .await
             .is_ok_and(|row| row.is_some_and(|r| !r.blocked));
         if ui
@@ -947,7 +945,7 @@ fn open_early_resume(ui: Ui, surface: usize, session: u64) {
                 0,
                 session,
                 ErrorKind::Http(429),
-                crate::chrome::i18n::tr("Provider connection reserved for recording").into(),
+                crate::kit::i18n::tr("Provider connection reserved for recording").into(),
             );
         }
     });
@@ -973,7 +971,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
             surface,
             session,
             ErrorKind::Http(429),
-            crate::chrome::i18n::tr("Provider connection reserved for recording").into(),
+            crate::kit::i18n::tr("Provider connection reserved for recording").into(),
         );
         return;
     }
@@ -1025,7 +1023,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                         surface,
                         session,
                         ErrorKind::Unavailable,
-                        crate::chrome::i18n::tr("Program guide could not be loaded").into(),
+                        crate::kit::i18n::tr("Program guide could not be loaded").into(),
                     );
                 }
             },
@@ -1121,7 +1119,7 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
 
 /// Local admission uses the same retryable refusal as a connection held by
 /// recording in open_allowed(). The channel resolved; its address is present.
-fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &crate::runtime::Error) -> bool {
+fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &iptv_runtime::Error) -> bool {
     if !error.provider_capacity() {
         return false;
     }
@@ -1130,7 +1128,7 @@ fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &crate::runtime::E
         surface,
         session,
         ErrorKind::Http(429),
-        crate::chrome::i18n::tr("No provider connection available; check Streams at once").into(),
+        crate::kit::i18n::tr("No provider connection available; check Streams at once").into(),
     );
     true
 }
@@ -1200,7 +1198,7 @@ fn load_authorized(
                 surface,
                 session,
                 ErrorKind::Unavailable,
-                crate::chrome::i18n::tr("Channel unavailable").into(),
+                crate::kit::i18n::tr("Channel unavailable").into(),
             );
             return;
         };
@@ -1215,7 +1213,7 @@ fn load_authorized(
                             surface,
                             session,
                             ErrorKind::Unavailable,
-                            crate::chrome::i18n::tr("Channel unavailable").into(),
+                            crate::kit::i18n::tr("Channel unavailable").into(),
                         );
                     }
                 }
@@ -1294,7 +1292,7 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
         .health
         .with_untracked(|h| (h.live(), h.reconnecting()));
     if surface == 0 {
-        crate::chrome::startup::mark("player opened");
+        crate::kit::startup::mark("player opened");
     }
     log::info!(
         "iptv player {surface} open: session {session}, {} header(s){}",
@@ -1341,22 +1339,19 @@ fn cancel_resolve(surface: usize) {
 
 fn resolve_failure(failure: ResolveFailure) -> (ErrorKind, String) {
     match failure {
-        ResolveFailure::Network => (
-            ErrorKind::Network,
-            crate::chrome::i18n::tr("Network").into(),
-        ),
+        ResolveFailure::Network => (ErrorKind::Network, crate::kit::i18n::tr("Network").into()),
         ResolveFailure::TimedOut => (
             ErrorKind::Network,
-            crate::chrome::i18n::tr("The request timed out").into(),
+            crate::kit::i18n::tr("The request timed out").into(),
         ),
         ResolveFailure::Portal(ImportErrorKind::AuthFailed) => (
             ErrorKind::Account,
-            crate::chrome::i18n::tr("Portal authentication unavailable").into(),
+            crate::kit::i18n::tr("Portal authentication unavailable").into(),
         ),
-        ResolveFailure::Portal(_) => (ErrorKind::Resolve, crate::chrome::i18n::tr("Portal").into()),
+        ResolveFailure::Portal(_) => (ErrorKind::Resolve, crate::kit::i18n::tr("Portal").into()),
         ResolveFailure::Unavailable | ResolveFailure::Cancelled => (
             ErrorKind::Unavailable,
-            crate::chrome::i18n::tr("Channel unavailable").into(),
+            crate::kit::i18n::tr("Channel unavailable").into(),
         ),
     }
 }
@@ -1442,16 +1437,16 @@ fn show_channel(ui: Ui, channel: usize) {
 
 /// Playlist `source` was deleted: its last channel goes too (after any
 /// write still queued for it).
-pub fn forget_source(source: crate::runtime::model::SourceId) {
+pub fn forget_source(source: iptv_runtime::model::SourceId) {
     crate::wiring::runtime_owner::runtime().forget_last_channel(source);
 }
 /// The last channel of playlist `source` (the shared one of older builds
 /// for none), a write still queued included.
-fn load_last_channel(source: Option<crate::runtime::model::SourceId>) -> Option<String> {
+fn load_last_channel(source: Option<iptv_runtime::model::SourceId>) -> Option<String> {
     crate::wiring::runtime_owner::runtime().load_last_channel(source)
 }
 /// Queues the write: a zap never waits for the disk.
-fn save_last_channel(source: Option<crate::runtime::model::SourceId>, key: &str) {
+fn save_last_channel(source: Option<iptv_runtime::model::SourceId>, key: &str) {
     crate::wiring::runtime_owner::runtime().save_last_channel(source, key);
 }
 
@@ -1459,7 +1454,7 @@ fn save_last_channel(source: Option<crate::runtime::model::SourceId>, key: &str)
 /// channel history belong to the old one (channel keys are unique only
 /// within a playlist, so the new one may reuse the playing key).
 pub fn source_changed(ui: Ui) {
-    crate::chrome::desktop::player_windows::close_all(ui);
+    crate::playback::player_windows::close_all(ui);
     crate::playback::multiview::close(ui);
     if ui.playback.playing.get_untracked().is_some() {
         log::info!("iptv player: another playlist is shown; stopping");
@@ -1467,7 +1462,7 @@ pub fn source_changed(ui: Ui) {
         stop(ui);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
     }
     ui.playback.player.main().key.set(None);
     ui.playback.player.history.set(ChannelHistory::default());
@@ -1554,7 +1549,7 @@ fn gone(ui: Ui) {
     stop(ui);
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::ReturnToBrowse);
+        .apply(crate::kit::mode::Action::ReturnToBrowse);
 }
 
 /// The replacement guide has fewer rows than the playing
@@ -1602,7 +1597,7 @@ pub fn source_ready(ui: Ui, refresh: bool) {
         return;
     }
     log::info!("iptv player: resuming the last channel");
-    crate::chrome::startup::mark("last channel resolved");
+    crate::kit::startup::mark("last channel resolved");
     // The guide's list follows only playback the parental lock admitted
     // (at once, or after its PIN): a canceled PIN leaves the guide as it
     // was.
@@ -1614,7 +1609,7 @@ pub fn source_ready(ui: Ui, refresh: bool) {
         crate::guide::lists::show_resumed(ui, channel);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::EnterFullscreen);
+            .apply(crate::kit::mode::Action::EnterFullscreen);
         ui.show_playing();
     });
 }

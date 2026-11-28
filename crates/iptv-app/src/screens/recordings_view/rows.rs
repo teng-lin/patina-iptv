@@ -1,6 +1,6 @@
 //! Primary row actions, inline management and a separate destructive confirmation.
 use super::*;
-use crate::chrome::ui_kit::icons::{self, Icon};
+use crate::kit::ui_kit::icons::{self, Icon};
 
 fn control(
     ui: Ui,
@@ -203,7 +203,7 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                                     move || {
                                         let name =
                                             job().map(|j| j.request.title).unwrap_or_default();
-                                        crate::chrome::i18n::trf(
+                                        crate::kit::i18n::trf(
                                             "More options for {name}",
                                             &[("name", name.as_str().into())],
                                         )
@@ -261,7 +261,7 @@ pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
     when(
         move || ui.screens.recordings.with(|s| s.confirm_delete),
         move || {
-            let (outer, card) = crate::chrome::ui_kit::entry::frame(ui, size);
+            let (outer, card) = crate::kit::ui_kit::entry::frame(ui, size);
             outer.test_id("recording-delete-confirmation").child(
                 card.child(ui_kit::title(
                     size,

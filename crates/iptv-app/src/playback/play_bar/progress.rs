@@ -1,7 +1,7 @@
 //! The play bar's interactive timeline (`line`) with start/end times for
 //! catch-up and on-demand playback (press or drag seeks, `seek.rs`).
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{TouchEvent, TouchPhase};

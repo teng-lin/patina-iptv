@@ -18,7 +18,7 @@
 //! (a tile watched full screen) its Multiview button goes back to the
 //! grid.
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 
 mod info;
 mod progress;
@@ -36,7 +36,7 @@ use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{Checked, TouchEvent};
 
-use crate::chrome::ui_kit::icons::{self, Icon};
+use crate::kit::ui_kit::icons::{self, Icon};
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_DISABLED_ALPHA};
 use crate::{Playback, Ui, ViewMode, tint};
 
@@ -44,7 +44,7 @@ const WHITE: u32 = 0xFFFFFF;
 const PANEL_ALPHA: u8 = 0xE0;
 /// Volume and window full screen are the app's on the desktop only
 /// (Linux and macOS; Android keeps the system volume).
-const DESKTOP: bool = crate::chrome::desktop::DESKTOP;
+const DESKTOP: bool = crate::host::DESKTOP;
 
 /// Whether the device has a pointer for the bar: anything but a TV (its
 /// remote has the panels) and a terminal.
@@ -61,7 +61,7 @@ pub fn pointer_available() -> bool {
 fn target() -> f32 {
     if idiom() == Idiom::Desktop {
         34.0
-    } else if crate::chrome::scale::phone() {
+    } else if crate::kit::scale::phone() {
         44.0
     } else {
         48.0
@@ -79,14 +79,14 @@ fn show_timeline(ui: crate::PlaybackUi) -> bool {
 /// window's full screen): a desktop build, not a TV, and not a headless
 /// phone (whose device has neither).
 fn desktop_controls() -> bool {
-    DESKTOP && idiom() != Idiom::Tv && !crate::chrome::scale::phone()
+    DESKTOP && idiom() != Idiom::Tv && !crate::kit::scale::phone()
 }
 
 /// Keep enough room for the centered transport in tight windows.
 fn bar_margin() -> f32 {
     let safe = safe_area();
     safe.left.0.max(safe.right.0)
-        + if crate::chrome::scale::phone() || window().width.0 < 360.0 {
+        + if crate::kit::scale::phone() || window().width.0 < 360.0 {
             PHONE_BAR_MARGIN
         } else {
             BAR_MARGIN
@@ -256,8 +256,8 @@ pub fn layer(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
                     ui.overlay_open(|overlay| {
                         !matches!(
                             overlay,
-                            crate::chrome::overlays::Overlay::Chooser
-                                | crate::chrome::overlays::Overlay::Description
+                            crate::kit::overlay::Overlay::Chooser
+                                | crate::kit::overlay::Overlay::Description
                         )
                     })
                 })
@@ -289,7 +289,7 @@ fn back(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
         // Only the button takes presses: around it they reach the video.
         .pointer_events(PointerEvents::BoxNone)
         .child(
-            crate::chrome::ui_kit::round_back(
+            crate::kit::ui_kit::round_back(
                 side,
                 0.0,
                 back_bg(ui),
@@ -528,7 +528,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
 /// tablet's or back (a foldable phone, unfolded): its buttons' side and
 /// margins are read as it is made.
 fn bar(ui: Ui) -> impl IntoElement {
-    when(crate::chrome::scale::phone, move || bar_now(ui)).otherwise(move || bar_now(ui))
+    when(crate::kit::scale::phone, move || bar_now(ui)).otherwise(move || bar_now(ui))
 }
 
 fn bar_now(ui: Ui) -> impl IntoElement {
@@ -625,7 +625,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
             expanded: (control == Control::More).then(|| {
                 ui.screens.chooser.with(|c| {
                     c.as_ref()
-                        .is_some_and(|c| c.kind == crate::chrome::chooser::Kind::More)
+                        .is_some_and(|c| c.kind == crate::wiring::navigation::ChooserKind::More)
                 })
             }),
             pressed: match control {
@@ -707,28 +707,28 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
 
 fn control_label(control: Control) -> &'static str {
     match control {
-        Control::Mute => crate::chrome::i18n::key("Mute"),
-        Control::Listen => crate::chrome::i18n::key("Listen to this"),
-        Control::More => crate::chrome::i18n::key("More options"),
-        Control::Volume => crate::chrome::i18n::key("Volume"),
-        Control::PreviousChannel => crate::chrome::i18n::key("Previous channel"),
-        Control::Rewind => crate::chrome::i18n::key("Rewind"),
-        Control::PlayPause => crate::chrome::i18n::key("Play or pause"),
-        Control::Forward => crate::chrome::i18n::key("Fast-forward"),
-        Control::NextChannel => crate::chrome::i18n::key("Next channel"),
-        Control::Record => crate::chrome::i18n::key("Record"),
-        Control::Favorite => crate::chrome::i18n::key("Favorite"),
-        Control::Tracks => crate::chrome::i18n::key("Subtitles and tracks"),
-        Control::Details => crate::chrome::i18n::key("Program details"),
-        Control::Picture => crate::chrome::i18n::key("Display"),
-        Control::Channels => crate::chrome::i18n::key("Channel list"),
-        Control::Multiview => crate::chrome::i18n::key("Multiview"),
-        Control::Cast => crate::chrome::i18n::key("Cast to TV"),
-        Control::Pip => crate::chrome::i18n::key("Picture in picture"),
-        Control::Guide => crate::chrome::i18n::key("TV guide"),
-        Control::Search => crate::chrome::i18n::key("Search"),
-        Control::Fullscreen => crate::chrome::i18n::key("Full screen"),
-        Control::Timeline => crate::chrome::i18n::key("Playback position"),
+        Control::Mute => crate::kit::i18n::key("Mute"),
+        Control::Listen => crate::kit::i18n::key("Listen to this"),
+        Control::More => crate::kit::i18n::key("More options"),
+        Control::Volume => crate::kit::i18n::key("Volume"),
+        Control::PreviousChannel => crate::kit::i18n::key("Previous channel"),
+        Control::Rewind => crate::kit::i18n::key("Rewind"),
+        Control::PlayPause => crate::kit::i18n::key("Play or pause"),
+        Control::Forward => crate::kit::i18n::key("Fast-forward"),
+        Control::NextChannel => crate::kit::i18n::key("Next channel"),
+        Control::Record => crate::kit::i18n::key("Record"),
+        Control::Favorite => crate::kit::i18n::key("Favorite"),
+        Control::Tracks => crate::kit::i18n::key("Subtitles and tracks"),
+        Control::Details => crate::kit::i18n::key("Program details"),
+        Control::Picture => crate::kit::i18n::key("Display"),
+        Control::Channels => crate::kit::i18n::key("Channel list"),
+        Control::Multiview => crate::kit::i18n::key("Multiview"),
+        Control::Cast => crate::kit::i18n::key("Cast to TV"),
+        Control::Pip => crate::kit::i18n::key("Picture in picture"),
+        Control::Guide => crate::kit::i18n::key("TV guide"),
+        Control::Search => crate::kit::i18n::key("Search"),
+        Control::Fullscreen => crate::kit::i18n::key("Full screen"),
+        Control::Timeline => crate::kit::i18n::key("Playback position"),
     }
 }
 fn control_id(control: Control) -> &'static str {
@@ -833,12 +833,14 @@ pub(crate) fn activate(
             && let Some(reason) =
                 untracked(|| crate::playback::multiview::availability(ui)).reason()
         {
-            crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
+            crate::kit::toast::notify(crate::wiring::capabilities::reason(reason));
         }
         return;
     }
     log::info!("iptv play bar: {}", control_label(control));
-    use crate::chrome::chooser::{self, Kind};
+    use crate::wiring::navigation::{
+        ChooserKind as Kind, close_chooser, open_chooser, open_more_chooser,
+    };
     // Keep the current reading or selection position when the user adjusts
     // playback beneath a popup. Opening another surface replaces that popup.
     if matches!(
@@ -855,7 +857,7 @@ pub(crate) fn activate(
             | Control::Volume
     ) {
         if ui.screens.description.with_untracked(Option::is_some) {
-            crate::chrome::menu_view::close(ui);
+            crate::wiring::navigation::close_menu(ui);
             if control == Control::Details {
                 return;
             }
@@ -865,7 +867,7 @@ pub(crate) fn activate(
             .chooser
             .with_untracked(|c| c.as_ref().map(|c| c.kind))
         {
-            chooser::close(ui);
+            close_chooser(ui);
             if matches!(
                 (control, kind),
                 (Control::More, Kind::More)
@@ -878,7 +880,7 @@ pub(crate) fn activate(
     }
     match control {
         Control::Mute => crate::playback::media::toggle_mute(ui),
-        Control::More => chooser::open_more(
+        Control::More => open_more_chooser(
             ui.screens,
             layout(ui)
                 .more
@@ -888,7 +890,7 @@ pub(crate) fn activate(
             target_window,
         ),
         Control::Listen => crate::wiring::listen::listen(ui),
-        Control::Volume => chooser::open(ui, Kind::Volume),
+        Control::Volume => open_chooser(ui, Kind::Volume),
         Control::PreviousChannel => {
             crate::playback::touch_zap::zap(ui, iptv_presentation::touch_zap::Direction::Previous)
         }
@@ -915,11 +917,11 @@ pub(crate) fn activate(
         }
         Control::Tracks => {
             if let Some(kind) = untracked(|| tracks(ui)) {
-                chooser::open(ui, Kind::Track(kind));
+                open_chooser(ui, Kind::Track(kind));
             }
         }
         Control::Details => details(ui),
-        Control::Picture => chooser::open(ui, Kind::Picture),
+        Control::Picture => open_chooser(ui, Kind::Picture),
         Control::Channels => {
             crate::screens::channels_view::open(ui, ListMode::Overlay);
             ui.playback.play_bar.update(PlayBar::hide);

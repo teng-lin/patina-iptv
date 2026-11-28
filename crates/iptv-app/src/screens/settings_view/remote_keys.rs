@@ -1,7 +1,7 @@
 //! The remote's keys and actions by name, for the bindings editor
 //! (`remote_editor.rs`).
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use iptv_nav::{Action, Context, RemoteKey};
 use iptv_presentation::capabilities::Keys;
@@ -131,7 +131,7 @@ pub(crate) fn key_name(key: RemoteKey) -> String {
         RemoteKey::Search => tr("/ or Ctrl+F"),
         _ => "",
     };
-    if crate::chrome::input::keys_now() != Some(Keys::Keyboard) || keyboard.is_empty() {
+    if crate::kit::input::keys_now() != Some(Keys::Keyboard) || keyboard.is_empty() {
         name.to_owned()
     } else {
         trf(
@@ -207,7 +207,7 @@ pub(crate) fn action_name(action: Action) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chrome::i18n::in_language;
+    use crate::kit::i18n::in_language;
 
     const ACTIONS: [Action; 42] = [
         Action::MoveUp,

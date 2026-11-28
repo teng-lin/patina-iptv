@@ -555,7 +555,7 @@ fn follow(ui: Ui, outcome: Outcome) {
         {
             ui.chrome
                 .mode
-                .apply(crate::chrome::mode::Action::EnterFullscreen);
+                .apply(crate::kit::mode::Action::EnterFullscreen);
             ui.show_playing();
         }
         Outcome::Open(item) => open(ui, item),

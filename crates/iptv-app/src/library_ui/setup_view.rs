@@ -3,12 +3,12 @@
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::chrome::fonts::{LIBRARY_TITLE, MEDIUM, SANS};
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::{self, FocusScroll};
+use crate::kit::fonts::{LIBRARY_TITLE, MEDIUM, SANS};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::{self, FocusScroll};
 use crate::theme::{BRIGHT_TEXT, RADIUS_LARGE};
 
-pub(crate) use crate::chrome::ui_kit::primary_button as primary;
+pub(crate) use crate::kit::ui_kit::primary_button as primary;
 
 const PANEL_WIDTH: f32 = 1120.0;
 const MIN_SPLIT_WIDTH: f32 = 740.0;
@@ -46,8 +46,7 @@ pub(crate) fn frame(
                         .gap(move || size.px(12.0))
                         .py(move || size.px(22.0))
                         .child(
-                            ui_kit::title(size, crate::chrome::startup_view::APP_NAME)
-                                .font_weight(MEDIUM),
+                            ui_kit::title(size, crate::kit::ui_kit::APP_NAME).font_weight(MEDIUM),
                         )
                         .child(ui_kit::body(size, section)),
                 )

@@ -1,7 +1,7 @@
 //! The player's words: waiting and failures (short, no addresses), the
 //! action cards' labels and the keys' hints over the video.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use iptv_core::playback::{Cause, ErrorKind};
 use iptv_nav::Profile;

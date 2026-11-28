@@ -230,7 +230,7 @@ One press through the layers, OK on a program that ended an hour ago:
 
 | Layer | The question | Answered by |
 | --- | --- | --- |
-| View | Which key did the platform send? | `iptv-app/src/chrome/input.rs`: `RemoteKey::Ok`, down then up |
+| View | Which key did the platform send? | `iptv-app/src/shell/input.rs`: `RemoteKey::Ok`, down then up |
 | Presentation state | What did the viewer ask for? | `iptv-nav`: a short press in `Context::Guide` is `Action::Select` |
 | View | Which feature is on top? | `input.rs` routes the action to the guide |
 | Domain | Can this program be replayed? | `Program::can_replay`, from its start, now and the channel's archive days |
@@ -443,7 +443,7 @@ The runtime owns durable data and operations. The front ends hold their
 feature state in `iptv-presentation` holders. Views render that state and
 send actions.
 
-1. **Input.** NSH reports a keystroke. `iptv-app/src/chrome/input.rs` turns it into an
+1. **Input.** NSH reports a keystroke. `iptv-app/src/shell/input.rs` turns it into an
    `iptv_nav::RemoteKey` with a phase, a `PressDetector` decides short or long,
    and `Keymap::resolve` maps it to an `Action` for the current `Context`
    (guide, full screen, a menu, an editor).

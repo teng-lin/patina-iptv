@@ -1,15 +1,15 @@
 //! Batch guide repair inside the existing guide inspection workflow.
-use crate::runtime::model::InspectionControl;
 use crate::{
     Ui,
-    chrome::i18n::tr,
-    chrome::scale::Scale,
-    chrome::ui_kit,
-    guide::list_rows::{self, Mark, ROW_TWO},
+    kit::i18n::tr,
+    kit::list_rows::{self, Mark, ROW_TWO},
+    kit::scale::Scale,
+    kit::ui_kit,
 };
 use iptv_library::{Choice, SourceId, guide_repair as model, inspection::*};
 use iptv_nav::Action;
 use iptv_presentation::library::guide_repair_screen::{Reply, Row, Screen};
+use iptv_runtime::model::InspectionControl;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 use std::time::Duration;
@@ -114,7 +114,7 @@ fn dismiss_inspection_input(screens: crate::ScreensUi) {
             s.typing = false;
         }
     });
-    crate::chrome::input::dismiss_keyboard();
+    crate::kit::input::dismiss_keyboard();
 }
 pub fn reopen(screens: crate::ScreensUi) {
     dismiss_inspection_input(screens);
@@ -151,7 +151,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         let info = match result {
             Ok(info) => info,
             Err(_) => {
-                crate::chrome::toast::notify(tr("Guide changes could not be saved"));
+                crate::kit::toast::notify(tr("Guide changes could not be saved"));
                 return;
             }
         };
@@ -162,7 +162,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         })
         .unwrap_or(false)
         {
-            crate::chrome::toast::notify(tr("Finish the current guide changes first"));
+            crate::kit::toast::notify(tr("Finish the current guide changes first"));
             return;
         }
         if state(ui.screens, |s| {
@@ -637,8 +637,8 @@ fn feeds(ui: Ui, size: Scale) -> impl IntoElement {
                         }))
                 },
             )
-            .estimated_item_size(crate::guide::list_rows::pitch(size, ROW_TWO))
-            .h(move || px(crate::guide::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
+            .estimated_item_size(crate::kit::list_rows::pitch(size, ROW_TWO))
+            .h(move || px(crate::kit::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
         },
     )
 }
@@ -689,8 +689,8 @@ fn indirect(ui: Ui, size: Scale) -> impl IntoElement {
                         }))
                 },
             )
-            .estimated_item_size(crate::guide::list_rows::pitch(size, ROW_TWO))
-            .h(move || px(crate::guide::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
+            .estimated_item_size(crate::kit::list_rows::pitch(size, ROW_TWO))
+            .h(move || px(crate::kit::list_rows::pitch(size, ROW_TWO)().0 * 2.0))
         },
     )
 }
@@ -781,7 +781,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             let screen = ui_kit::screen(ui, size)
                 .test_id("guide-repair-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlays::Overlay::GuideRepair.accessibility_covered(ui)
+                    crate::kit::overlay::Overlay::GuideRepair.accessibility_covered(ui)
                 })
                 .child(ui_kit::header(
                     ui,

@@ -3,7 +3,7 @@
 The rules shared with touch and desktop (choosing, returning, layout changes)
 are in the [interaction contract](interaction.md). This page is the remote's
 key table: what each key does on each surface, a tap and a hold. It describes
-the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/chrome/input.rs`,
+the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/shell/input.rs`,
 `player_keys.rs`, `play_bar.rs`); a viewer can rebind keys in Settings → Remote
 control (`remote_editor.rs`), which this table does not cover.
 

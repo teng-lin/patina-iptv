@@ -98,7 +98,7 @@ mod identity_tests {
     #[test]
     fn multiview_and_normal_selection_resolve_the_same_incarnation_qualified_identity() {
         let directory = tempfile::tempdir().unwrap();
-        let owner = crate::runtime::Runtime::new(crate::runtime::Ports::new(
+        let owner = iptv_runtime::Runtime::new(iptv_runtime::Ports::new(
             directory.path().to_path_buf(),
             |_| panic!("synthetic search identity lookup must not open a database"),
         ));
