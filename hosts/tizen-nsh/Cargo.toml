@@ -12,7 +12,7 @@ resolver = "3"
 [package]
 name = "patina-tizen"
 description = "Patina's NSH interface on Samsung Tizen TVs: iptv-app linked into nsh-platform-tizen's module."
-version = "0.1.13"
+version = "0.1.14"
 edition = "2024"
 license = "AGPL-3.0-only"
 publish = false
