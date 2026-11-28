@@ -14,7 +14,6 @@ pub(crate) mod menu_view;
 pub(crate) mod mode;
 pub(crate) mod overlay;
 pub(crate) mod overlays;
-pub(crate) mod rail;
 pub(crate) mod remote_editor;
 pub(crate) mod scale;
 pub mod startup;

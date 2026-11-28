@@ -16,8 +16,6 @@ use nsh_core::element::desktop::{MenuItem, WindowRef, current_window, set_applic
 use crate::Ui;
 
 mod display_bounds;
-pub mod pip_window;
-pub mod player_windows;
 pub(crate) mod quit_confirm;
 /// The desktop backends, where the app owns the window and the sound:
 /// Linux, macOS and Windows.
@@ -75,7 +73,7 @@ pub fn bind(ui: Ui) {
             // playing, so choosing the same channel after reopening plays it.
             crate::screens::parental_view::hidden(ui);
             crate::playback::pip::exit(ui, iptv_presentation::pip_window::Exit::Close);
-            player_windows::close_all(ui);
+            crate::playback::player_windows::close_all(ui);
             crate::playback::player_keys::stop_playback(ui);
             // Nothing autoplays in the hidden window, nor on showing again.
             crate::playback::browse_playback::hold(ui);

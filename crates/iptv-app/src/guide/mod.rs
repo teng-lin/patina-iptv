@@ -10,6 +10,7 @@ pub(crate) mod list_rows;
 pub(crate) mod listing_labels;
 pub(crate) mod lists;
 pub(crate) mod numbers;
+pub(crate) mod rail;
 
 pub use iptv_core::guide::{
     Airing, CHANNELS, DAY, GROUPS, GroupName, HISTORY, HORIZON, HOUR, Listing, Program,

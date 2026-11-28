@@ -89,16 +89,22 @@ pub(crate) fn reorder_playlists(ui: Ui) {
 
 // Shell dispatch entry points exposed to feature trees without naming `shell/`.
 pub(crate) use crate::chrome::chooser::{
-    Kind as ChooserKind, close as close_chooser, open as open_chooser,
+    Kind as ChooserKind, close as close_chooser, layer as chooser_layer, open as open_chooser,
     open_more as open_more_chooser, picture_identity, picture_name,
     show_receivers as show_cast_receivers,
 };
-pub(crate) use crate::chrome::desktop::{close_after_shutdown, focus_main};
-pub(crate) use crate::chrome::input::context as input_context;
+pub(crate) use crate::chrome::desktop::{
+    close_after_shutdown, focus_main, keep_reachable as keep_window_reachable, pointer_entered,
+    pointer_forget, with_window,
+};
+pub(crate) use crate::chrome::input::{
+    bind as bind_input, context as input_context, window as input_window,
+};
 pub(crate) use crate::chrome::menu_view::{
     close as close_menu, empty_group_settings_available, group_order_label, has_group_options,
-    offer_external_player_reset, open as open_menu, open_at as open_menu_at,
+    layer as menu_layer, offer_external_player_reset, open as open_menu, open_at as open_menu_at,
     open_channel as open_channel_menu, open_empty_group_settings, open_group_options,
     open_playlist_options, open_playlist_order, open_timeline_context, perform as perform_menu,
 };
 pub(crate) use crate::chrome::remote_editor::{media_toggle_override, open as open_remote_editor};
+pub(crate) use crate::{pointer_moved, toggle_panels};

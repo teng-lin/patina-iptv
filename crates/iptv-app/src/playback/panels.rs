@@ -97,7 +97,7 @@ pub fn backdrop(ui: Ui) -> impl IntoElement {
         }));
     }
     let rail_width = move || {
-        let width = crate::chrome::rail::width(ui.guide);
+        let width = crate::guide::rail::width(ui.guide);
         if video_under_page && clear() {
             let w = window();
             let top = safe_area().top.0 + header_now().0;

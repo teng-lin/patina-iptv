@@ -88,7 +88,7 @@ fn attributes(w: f32, h: f32) -> WindowAttributes {
 
 /// The bottom right corner of the main window's display.
 fn corner(w: f32, h: f32) -> Option<WindowPosition> {
-    let state = super::with_window(|m| m.state()).flatten()?;
+    let state = crate::wiring::navigation::with_window(|m| m.state()).flatten()?;
     let area = display(state.display?)?.visible_bounds;
     let x = area.origin.x.0 + area.size.width.0 - w - MARGIN;
     let y = area.origin.y.0 + area.size.height.0 - h - MARGIN;
@@ -113,7 +113,7 @@ fn closed(ui: Ui, cause: WindowCloseCause) {
 }
 
 fn content(ui: Ui) -> impl IntoElement {
-    super::keep_reachable(nsh_core::element::desktop::current_window());
+    crate::wiring::navigation::keep_window_reachable(nsh_core::element::desktop::current_window());
     view()
         .test_id("primary-pip")
         .flex_1()

@@ -24,9 +24,9 @@ mod wiring;
 
 use chrome::{
     chooser, desktop, exit_confirmation, fonts, i18n, input, keyboard, menu_view, mode, overlays,
-    rail, remote_editor, startup_view, toast, ui_kit,
+    remote_editor, startup_view, toast, ui_kit,
 };
-use guide::{fav_editor, favorites, grid, guide_clock, header, lists};
+use guide::{fav_editor, favorites, grid, guide_clock, header, lists, rail};
 use iptv_runtime as runtime;
 use library_ui::{
     backup, custom_groups, epg_sources_view, guide_assign_view, guide_inspect_view,
@@ -34,7 +34,8 @@ use library_ui::{
 };
 use playback::{
     browse_playback, external_player, interruption, media, multiview, multiview_picker,
-    multiview_view, panels, pip, play_bar, player, player_panels, touch_zap, video,
+    multiview_view, panels, pip, pip_window, play_bar, player, player_panels, player_windows,
+    touch_zap, video,
 };
 use runtime_owner::runtime;
 use screens::{
@@ -740,7 +741,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     lists::bind(ui);
     multiview::bind(ui);
     pip::bind(ui);
-    desktop::player_windows::bind(ui);
+    player_windows::bind(ui);
     bind_back(ui);
     #[cfg(feature = "test-support")]
     guide_window_walkthrough::bind(ui);
@@ -814,16 +815,15 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         .children((1..player::SURFACES).map(move |s| {
             when(
                 move || {
-                    multiview::mounted(ui.playback, s)
-                        || desktop::player_windows::mounted(ui.playback, s)
+                    multiview::mounted(ui.playback, s) || player_windows::mounted(ui.playback, s)
                 },
                 move || video::layer(ui, s),
             )
         }))
         .child(ui_layers(ui, groups, rows))
         // The desktops' picture-in-picture window, while it is open.
-        .child(desktop::pip_window::window(ui))
-        .child(desktop::player_windows::windows(ui, go_back))
+        .child(pip_window::window(ui))
+        .child(player_windows::windows(ui, go_back))
 }
 
 /// Everything over the video: the guide, the full-screen tap catcher,
@@ -903,7 +903,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(touch_zap::layer(ui))
         // Where the video was while the desktops' picture-in-picture
         // window shows it.
-        .child(desktop::pip_window::placeholder(ui))
+        .child(pip_window::placeholder(ui))
         .child(player_panels::status(ui))
         .child(player_panels::layer(ui))
         .child(multiview_view::layer(ui))
@@ -996,7 +996,7 @@ fn video_catcher(ui: Ui, live: bool, gesture: touch_zap::Gesture) -> View {
 /// A tap on full-screen video: the play bar on a device with a pointer,
 /// else the card and its buttons; beside multiview's tiles, its pointer
 /// chrome (the tiles take their own taps).
-fn toggle_panels(ui: Ui) {
+pub(crate) fn toggle_panels(ui: Ui) {
     // A screen of its own covers the video: a tap that fell through its
     // background is not one on the picture.
     if untracked(|| ui.overlay_open(overlays::Overlay::covers_video)) {
@@ -1041,7 +1041,7 @@ pub(crate) fn pointer_input(chrome: ChromeUi) {
 /// The mouse moved: over full-screen video with nothing open above the
 /// panels, it shows the play bar (multiview's pointer chrome over its
 /// grid) and keeps it while it moves.
-fn pointer_moved(ui: Ui, e: &MouseEvent) {
+pub(crate) fn pointer_moved(ui: Ui, e: &MouseEvent) {
     let open = untracked(|| ui.overlay_open(overlays::Overlay::keeps_pointer_from_play_bar));
     let (x, y) = (e.page_position.x.0, e.page_position.y.0);
     // Anywhere else (the guide, lists, Recordings), a mouse that really

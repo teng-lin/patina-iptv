@@ -1705,7 +1705,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .absolute()
                 .top(move || px(safe_area().top.0 + crate::playback::panels::header_now().0))
                 .bottom(px(0.0))
-                .left(move || px(crate::chrome::rail::width(ui.guide)))
+                .left(move || px(crate::guide::rail::width(ui.guide)))
                 .w(move || px(crate::playback::panels::groups_width(ui.guide)))
                 .px(px(8.0))
                 .py(px(6.0))

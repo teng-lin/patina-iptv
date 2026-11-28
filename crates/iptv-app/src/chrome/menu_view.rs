@@ -244,7 +244,7 @@ fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &L
             3,
             Row::Action {
                 item: MenuItem::WatchInNewWindow,
-                enabled: crate::chrome::desktop::player_windows::can_open(ui, channel),
+                enabled: crate::playback::player_windows::can_open(ui, channel),
             },
         );
     }
@@ -291,7 +291,7 @@ fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row
     // Only the main window opens player windows.
     let new_window = ((crate::host::LINUX || crate::host::MACOS)
         && ui.playback.player_surface == 0)
-        .then(|| crate::chrome::desktop::player_windows::can_open(ui, origin.channel));
+        .then(|| crate::playback::player_windows::can_open(ui, origin.channel));
     let scope = channel_scope(ui.app, list);
     let mut rows = channel_menu(
         current

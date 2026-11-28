@@ -131,7 +131,7 @@ pub fn close(ui: Ui, id: SessionId) {
         .player_windows
         .with_untracked(|w| w.sessions().iter().find(|s| s.id == id).map(|s| s.surface));
     if let Some(surface) = surface {
-        super::pointer_forget(surface);
+        crate::wiring::navigation::pointer_forget(surface);
         crate::playback::player::stop_surface(ui, surface);
         ui.playback.player_windows.update(|w| w.close(id));
     }
@@ -305,7 +305,8 @@ fn bind_pip(
             window.set(window_attributes(compact));
             if compact {
                 saved.set(window.state().map(|s| s.placement));
-                let (w, h) = super::pip_window::size_for(local.playback.player.main().size.get());
+                let (w, h) =
+                    crate::playback::pip_window::size_for(local.playback.player.main().size.get());
                 window.set_mode(WindowMode::Normal);
                 window.set_bounds(WindowFrame {
                     width: Some(px(w)),
@@ -324,7 +325,7 @@ fn bind_pip(
 }
 
 fn opening_position(surface: usize) -> Option<nsh_core::desktop::WindowPosition> {
-    let state = super::with_window(|main| main.state()).flatten()?;
+    let state = crate::wiring::navigation::with_window(|main| main.state()).flatten()?;
     let area = nsh_core::element::desktop::display(state.display?)?.visible_bounds;
     Some(cascade_position(surface, area))
 }
@@ -422,10 +423,10 @@ fn player_content(
         }
     });
     let window = nsh_core::element::desktop::current_window();
-    super::keep_reachable(window.clone());
+    crate::wiring::navigation::keep_window_reachable(window.clone());
     follow_lists(local);
     crate::guide::lists::bind_categories(local);
-    let input = stored(Some(crate::chrome::input::bind(local)));
+    let input = stored(Some(crate::wiring::navigation::bind_input(local)));
     crate::playback::pip::bind(local);
     bind_pip(parent, local, id, window.clone(), back_action);
     let back_window = window.clone();
@@ -454,18 +455,17 @@ fn player_content(
     let _show = set_timeout(std::time::Duration::from_millis(250), move || {
         crate::playback::play_bar::pointer_moved(local)
     });
-    crate::chrome::input::window(view().flex_1(), input)
+    crate::wiring::navigation::input_window(view().flex_1(), input)
         .test_id(&format!("auxiliary-player-{}", id.0))
         .bg(rgb(0x000000))
         // Which pointer presses its controls, as in the main window.
         .on_touch(move |e: &nsh_core::TouchEvent| crate::pointer_down(local.chrome, e))
         .on_mouse_enter(move |e: &MouseEvent| {
             let at = e.page_position;
-            super::pointer_entered(surface, at.x.0, at.y.0);
+            crate::wiring::navigation::pointer_entered(surface, at.x.0, at.y.0);
             if !crate::playback::pip::in_window(local.playback)
                 && !untracked(|| {
-                    local
-                        .overlay_open(crate::chrome::overlays::Overlay::keeps_pointer_from_play_bar)
+                    local.overlay_open(crate::chrome::overlay::Overlay::keeps_pointer_from_play_bar)
                 })
             {
                 local.touched();
@@ -474,7 +474,7 @@ fn player_content(
         })
         .on_mouse_move(move |event: &MouseEvent| {
             if !crate::playback::pip::in_window(local.playback) {
-                crate::pointer_moved(local, event);
+                crate::wiring::navigation::pointer_moved(local, event);
             }
         })
         .child(
@@ -488,7 +488,7 @@ fn player_content(
         )
         .child(when(
             move || crate::playback::pip::in_window(local.playback),
-            move || super::pip_window::chrome(local),
+            move || crate::playback::pip_window::chrome(local),
         ))
         .child(when(
             move || !crate::playback::pip::in_window(local.playback),
@@ -504,7 +504,7 @@ fn player_content(
                             .label(move || tr("Video"))
                             .on_press(move |event: &PressEvent| {
                                 local.touched();
-                                crate::toggle_panels(local);
+                                crate::wiring::navigation::toggle_panels(local);
                                 if event.clicks == 2 {
                                     let full = window.state().is_some_and(|s| {
                                         s.mode == nsh_core::desktop::WindowMode::FullScreen
@@ -521,9 +521,9 @@ fn player_content(
                     .child(crate::playback::player_panels::layer(local))
                     .child(crate::screens::channels_view::layer(local))
                     .child(crate::screens::search_view::layer(local))
-                    .child(crate::chrome::menu_view::layer(local))
+                    .child(crate::wiring::navigation::menu_layer(local))
                     .child(crate::library_ui::organization_view::layer(local))
-                    .child(crate::chrome::chooser::layer(local, false))
+                    .child(crate::wiring::navigation::chooser_layer(local, false))
                     .child(crate::playback::play_bar::layer(local, back_action))
             },
         ))

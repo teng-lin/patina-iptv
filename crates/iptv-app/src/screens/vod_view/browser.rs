@@ -131,7 +131,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
                         .flex_row()
                         .gap(move || size.px(14.0))
                         .child(
-                            svg(crate::chrome::rail::icon(item))
+                            svg(crate::guide::rail::icon(item))
                                 .size(move || size.px(26.0))
                                 .text_color(move || {
                                     rgb(if focused() {
@@ -391,7 +391,7 @@ fn tools(ui: Ui, size: Scale) -> View {
                     })
                     .child(
                         svg(if control == Control::Search {
-                            crate::chrome::rail::icon(RailItem::Search)
+                            crate::guide::rail::icon(RailItem::Search)
                         } else {
                             crate::chrome::ui_kit::icons::src(
                                 crate::chrome::ui_kit::icons::Icon::Sort,
@@ -543,7 +543,7 @@ fn poster(
                             .items_center()
                             .justify_center()
                             .child(
-                                svg(crate::chrome::rail::icon(
+                                svg(crate::guide::rail::icon(
                                     if card().is_some_and(|c| c.key.kind == Kind::Series) {
                                         RailItem::Shows
                                     } else {

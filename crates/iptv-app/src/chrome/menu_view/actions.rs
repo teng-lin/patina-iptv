@@ -209,7 +209,7 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
         }
         MenuItem::WatchInNewWindow => {
             if let Some(channel) = channel {
-                crate::chrome::desktop::player_windows::open(ui, channel);
+                crate::playback::player_windows::open(ui, channel);
             }
         }
         MenuItem::ManageFavorites => crate::guide::fav_editor::open(ui, &list, channel),
