@@ -10,8 +10,8 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
-use crate::runtime::network::{Client, Network};
 use iptv_import::Fetch;
+use iptv_runtime::network::{Client, Network};
 use std::sync::Arc;
 
 const IMAGE_BYTES: u64 = 4 << 20;
@@ -100,15 +100,15 @@ fn permits() -> &'static Semaphore {
 }
 
 /// The limits of an artwork download.
-fn config() -> crate::runtime::network::NetworkConfig {
-    crate::runtime::network::NetworkConfig {
+fn config() -> iptv_runtime::network::NetworkConfig {
+    iptv_runtime::network::NetworkConfig {
         max_streamed_bytes: IMAGE_BYTES,
         max_buffered_bytes: IMAGE_BYTES as usize,
         request_timeout: Duration::from_secs(10),
         allow_files: false,
         #[cfg(debug_assertions)]
         allow_private_fixture: cfg!(feature = "test-support")
-            || crate::runtime::build_config::DEV_PLAYLIST.is_some(),
+            || iptv_runtime::build_config::DEV_PLAYLIST.is_some(),
         ..Default::default()
     }
 }
@@ -205,7 +205,7 @@ mod tests {
         impl Network for Refusing {
             fn client(
                 &self,
-                _: &crate::runtime::network::NetworkConfig,
+                _: &iptv_runtime::network::NetworkConfig,
             ) -> Result<Client, iptv_import::FetchError> {
                 Err(iptv_import::FetchError::new(
                     iptv_import::FetchErrorKind::Unsupported,
@@ -217,9 +217,9 @@ mod tests {
     }
 
     /// A native client for `config`, as the runtime's network port makes it.
-    fn client_with(config: crate::runtime::network::NetworkConfig) -> Client {
-        let ports = crate::runtime::Ports::new(std::env::temp_dir(), |_| {
-            Err(crate::runtime::model::StoreError::unavailable(
+    fn client_with(config: iptv_runtime::network::NetworkConfig) -> Client {
+        let ports = iptv_runtime::Ports::new(std::env::temp_dir(), |_| {
+            Err(iptv_runtime::model::StoreError::unavailable(
                 "synthetic: no store",
             ))
         });
@@ -365,7 +365,7 @@ mod tests {
             .build()
             .unwrap();
         rt.block_on(async {
-            let net = client_with(crate::runtime::network::NetworkConfig {
+            let net = client_with(iptv_runtime::network::NetworkConfig {
                 allow_private_fixture: true,
                 ..Default::default()
             });

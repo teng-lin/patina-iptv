@@ -233,7 +233,7 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
         },
     )
     .test_id("guide-groups")
-    .pointer_events(move || crate::guide_chrome_pointer_events(ui.screens))
+    .pointer_events(move || crate::wiring::navigation::guide_chrome_pointer_events(ui.screens))
     .accessibility_elements_hidden(move || !crate::guide::lists::columns_shown(ui.guide))
     .estimated_item_size(list_rows::pitch(size, ROW))
     .element_ref(&groups)

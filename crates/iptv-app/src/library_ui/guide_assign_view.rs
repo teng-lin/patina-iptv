@@ -15,8 +15,8 @@ use iptv_presentation::library::guide_assign as state;
 
 use crate::kit::i18n::{tr, trf};
 use crate::kit::input::dismiss_keyboard;
-use crate::runtime::model::{GuideChannel, SourceId};
 use iptv_nav::Action;
+use iptv_runtime::model::{GuideChannel, SourceId};
 use nsh_core::element::input;
 use nsh_core::prelude::*;
 

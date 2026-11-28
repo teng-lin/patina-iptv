@@ -47,7 +47,7 @@ fn open_with(ui: Ui, wizard: Wizard) {
     if let Some(Step::Processing { id, .. } | Step::Canceling { id }) =
         read(ui.screens, Wizard::step)
     {
-        crate::runtime_owner::runtime().cancel_wizard_import(id, false);
+        crate::wiring::runtime_owner::runtime().cancel_wizard_import(id, false);
     }
     ui.screens.wizard.set(Some(Open {
         wizard,
@@ -137,9 +137,9 @@ pub fn send(ui: Ui, event: WizardEvent) {
 }
 
 /// The M3U link form starts with the development playlist's URL, when the
-/// build has one ([`crate::runtime::build_config::DEV_PLAYLIST`]).
+/// build has one ([`iptv_runtime::build_config::DEV_PLAYLIST`]).
 fn prefill(ui: Ui) {
-    let Some(url) = crate::runtime::build_config::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
+    let Some(url) = iptv_runtime::build_config::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
         return;
     };
     let due = read(ui.screens, |w| {
@@ -265,7 +265,7 @@ pub fn key(ui: Ui, action: Action) {
         // On the first run's welcome screen, where Back leaves: the
         // question first, where the host asks it (`crate::confirm_leaving`).
         Action::Back => {
-            let _ = back(ui) || crate::ask_before_leaving(ui);
+            let _ = back(ui) || crate::wiring::navigation::ask_before_leaving(ui);
         }
         _ => {}
     }

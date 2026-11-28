@@ -489,6 +489,9 @@ fn expand_path<'a>(
 }
 
 fn is_module_in(root: &Path, tree: &str, name: &str) -> bool {
+    if !name.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
+        return false;
+    }
     let module = root.join(tree).join(name);
     module.with_extension("rs").is_file() || module.join("mod.rs").is_file()
 }
@@ -811,6 +814,72 @@ fn ui_parameter_count_only_shrinks() {
         "shipped functions taking whole `Ui` changed (actual={actual}, limit={UI_PARAMETER_LIMIT}); \
          narrow parameters to `Ui` sub-handles and lower `UI_PARAMETER_LIMIT` as they shrink"
     );
+}
+
+const FEATURE_TREES: [&str; 4] = ["guide", "playback", "library_ui", "screens"];
+
+/// Ambient service facades in `wiring/` that `kit/**` building blocks may read
+/// (reactive settings, device reports, and the runtime handle). Dispatch and
+/// feature glue (`wiring::navigation`, `wiring::data`, `wiring::runtime_events`,
+/// `wiring::tasks`, …) stay forbidden from `kit/**`.
+const KIT_WIRING_SERVICES: &[&str] = &["device", "runtime_owner", "settings"];
+
+#[test]
+fn kit_has_no_feature_shell_or_dispatch_wiring_dependency() {
+    let (root, files) = app_sources();
+    for file in files {
+        let name = file_name(&root, &file);
+        if !name.starts_with("kit/") || name.ends_with("/tests.rs") {
+            continue;
+        }
+        let source = shipped(&code(&file));
+        for path in rooted_paths(&source, &name) {
+            let first = path[0];
+            for forbidden in FEATURE_TREES.into_iter().chain(["shell"]) {
+                assert!(
+                    first != forbidden && !is_module_in(&root, forbidden, first),
+                    "{name} depends on {forbidden} via {}",
+                    path.join("::")
+                );
+            }
+            if first == "wiring" {
+                let submodule = path.get(1).copied().unwrap_or("*");
+                assert!(
+                    KIT_WIRING_SERVICES.contains(&submodule),
+                    "{name} depends on wiring::{submodule} (only {KIT_WIRING_SERVICES:?} are allowed in kit/)"
+                );
+            } else {
+                assert!(
+                    !is_module_in(&root, "wiring", first),
+                    "{name} depends on wiring via root alias {}",
+                    path.join("::")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn feature_trees_never_name_shell() {
+    let (root, files) = app_sources();
+    for file in files {
+        let name = file_name(&root, &file);
+        let Some((tree, _)) = name.split_once('/') else {
+            continue;
+        };
+        if !FEATURE_TREES.contains(&tree) || name.ends_with("/tests.rs") {
+            continue;
+        }
+        let source = shipped(&code(&file));
+        for path in rooted_paths(&source, &name) {
+            let first = path[0];
+            assert!(
+                first != "shell" && !is_module_in(&root, "shell", first),
+                "{name} names shell via {}; route through wiring::navigation instead",
+                path.join("::")
+            );
+        }
+    }
 }
 
 #[test]

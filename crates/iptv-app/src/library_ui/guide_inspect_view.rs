@@ -1,6 +1,5 @@
 //! Existing guide-source workflow's read-only coverage/candidate inspection.
 use crate::kit::input::dismiss_keyboard;
-use crate::runtime::model::{InspectionControl, ProbeRequest, ProbeTarget};
 use crate::{
     Ui,
     kit::i18n::tr,
@@ -11,6 +10,7 @@ use crate::{
 use iptv_library::{SourceId, inspection::*};
 use iptv_nav::Action;
 use iptv_presentation::library::guide_inspect::{Mode, Reply, Row, Screen};
+use iptv_runtime::model::{InspectionControl, ProbeRequest, ProbeTarget};
 use nsh_core::{element::input, prelude::*};
 use std::time::Duration;
 

@@ -2,8 +2,8 @@
 
 use crate::kit::i18n::{tr, trf};
 
-use crate::runtime::model::{GuideSource, ImportErrorKind};
 use iptv_presentation::wizard::FieldError;
+use iptv_runtime::model::{GuideSource, ImportErrorKind};
 
 use super::state::{Act, EditKind, Notice};
 use crate::library_ui::playlists_view::masked_link;

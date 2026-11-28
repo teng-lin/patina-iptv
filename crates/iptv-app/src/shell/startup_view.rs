@@ -43,14 +43,14 @@ pub(crate) struct StoreFailure {
 pub(crate) fn store_failed(
     ui: crate::Ui,
     path: Option<std::path::PathBuf>,
-    error: crate::runtime::Error,
+    error: iptv_runtime::Error,
 ) {
     let retryable = error.retryable_open();
     let diagnostic = || {
         error
             .unavailable_reason()
             .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-            .unwrap_or_else(|| crate::i18n::key("The saved library could not be opened"))
+            .unwrap_or_else(|| crate::kit::i18n::key("The saved library could not be opened"))
     };
     let cause = if let Some((found, supported)) = error.newer_schema() {
         Cause::Newer { found, supported }
@@ -106,7 +106,7 @@ fn controls(chrome: crate::ChromeUi) -> Option<Recovery> {
 
 fn select_recovery(chrome: crate::ChromeUi, action: RecoveryAction) {
     if change_controls(chrome, |controls| controls.select(action)) {
-        crate::runtime::data::retry_startup(&crate::wiring::runtime_owner::runtime());
+        iptv_runtime::data::retry_startup(&crate::wiring::runtime_owner::runtime());
     }
 }
 
@@ -273,7 +273,7 @@ fn failure_details(
                         "Database schema version {found} is newer than this build supports ({supported}).",
                         &[("found", (*found).into()), ("supported", (*supported).into())],
                     ),
-                    Cause::RestartRequired(reason) | Cause::Other(reason) => crate::i18n::tr(reason).to_owned(),
+                    Cause::RestartRequired(reason) | Cause::Other(reason) => crate::kit::i18n::tr(reason).to_owned(),
                 };
                 view()
                     .test_id("store-recovery-details")

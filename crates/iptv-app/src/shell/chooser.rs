@@ -430,7 +430,7 @@ pub fn pick(ui: Ui, index: usize) {
         Kind::History => play_recent(ui, &value),
         Kind::Leave => {
             if index == 1 {
-                crate::leave();
+                crate::shell::back::leave();
             }
         }
     }

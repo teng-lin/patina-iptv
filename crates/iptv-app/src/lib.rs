@@ -22,13 +22,6 @@ pub mod theme;
 mod ui;
 mod wiring;
 
-#[allow(unused_imports)]
-use iptv_runtime as runtime;
-#[allow(unused_imports)]
-use kit::i18n;
-#[allow(unused_imports)]
-use wiring::runtime_owner::{self, runtime};
-
 pub use guide::{header::debug_overlay, timeline};
 pub use host::set_tui_mode;
 #[cfg(feature = "test-support")]
@@ -57,8 +50,6 @@ pub use time::clock;
 pub use ui::{Input, Playback, SharedUi, Stats, Ui, ViewMode, channel_name, in_archive, tint};
 pub use wiring::runtime_owner::schedule;
 
-pub(crate) use shell::app::{guide_chrome_pointer_events, pointer_moved, toggle_panels};
-pub(crate) use shell::back::{ask_before_leaving, go_back, leave};
 pub(crate) use ui::{ChromeUi, GuideUi, PlaybackUi, ScreensUi, pointer_down, pointer_input};
 
 /// The app's guide clock and its UI tick.

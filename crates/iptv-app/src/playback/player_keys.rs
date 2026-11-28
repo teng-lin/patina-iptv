@@ -163,7 +163,7 @@ pub(crate) fn play_pause(ui: Ui, key: RemoteKey, press: Press) {
 pub(crate) fn stop_playback(ui: Ui) {
     let owner = crate::wiring::runtime_owner::runtime();
     owner.next_cast_intent();
-    owner.cancel_stream_resolution(crate::runtime::model::StreamPurpose::Cast);
+    owner.cancel_stream_resolution(iptv_runtime::model::StreamPurpose::Cast);
     owner.cancel_pending_native_cast();
     if ui.cast.remote.get_untracked() {
         crate::screens::casting::stop(ui);

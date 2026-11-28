@@ -380,7 +380,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         {
             return;
         }
-        crate::go_back(ui);
+        crate::shell::back::go_back(ui);
     });
     // Desktop sound keys (remotes and tablets use the system volume). F11
     // (window full screen; Ctrl+Cmd+F on macOS) is the platform's.

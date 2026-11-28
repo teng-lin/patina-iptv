@@ -18,7 +18,7 @@ pub(crate) fn start(ui: Ui) {
     // NSH drops cleanup callbacks without invoking them when the entire Rust
     // runtime exits. Capture an RAII guard so both owner disposal and runtime
     // destruction drain accepted writes while the engine thread still exists.
-    struct Drain(Rc<crate::runtime::Runtime>);
+    struct Drain(Rc<iptv_runtime::Runtime>);
     impl Drop for Drain {
         fn drop(&mut self) {
             with_runtime(self.0.clone(), || {
@@ -61,7 +61,7 @@ pub(crate) fn start(ui: Ui) {
     crate::wiring::data::stored::bind(ui.app);
     crate::screens::search_view::load_saved_history(ui.screens);
     let owner = runtime();
-    owner.bind_browser(move || crate::runtime::BrowserState {
+    owner.bind_browser(move || iptv_runtime::BrowserState {
         focused_key: crate::wiring::runtime_events::focused_channel(ui.guide)
             .and_then(|channel| schedule().channel_key(channel)),
         playing: ui.playback.playing.get_untracked().is_some(),
@@ -69,7 +69,7 @@ pub(crate) fn start(ui: Ui) {
     tasks::spawn_in_app(async move {
         let owner = runtime();
         let _ = owner.parental_refresh().await;
-        crate::runtime::data::start(&owner);
+        iptv_runtime::data::start(&owner);
         crate::screens::parental_view::bind(ui);
     });
 }

@@ -2,9 +2,9 @@
 
 use crate::kit::i18n::{tr, trf};
 
-use crate::runtime::model::ImportErrorKind;
 use iptv_presentation::wizard::{FailureKind, ImportFailure};
 use iptv_providers::model::SourceKind;
+use iptv_runtime::model::ImportErrorKind;
 
 use super::details::{Form, Param};
 use super::state::{Act, Notice};
@@ -316,7 +316,7 @@ pub fn delete_consequences(p: &Playlist, next: Option<&str>, has_other_playlists
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::model::SourceId;
+    use iptv_runtime::model::SourceId;
 
     use super::*;
 

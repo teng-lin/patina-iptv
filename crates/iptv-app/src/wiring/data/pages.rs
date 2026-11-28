@@ -13,7 +13,7 @@ pub fn bind(ui: Ui) {
         };
         untracked(|| {
             let schedule = crate::wiring::runtime_owner::schedule();
-            crate::runtime::data::pages::pin_archive(
+            iptv_runtime::data::pages::pin_archive(
                 &crate::wiring::runtime_owner::runtime(),
                 archive.map(|(channel, minute)| {
                     (channel, iptv_core::guide::unix_of(&*schedule, minute))
@@ -27,11 +27,11 @@ pub fn bind(ui: Ui) {
         let home = ui.guide.focus.with(|f| f.window == home_window(f.now));
         if home && away.replace(false) {
             untracked(|| {
-                crate::runtime::data::pages::evict(&crate::wiring::runtime_owner::runtime());
+                iptv_runtime::data::pages::evict(&crate::wiring::runtime_owner::runtime());
             });
         }
         away.set(!home);
     });
 }
 
-pub use crate::runtime::data::pages::{ready, want};
+pub use iptv_runtime::data::pages::{ready, want};

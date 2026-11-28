@@ -10,12 +10,12 @@ pub(crate) use render::playlist_layer;
 
 use crate::kit::i18n::{tr, trf};
 use crate::library_ui::organization_view::{self, Kind};
-use crate::runtime::model::SourceId;
 use iptv_core::guide::GroupName;
 use iptv_core::organization::{Block, BlockKind, GroupPreference, GroupPreferences};
 use iptv_library::ChannelScope;
 use iptv_presentation::lists::{Entry, ListId};
 use iptv_presentation::organization::Mode;
+use iptv_runtime::model::SourceId;
 
 use iptv_presentation::menu::{
     Heading, Menu, MenuItem, Origin, Row, Target, channel_menu, group_offset_menu, group_options,
@@ -673,7 +673,7 @@ fn group_option_rows(ui: Ui, list: &ListId) -> Option<Vec<Row>> {
     let scope = entry.and_then(|_| channel_scope(ui.app, list));
     let kind = scope.as_ref().map(|(_, kind)| kind);
     let mut rows: Vec<Row> = if playlist_menu(list) {
-        let stored = crate::runtime().playlists().ok()?;
+        let stored = crate::wiring::runtime_owner::runtime().playlists().ok()?;
         if stored.is_empty() {
             return None;
         }
@@ -725,7 +725,7 @@ fn group_option_rows(ui: Ui, list: &ListId) -> Option<Vec<Row>> {
 }
 
 fn playlist_by_id(id: SourceId) -> Option<crate::wiring::data::Playlist> {
-    crate::runtime()
+    crate::wiring::runtime_owner::runtime()
         .playlists()
         .ok()?
         .into_iter()
@@ -733,7 +733,8 @@ fn playlist_by_id(id: SourceId) -> Option<crate::wiring::data::Playlist> {
 }
 
 fn playlist_menu(list: &ListId) -> bool {
-    *list == ListId::All && crate::wiring::data::combined::active(&crate::runtime())
+    *list == ListId::All
+        && crate::wiring::data::combined::active(&crate::wiring::runtime_owner::runtime())
 }
 
 fn is_playlist_menu(menu: &Menu) -> bool {
@@ -785,8 +786,7 @@ fn list_preferences(list: &ListId) -> GroupPreferences {
 fn set_group_preference(target: iptv_core::parental::Target, preference: GroupPreference) {
     let source = SourceId(target.source);
     let owner = crate::wiring::runtime_owner::runtime();
-    let save =
-        crate::runtime::commands::set_group_preference(&owner, source, target.id, preference);
+    let save = iptv_runtime::commands::set_group_preference(&owner, source, target.id, preference);
     crate::wiring::tasks::spawn_in_app(async move {
         match save.await {
             Ok(()) => crate::wiring::data::organization_changed(&owner, source),

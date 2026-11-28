@@ -3,7 +3,6 @@ use crate::{
     Playback, Ui,
     kit::i18n::{tr, trf},
     kit::toast::notify,
-    runtime::model::{ResolveFailure, StreamPurpose},
     wiring::navigation::{ChooserKind, close_chooser, open_chooser, show_cast_receivers},
     wiring::runtime_owner::{runtime, schedule},
 };
@@ -12,6 +11,7 @@ use iptv_core::{
     cast::{Command, Controls, Error, Receiver, RemoteState, Target},
 };
 use iptv_presentation::cast::{Prompt, State};
+use iptv_runtime::model::{ResolveFailure, StreamPurpose};
 use nsh_core::prelude::{Memo, Signal, Stored, computed, set_timeout, signal, stored};
 use std::time::Duration;
 
@@ -165,15 +165,15 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let Some((epg, local)) = iptv_guide::combined::epg_channel(&*guide, channel) else {
         return;
     };
-    let Some(authority) = crate::runtime::Runtime::playback_authority(&*guide, channel) else {
+    let Some(authority) = iptv_runtime::Runtime::playback_authority(&*guide, channel) else {
         return;
     };
     let resolution = epg.resolve(
         local,
         None,
-        crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
+        iptv_runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
-    let context = crate::runtime::Runtime::playback_context(&*guide, channel);
+    let context = iptv_runtime::Runtime::playback_context(&*guide, channel);
     let Some(target) = crate::screens::parental_view::live_target(ui.app, channel) else {
         return;
     };

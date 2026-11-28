@@ -52,7 +52,9 @@ fn menu_layer(ui: Ui, overlay: crate::shell::overlays::Overlay) -> impl IntoElem
             .menu
             .with(|menu| menu.as_ref().is_some_and(is_playlist_menu))
         {
-            crate::runtime().playlists().unwrap_or_default()
+            crate::wiring::runtime_owner::runtime()
+                .playlists()
+                .unwrap_or_default()
         } else {
             Vec::new()
         }

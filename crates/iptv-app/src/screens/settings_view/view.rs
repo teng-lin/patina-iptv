@@ -194,7 +194,7 @@ pub(crate) fn focused_playlist(screens: crate::ScreensUi) -> Option<i64> {
 /// Stored playlist `id` (reactive: the library's version).
 fn stored_playlist(app: crate::SharedUi, id: i64) -> Option<crate::wiring::data::Playlist> {
     app.library.version.get();
-    crate::runtime()
+    crate::wiring::runtime_owner::runtime()
         .playlists()
         .ok()?
         .into_iter()
@@ -529,7 +529,7 @@ fn row_view(
                                 settings_guarded(ui.screens, move || {
                                     crate::library_ui::playlists_view::open_only(
                                         ui.screens,
-                                        crate::runtime::model::SourceId(playlist.id),
+                                        iptv_runtime::model::SourceId(playlist.id),
                                         crate::library_ui::playlists_view::Only::Delete,
                                     )
                                 });

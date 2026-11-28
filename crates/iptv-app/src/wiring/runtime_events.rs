@@ -1,9 +1,7 @@
 //! The shell's single application-event entry point.
-use crate::{
-    Ui,
-    runtime::{RuntimeEvent, ScheduleCause},
-};
+use crate::Ui;
 use iptv_core::guide::Schedule;
+use iptv_runtime::{RuntimeEvent, ScheduleCause};
 use nsh_core::prelude::batch;
 use std::rc::Rc;
 

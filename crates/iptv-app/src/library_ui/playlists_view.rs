@@ -23,8 +23,8 @@ mod details_card;
 use iptv_presentation::library::playlists as state;
 mod words;
 
-use crate::runtime::model::SourceId;
 use iptv_nav::Action;
+use iptv_runtime::model::SourceId;
 use nsh_core::prelude::*;
 
 pub use state::Only;
@@ -923,7 +923,12 @@ fn confirm_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             };
             let shown = !ui.app.library.all.get() && ui.app.library.shown.get() == Some(id);
             let next = shown
-                .then(|| crate::runtime::data::next_playlist_after_deletion(&crate::runtime(), id))
+                .then(|| {
+                    iptv_runtime::data::next_playlist_after_deletion(
+                        &crate::wiring::runtime_owner::runtime(),
+                        id,
+                    )
+                })
                 .flatten();
             (
                 trf("Delete “{name}”?", &[("name", (&p.name).into())]),

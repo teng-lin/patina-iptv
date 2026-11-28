@@ -67,7 +67,7 @@ pub(super) fn preview(ui: Ui, key: RemoteKey, press: Press, action: Action, repe
                 crate::playback::play_bar::remote(ui);
             }
             Action::Back => {
-                crate::go_back(ui);
+                crate::shell::back::go_back(ui);
             }
             Action::PlayPause | Action::Stop => {
                 crate::playback::player_keys::apply(ui, key, press, action, repeat);

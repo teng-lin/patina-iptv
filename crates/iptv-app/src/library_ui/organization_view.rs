@@ -4,7 +4,6 @@ use crate::kit::input::dismiss_keyboard;
 use crate::kit::list_rows::{self, Mark, ROW};
 use crate::kit::scale::Scale;
 use crate::kit::ui_kit::entry::{self, TextSheet};
-use crate::runtime::{Error, model::SourceId};
 use crate::{Ui, kit::ui_kit, wiring::data};
 use iptv_core::organization::{Block, BlockKind, Item, Sort};
 use iptv_nav::Action;
@@ -14,6 +13,7 @@ use iptv_presentation::organization::{
     Action as Edit, Editor, Items, LEAVE_CHOICES, Mode, OrderSave, Placement, step_choice,
 };
 use iptv_presentation::reorder::{Key, LeaveChoice, Outcome};
+use iptv_runtime::{Error, model::SourceId};
 use nsh_core::{Checked, prelude::*};
 use std::collections::{HashMap, HashSet};
 
@@ -21,7 +21,7 @@ pub use iptv_library::OrganizationScope as Kind;
 pub use iptv_presentation::organization::Open;
 
 async fn items(source: SourceId, kind: &Kind, order: Option<Sort>) -> Result<Items, Error> {
-    crate::runtime::commands::organization_editor(
+    iptv_runtime::commands::organization_editor(
         &crate::wiring::runtime_owner::runtime(),
         source,
         kind.clone(),
@@ -73,7 +73,7 @@ pub fn rename_group(ui: Ui, source: SourceId, id: String) {
 /// The group column displays just the playlist headings during a move.
 /// Its normal catalog keeps the viewer's expansion and visibility choices.
 pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
-    let Ok(playlists) = crate::runtime().playlists() else {
+    let Ok(playlists) = crate::wiring::runtime_owner::runtime().playlists() else {
         return;
     };
     if playlists.is_empty()
@@ -271,7 +271,7 @@ fn block_state(state: &Open, id: &str) -> Block {
 pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked: bool) {
     let generation = ui.screens.organization.epoch();
     let owner = crate::wiring::runtime_owner::runtime();
-    let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
+    let save = iptv_runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
     crate::wiring::tasks::spawn_in_app(async move {
         if save.await.is_err() {
             crate::kit::toast::notify(tr(
@@ -291,7 +291,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
         if !still_open(ui.screens, generation) || !is_open(ui.screens) {
             return;
         }
-        let blocks = crate::runtime::commands::guide_blocks(&owner, source).await;
+        let blocks = iptv_runtime::commands::guide_blocks(&owner, source).await;
         if !still_open(ui.screens, generation) {
             return;
         }
@@ -490,7 +490,7 @@ fn save_order(ui: Ui) {
                 return;
             }
             if !crate::wiring::settings::playlists_by_hand()
-                && let Err(error) = crate::runtime()
+                && let Err(error) = crate::wiring::runtime_owner::runtime()
                     .check_setting_write(iptv_settings::keys::PLAYLIST_SORT.as_str())
             {
                 crate::screens::settings_view::notify_setting_error(error);
@@ -504,24 +504,26 @@ fn save_order(ui: Ui) {
 }
 
 fn check_playlist_order_catalog(ui: Ui) -> bool {
-    let valid = crate::runtime().playlists().is_ok_and(|rows| {
-        untracked(|| {
-            state(ui.screens, |s| {
-                if let Some(saved) = &s.saved_playlist_positions {
-                    // The saved positions can change the tie order of equal names.
-                    // The draft can still be retried while its playlists all exist.
-                    let saved: HashSet<_> = saved.iter().copied().collect();
-                    rows.len() == saved.len() && rows.iter().all(|p| saved.contains(&p.id))
-                } else {
-                    rows.iter().map(|p| p.id.0.to_string()).eq(s
-                        .editor
-                        .items
-                        .iter()
-                        .map(|item| item.id.clone()))
-                }
-            })
-        }) == Some(true)
-    });
+    let valid = crate::wiring::runtime_owner::runtime()
+        .playlists()
+        .is_ok_and(|rows| {
+            untracked(|| {
+                state(ui.screens, |s| {
+                    if let Some(saved) = &s.saved_playlist_positions {
+                        // The saved positions can change the tie order of equal names.
+                        // The draft can still be retried while its playlists all exist.
+                        let saved: HashSet<_> = saved.iter().copied().collect();
+                        rows.len() == saved.len() && rows.iter().all(|p| saved.contains(&p.id))
+                    } else {
+                        rows.iter().map(|p| p.id.0.to_string()).eq(s
+                            .editor
+                            .items
+                            .iter()
+                            .map(|item| item.id.clone()))
+                    }
+                })
+            }) == Some(true)
+        });
     if !valid {
         untracked(|| close(ui));
         crate::kit::toast::notify(tr(
@@ -576,7 +578,7 @@ fn persist_order(ui: Ui) {
                 expected_sort,
                 from_custom,
             } => {
-                let result = crate::runtime::commands::save_organization_order(
+                let result = iptv_runtime::commands::save_organization_order(
                     &owner,
                     source,
                     kind,
@@ -753,7 +755,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     }
     if scope_kind == Kind::Favorites && edit == Edit::ResetOrder {
         let keys = crate::guide::favorites::ordered_keys();
-        let ordered = crate::runtime::commands::favorite_provider_order(
+        let ordered = iptv_runtime::commands::favorite_provider_order(
             &crate::wiring::runtime_owner::runtime(),
             source,
             keys,
@@ -791,7 +793,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         }
         let id = order.remove(at);
         order.insert(to, id);
-        let result = crate::runtime::commands::save_organization_order(
+        let result = iptv_runtime::commands::save_organization_order(
             &crate::wiring::runtime_owner::runtime(),
             source,
             scope_kind.clone(),
@@ -815,7 +817,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     };
     update(ui.screens, Open::begin_save);
     let finished = s.clone();
-    let result = crate::runtime::commands::edit_organization(
+    let result = iptv_runtime::commands::edit_organization(
         &crate::wiring::runtime_owner::runtime(),
         source,
         scope_kind,
@@ -832,7 +834,7 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
     let Some((source, kind)) = s.scope.clone() else {
         return;
     };
-    let result = crate::runtime::commands::set_organization_sort(
+    let result = iptv_runtime::commands::set_organization_sort(
         &crate::wiring::runtime_owner::runtime(),
         source,
         kind,
@@ -909,7 +911,7 @@ fn commit(ui: Ui) {
     let Some((source, kind)) = s.scope.clone() else {
         return;
     };
-    let result = crate::runtime::commands::rename_organization_item(
+    let result = iptv_runtime::commands::rename_organization_item(
         &crate::wiring::runtime_owner::runtime(),
         source,
         kind,

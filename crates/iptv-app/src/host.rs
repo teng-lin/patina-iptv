@@ -2,7 +2,7 @@
 //! Platform `cfg` belongs here; the few files outside that still have one
 //! are listed, to shrink, in `tests/app/architecture.rs`.
 //!
-//! Each host builds the runtime's [`Ports`](crate::runtime::Ports) for its
+//! Each host builds the runtime's [`Ports`](iptv_runtime::Ports) for its
 //! platform (private directory, key broker, network, execution, entropy,
 //! backup exclusion, recording schedule) and answers the platform questions
 //! the screens ask: where storage lives, how background work runs, the

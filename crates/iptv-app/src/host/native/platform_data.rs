@@ -148,11 +148,10 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_flushPendingWri
 /// registered. A host callback runs off the application thread and outside
 /// any task, so it cannot be handed the shell's handle; the root leaves this
 /// `Send` one for it instead. It holds the owner weakly.
-static HOST_STOP: std::sync::Mutex<Option<crate::runtime::HostHandle>> =
-    std::sync::Mutex::new(None);
+static HOST_STOP: std::sync::Mutex<Option<iptv_runtime::HostHandle>> = std::sync::Mutex::new(None);
 
 /// The application root's owner is the one a host stop flushes from now on.
-pub(crate) fn flush_on_host_stop(owner: crate::runtime::HostHandle) {
+pub(crate) fn flush_on_host_stop(owner: iptv_runtime::HostHandle) {
     *HOST_STOP
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(owner);
@@ -160,7 +159,7 @@ pub(crate) fn flush_on_host_stop(owner: crate::runtime::HostHandle) {
 
 /// The registered root's owner; none before a root exists.
 #[cfg(any(target_os = "android", test, feature = "test-support"))]
-pub(crate) fn host_handle() -> Option<crate::runtime::HostHandle> {
+pub(crate) fn host_handle() -> Option<iptv_runtime::HostHandle> {
     HOST_STOP
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -228,7 +227,7 @@ fn home_directory(home: Option<std::ffi::OsString>) -> io::Result<PathBuf> {
 
 /// Protect storage before opening application services.
 pub(crate) fn protect_directory(path: &Path) -> io::Result<()> {
-    crate::runtime::storage::protect_directory(path, exclude_from_backup)
+    iptv_runtime::storage::protect_directory(path, exclude_from_backup)
 }
 
 /// User-initiated exports are separate; OS backups must not copy credentials.
@@ -311,7 +310,7 @@ mod tests {
         let owner = |name: &str| {
             let path = directory.path().join(name);
             std::fs::create_dir(&path).unwrap();
-            crate::runtime::Runtime::new(crate::runtime::Ports::new(path, |_| {
+            iptv_runtime::Runtime::new(iptv_runtime::Ports::new(path, |_| {
                 panic!("a small-file write must not open the credential broker")
             }))
         };

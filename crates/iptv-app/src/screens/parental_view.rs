@@ -2,12 +2,12 @@
 //! credentials and access. Callbacks run only after the authoritative gate.
 use crate::kit::i18n::{tr, trf};
 use crate::kit::input::dismiss_keyboard;
-use crate::runtime::Runtime;
 use crate::wiring::navigation::request;
 use crate::{Ui, kit::scale::Scale, kit::ui_kit, tint};
 use iptv_core::parental::{ContentKind, Target};
 use iptv_nav::{Action, RemoteKey};
 use iptv_presentation::parental::{Phase, PromptState, Submission};
+use iptv_runtime::Runtime;
 use nsh_core::element::input;
 use nsh_core::prelude::*;
 use std::{cell::RefCell, rc::Rc};

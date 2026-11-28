@@ -249,16 +249,16 @@ pub fn offer(device: Device, key: &str) -> Offer {
         return Offer::Hidden;
     }
     if key == "playlists.show_all" {
-        let owner = crate::runtime();
+        let owner = crate::wiring::runtime_owner::runtime();
         if !crate::host::IMPORTS
             || crate::wiring::data::combined::active(&owner)
-            || !crate::runtime::data::has_multiple_enabled(&owner)
+            || !iptv_runtime::data::has_multiple_enabled(&owner)
         {
             return Offer::Hidden;
         }
     }
     if key == "playlists.manage"
-        && !crate::runtime()
+        && !crate::wiring::runtime_owner::runtime()
             .playlists()
             .is_ok_and(|rows| !rows.is_empty())
     {

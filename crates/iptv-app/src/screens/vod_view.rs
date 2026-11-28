@@ -6,11 +6,11 @@ use crate::{
     kit::i18n::{tr, trf},
     kit::scale::Scale,
     kit::ui_kit,
-    runtime::Runtime,
 };
 use iptv_core::vod::{Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Progress, Shelf, Sort};
 use iptv_nav::Action;
 use iptv_presentation::vod::{BackOutcome, Control, Operation, Screen};
+use iptv_runtime::Runtime;
 use nsh_base::input;
 use nsh_core::prelude::*;
 mod browser;

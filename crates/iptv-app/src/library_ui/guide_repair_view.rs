@@ -1,5 +1,4 @@
 //! Batch guide repair inside the existing guide inspection workflow.
-use crate::runtime::model::InspectionControl;
 use crate::{
     Ui,
     kit::i18n::tr,
@@ -10,6 +9,7 @@ use crate::{
 use iptv_library::{Choice, SourceId, guide_repair as model, inspection::*};
 use iptv_nav::Action;
 use iptv_presentation::library::guide_repair_screen::{Reply, Row, Screen};
+use iptv_runtime::model::InspectionControl;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 use std::time::Duration;

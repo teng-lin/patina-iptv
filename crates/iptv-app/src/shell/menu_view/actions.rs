@@ -354,7 +354,7 @@ fn hide_channel(app: crate::SharedUi, channel: Option<usize>) {
     if let Some(target) = channel.and_then(|ch| crate::screens::parental_view::live_target(app, ch))
     {
         let source = SourceId(target.source);
-        let saved = crate::runtime::commands::hide_channel(
+        let saved = iptv_runtime::commands::hide_channel(
             &crate::wiring::runtime_owner::runtime(),
             source,
             target.id,
@@ -429,7 +429,7 @@ fn group(
             if let Some(target) = group_target(scope.as_ref()) {
                 let source = SourceId(target.source);
                 let owner = crate::wiring::runtime_owner::runtime();
-                let save = crate::runtime::commands::rename_organization_item(
+                let save = iptv_runtime::commands::rename_organization_item(
                     &owner,
                     source,
                     Kind::Groups,
@@ -464,7 +464,7 @@ fn group(
             if let Some(target) = group_target(scope.as_ref()) {
                 let source = SourceId(target.source);
                 let owner = crate::wiring::runtime_owner::runtime();
-                let save = crate::runtime::commands::hide_group(&owner, source, target.id);
+                let save = iptv_runtime::commands::hide_group(&owner, source, target.id);
                 crate::wiring::tasks::spawn_in_app(async move {
                     match save.await {
                         Ok(()) => crate::wiring::data::organization_changed(&owner, source),

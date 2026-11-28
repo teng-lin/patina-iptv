@@ -212,7 +212,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let single_playlist = computed(move || {
         ui.app.library.version.get();
         let shown = ui.app.library.shown.get()?;
-        crate::runtime::data::library::playlists(&crate::wiring::runtime_owner::runtime())
+        iptv_runtime::data::library::playlists(&crate::wiring::runtime_owner::runtime())
             .ok()?
             .into_iter()
             .find(|playlist| playlist.id == shown)
@@ -455,7 +455,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
         .accessibility_elements_hidden(move || {
             crate::library_ui::organization_view::guide_order_open(ui.screens)
         })
-        .pointer_events(move || crate::guide_chrome_pointer_events(ui.screens))
+        .pointer_events(move || crate::wiring::navigation::guide_chrome_pointer_events(ui.screens))
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(
             view()

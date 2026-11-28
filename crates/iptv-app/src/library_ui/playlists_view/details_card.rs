@@ -2,7 +2,7 @@
 //! addresses hidden), tr("Check and save"), and what the check is doing or why
 //! it refused the new details.
 
-use crate::runtime::model::SourceId;
+use iptv_runtime::model::SourceId;
 use nsh_core::prelude::*;
 
 use super::details::Param;

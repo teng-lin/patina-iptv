@@ -102,7 +102,7 @@ fn to_save(shown: bool, saved: SearchHistory, session: &SearchHistory) -> Vec<St
 
 /// Both normal playback and multiview consume the current, visible semantic row.
 fn resolve_result_channel(
-    owner: &crate::runtime::Runtime,
+    owner: &iptv_runtime::Runtime,
     identity: &iptv_search::ChannelId,
     schedule: &dyn Schedule,
 ) -> Option<usize> {
@@ -206,7 +206,7 @@ pub(crate) fn refresh_saved_history(
     let revision = screens.search_history_revision.get_untracked();
     crate::wiring::runtime_owner::runtime().clear_loaded_search_history();
     let legacy = crate::wiring::data::data_dir().join(LEGACY_HISTORY_FILE);
-    let loaded = crate::runtime::commands::load_search_history(
+    let loaded = iptv_runtime::commands::load_search_history(
         &crate::wiring::runtime_owner::runtime(),
         legacy,
     );
@@ -240,7 +240,7 @@ pub(crate) fn clear_history(ui: Ui) {
     ui.screens
         .search_history_revision
         .update(|revision| *revision += 1);
-    let saved = crate::runtime::commands::clear_search_history(
+    let saved = iptv_runtime::commands::clear_search_history(
         &crate::wiring::runtime_owner::runtime(),
         crate::wiring::data::data_dir().join(LEGACY_HISTORY_FILE),
     );
@@ -276,7 +276,7 @@ fn save_history(screens: crate::ScreensUi) {
         return;
     }
     owner.install_search_history(list.clone());
-    let saved = crate::runtime::commands::save_search_history(&owner, list);
+    let saved = iptv_runtime::commands::save_search_history(&owner, list);
     crate::wiring::tasks::spawn_in_app(async move {
         if let Err(error) = saved.await {
             log::warn!("iptv search: could not save the recent searches: {error}");

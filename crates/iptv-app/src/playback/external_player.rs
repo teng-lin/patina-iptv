@@ -1,12 +1,12 @@
 //! Handoff for an explicit channel choice in a group with external playback.
-use crate::runtime::Runtime;
-use crate::runtime::model::{ResolveFailure, StreamPurpose};
 use crate::{Playback, Ui, ViewMode, host, kit::i18n::tr};
 use iptv_core::guide::{Program, Schedule};
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
 use iptv_presentation::external_player::{Handoff, State};
 use iptv_presentation::lists::{Entry, ListId};
+use iptv_runtime::Runtime;
+use iptv_runtime::model::{ResolveFailure, StreamPurpose};
 use nsh_core::prelude::{Memo, Signal, Stored, computed, signal, stored, untracked};
 use std::rc::Rc;
 
@@ -157,11 +157,11 @@ fn clear_pending_target(cast: crate::screens::casting::CastUi, ticket: Option<u6
 struct PendingHandoff {
     ui: Ui,
     ticket: u64,
-    owner: Rc<crate::runtime::Runtime>,
+    owner: Rc<iptv_runtime::Runtime>,
 }
 
 impl PendingHandoff {
-    fn new(ui: Ui, ticket: u64, owner: Rc<crate::runtime::Runtime>) -> Self {
+    fn new(ui: Ui, ticket: u64, owner: Rc<iptv_runtime::Runtime>) -> Self {
         Self { ui, ticket, owner }
     }
 
@@ -403,7 +403,7 @@ fn open_from(
         return Outcome::Handled;
     }
     let at = archive.map(|p| crate::guide::unix_of(&*schedule, p.start));
-    let clock = crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), at);
+    let clock = iptv_runtime::time::playback_clock(crate::guide::clock::wall_unix(), at);
     let epoch = schedule.epoch_unix();
     let epg_offset = epg.epg_offset_minutes(local);
     let expected = authority.clone();
@@ -423,7 +423,7 @@ fn open_from(
             if selected != channel {
                 return None;
             }
-            let clock = crate::runtime::time::playback_clock(
+            let clock = iptv_runtime::time::playback_clock(
                 crate::time::wall_unix(),
                 Some(crate::guide::unix_of(&*schedule, program.start)),
             );

@@ -23,8 +23,8 @@ use crate::kit::input::dismiss_keyboard;
 use iptv_presentation::library::epg_sources as state;
 mod words;
 
-use crate::runtime::model::SourceId;
 use iptv_nav::Action;
+use iptv_runtime::model::SourceId;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
@@ -49,7 +49,7 @@ pub fn open(screens: crate::ScreensUi, playlist: SourceId) {
     screens.guide_sources.set(Some(screen(playlist)));
     // Timer failures can occur without publishing a new visible guide.
     // Opening the controls always reads the latest persisted refresh result.
-    crate::runtime::data::refresh_guide_status(&crate::wiring::runtime_owner::runtime());
+    iptv_runtime::data::refresh_guide_status(&crate::wiring::runtime_owner::runtime());
 }
 
 /// The screen for `playlist`; a host that cannot import offers no guide
@@ -218,7 +218,7 @@ fn edit_name(edit: &crate::wiring::data::guides::Edit) -> String {
 }
 
 /// A guide source's title (its name, else where it comes from).
-pub fn source_title(s: &crate::runtime::model::GuideSource) -> String {
+pub fn source_title(s: &iptv_runtime::model::GuideSource) -> String {
     words::title(s)
 }
 

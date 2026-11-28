@@ -43,7 +43,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     {
         return false;
     }
-    let Some(context) = crate::runtime::Runtime::stored_playback_context(&stored.source.config)
+    let Some(context) = iptv_runtime::Runtime::stored_playback_context(&stored.source.config)
     else {
         return false;
     };
@@ -52,7 +52,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     };
     let id = stored.id;
     let content = ContentId::from_stored(key.clone());
-    let row = match crate::runtime::commands::channel(
+    let row = match iptv_runtime::commands::channel(
         &crate::wiring::runtime_owner::runtime(),
         id,
         content,
@@ -90,7 +90,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     main.health.update(|h| session = h.start(true, now));
     ui.playback.player.resume.set(false);
     ui.playback.playback.set(Playback::Live);
-    let authority = crate::runtime::Runtime::stored_source_authority(stored).resolve(&row.channel);
+    let authority = iptv_runtime::Runtime::stored_source_authority(stored).resolve(&row.channel);
     ui.playback.player.early.set(Some(Early {
         authority: authority.clone(),
         source_id: stored.id.0,

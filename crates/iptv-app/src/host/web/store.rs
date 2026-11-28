@@ -24,7 +24,7 @@ use std::time::Duration;
 use iptv_store_sqlite::{BrowserFiles, CHUNK_BYTES, Store, StoreError};
 use iptv_web::adapters::chunks;
 
-use crate::runtime::store_host::{Persist, StoreHost};
+use iptv_runtime::store_host::{Persist, StoreHost};
 
 /// How long a failed save waits before its chunks are offered again (a
 /// full quota or a busy database does not clear at once).

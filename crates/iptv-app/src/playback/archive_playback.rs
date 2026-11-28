@@ -21,7 +21,7 @@ impl Choice {
         program: Program,
         playing_context: bool,
     ) -> Option<Self> {
-        let authority = crate::runtime::Runtime::playback_authority(schedule, channel);
+        let authority = iptv_runtime::Runtime::playback_authority(schedule, channel);
         Some(Self {
             list,
             playing_context,
@@ -45,7 +45,7 @@ impl Choice {
         let (channel, Playback::CatchUp { start, .. }) = self.pending.remap(schedule)? else {
             return None;
         };
-        let authority = crate::runtime::Runtime::playback_authority(schedule, channel);
+        let authority = iptv_runtime::Runtime::playback_authority(schedule, channel);
         let program = schedule.program_at(channel, start);
         if (self.playing_context && playing != Some(channel))
             || authority != self.authority

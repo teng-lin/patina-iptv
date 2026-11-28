@@ -3,9 +3,9 @@
 //! playlist, the ones the catalog reads; the actions are the ones the playlists screen and the wizard
 //! already run (refresh a playlist, open its actions, add a playlist).
 use super::*;
-use crate::runtime::model::{ImportErrorKind, SourceId};
 use crate::wiring::data::Activity;
 use iptv_presentation::vod::{EmptyAction, ImportProblem, SourceVod, VodState};
+use iptv_runtime::model::{ImportErrorKind, SourceId};
 
 fn problem(kind: ImportErrorKind) -> ImportProblem {
     match kind {

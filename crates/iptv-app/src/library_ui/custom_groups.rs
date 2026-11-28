@@ -3,7 +3,6 @@
 use crate::kit::i18n::{tr, trf};
 use crate::kit::input::dismiss_keyboard;
 
-use crate::runtime::Error;
 use crate::{
     Ui,
     kit::scale::Scale,
@@ -16,6 +15,7 @@ use iptv_nav::Action;
 pub use iptv_presentation::custom_groups::Open;
 use iptv_presentation::custom_groups::{Page, Text};
 use iptv_providers::ContentId;
+use iptv_runtime::Error;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
@@ -88,7 +88,7 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
     ui.screens.custom_groups.open(Open::new(source));
     request(
         ui,
-        crate::runtime::commands::custom_groups(&crate::wiring::runtime_owner::runtime(), source),
+        iptv_runtime::commands::custom_groups(&crate::wiring::runtime_owner::runtime(), source),
         move |ui, result| match result {
             Ok(groups) => {
                 update(ui.screens, |s| s.reload_groups(groups));
@@ -113,7 +113,7 @@ fn reload(ui: Ui) {
     };
     request(
         ui,
-        crate::runtime::commands::group_members(
+        iptv_runtime::commands::group_members(
             &crate::wiring::runtime_owner::runtime(),
             source,
             scope,
@@ -147,7 +147,7 @@ fn show_members(ui: Ui, scope: ChannelScope) {
     let loaded_scope = scope.clone();
     request(
         ui,
-        crate::runtime::commands::members(
+        iptv_runtime::commands::members(
             &crate::wiring::runtime_owner::runtime(),
             source,
             loaded_scope,
@@ -214,7 +214,7 @@ fn commit_text(ui: Ui) {
     mutate(
         ui,
         s.source,
-        crate::runtime::commands::save_custom_group(
+        iptv_runtime::commands::save_custom_group(
             &crate::wiring::runtime_owner::runtime(),
             s.source,
             match kind {
@@ -365,7 +365,7 @@ fn act(ui: Ui, index: usize) {
                 mutate(
                     ui,
                     s.source,
-                    crate::runtime::commands::remove_custom_members(
+                    iptv_runtime::commands::remove_custom_members(
                         &crate::wiring::runtime_owner::runtime(),
                         origin,
                         ids,
@@ -398,7 +398,7 @@ fn act(ui: Ui, index: usize) {
             mutate(
                 ui,
                 s.source,
-                crate::runtime::commands::transfer_custom_members(
+                iptv_runtime::commands::transfer_custom_members(
                     &crate::wiring::runtime_owner::runtime(),
                     s.source,
                     s.origin(),
@@ -438,7 +438,7 @@ fn act(ui: Ui, index: usize) {
                 mutate(
                     ui,
                     s.source,
-                    crate::runtime::commands::delete_custom_group(
+                    iptv_runtime::commands::delete_custom_group(
                         &crate::wiring::runtime_owner::runtime(),
                         g,
                     ),

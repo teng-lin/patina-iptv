@@ -1,8 +1,8 @@
 //! Platform dialogs and document transport for runtime-owned backups.
 use crate::host::backup_documents as documents;
 use crate::kit::i18n::{tr, trf};
-use crate::runtime::backup::error::{Context, Error, Rejection};
-use crate::runtime::backup::report;
+use iptv_runtime::backup::error::{Context, Error, Rejection};
+use iptv_runtime::backup::report;
 
 use std::fs::File;
 

@@ -39,14 +39,14 @@ use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
 use crate::guide::{ProgramSelection, Schedule};
-use crate::runtime::Runtime;
-use crate::runtime::model::{ImportErrorKind, ResolveFailure, StreamPurpose};
 use crate::wiring::runtime_owner::runtime;
 use crate::{
     Playback, Ui, ViewMode, guide::lists, playback::browse_playback, playback::external_player,
     screens::parental_view,
 };
 use crate::{playback::seek, screens::recordings_view};
+use iptv_runtime::Runtime;
+use iptv_runtime::model::{ImportErrorKind, ResolveFailure, StreamPurpose};
 
 mod recover;
 pub(crate) mod resume;
@@ -336,7 +336,7 @@ fn later(playback: crate::PlaybackUi, delay: Duration, f: impl FnOnce() + 'stati
 /// start for catch-up: date placeholders describe that instant).
 fn clock(at: Option<i64>) -> Clock {
     let now = crate::guide::clock::wall_unix();
-    crate::runtime::time::playback_clock(now, at)
+    iptv_runtime::time::playback_clock(now, at)
 }
 
 /// Identity and UTC survive a catalog reorder or a different guide epoch.
@@ -920,7 +920,7 @@ fn open_early_resume(ui: Ui, surface: usize, session: u64) {
         let owner = crate::wiring::runtime_owner::runtime();
         let source = iptv_library::SourceId(early.source_id);
         let channel = iptv_providers::ContentId::from_stored(early.key.clone());
-        let allowed = crate::runtime::commands::channel(&owner, source, channel)
+        let allowed = iptv_runtime::commands::channel(&owner, source, channel)
             .await
             .is_ok_and(|row| row.is_some_and(|r| !r.blocked));
         if ui
@@ -1119,7 +1119,7 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
 
 /// Local admission uses the same retryable refusal as a connection held by
 /// recording in open_allowed(). The channel resolved; its address is present.
-fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &crate::runtime::Error) -> bool {
+fn fail_capacity(ui: Ui, surface: usize, session: u64, error: &iptv_runtime::Error) -> bool {
     if !error.provider_capacity() {
         return false;
     }
@@ -1437,16 +1437,16 @@ fn show_channel(ui: Ui, channel: usize) {
 
 /// Playlist `source` was deleted: its last channel goes too (after any
 /// write still queued for it).
-pub fn forget_source(source: crate::runtime::model::SourceId) {
+pub fn forget_source(source: iptv_runtime::model::SourceId) {
     crate::wiring::runtime_owner::runtime().forget_last_channel(source);
 }
 /// The last channel of playlist `source` (the shared one of older builds
 /// for none), a write still queued included.
-fn load_last_channel(source: Option<crate::runtime::model::SourceId>) -> Option<String> {
+fn load_last_channel(source: Option<iptv_runtime::model::SourceId>) -> Option<String> {
     crate::wiring::runtime_owner::runtime().load_last_channel(source)
 }
 /// Queues the write: a zap never waits for the disk.
-fn save_last_channel(source: Option<crate::runtime::model::SourceId>, key: &str) {
+fn save_last_channel(source: Option<iptv_runtime::model::SourceId>, key: &str) {
     crate::wiring::runtime_owner::runtime().save_last_channel(source, key);
 }
 

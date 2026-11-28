@@ -55,7 +55,7 @@ fn metadata() -> Metadata {
 }
 
 fn service() -> Service {
-    Service::new(crate::runtime())
+    Service::new(crate::wiring::runtime_owner::runtime())
 }
 
 struct Prompts(Ui);
@@ -472,13 +472,14 @@ fn progress_timer(ui: Ui) {
 
 fn cancellation_allowed(screens: crate::ScreensUi) -> bool {
     update_ui(screens).revision.get();
-    !update_ui(screens).install_busy.get() || host::can_cancel_install(&crate::runtime())
+    !update_ui(screens).install_busy.get()
+        || host::can_cancel_install(&crate::wiring::runtime_owner::runtime())
 }
 
 fn cancel_download(screens: crate::ScreensUi) -> bool {
     // Native extraction can win between rendering an enabled button and the
     // press. Do not claim cancellation or persist Skip after that boundary.
-    if !host::try_cancel_current(&crate::runtime()) {
+    if !host::try_cancel_current(&crate::wiring::runtime_owner::runtime()) {
         changed(screens);
         return false;
     }
@@ -531,7 +532,7 @@ fn download(ui: Ui) {
     crate::wiring::tasks::spawn_in_app(async move {
         let _operation = operation;
         let prompts = Prompts(ui);
-        let owner = crate::runtime();
+        let owner = crate::wiring::runtime_owner::runtime();
         let Some(result) =
             host::until_update_cancelled(&prompts, host::action_for(&owner, metadata(), &check))
                 .await
