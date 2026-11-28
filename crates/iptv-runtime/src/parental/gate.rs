@@ -135,4 +135,4 @@ impl ExternalPlaybackAuthorization {
     }
 }
 
-pub(crate) const SETTINGS_LOCKED_REASON: &str = "Unlock parental controls before changing settings";
+pub(crate) use crate::error::SETTINGS_LOCKED_REASON;

@@ -711,6 +711,78 @@ fn store_service_names_only_infrastructure() {
     exact(&found, STORE_SERVICE_MAY_NAME, "store_service dependency");
 }
 
+/// Bottom-layer modules: they may name each other and external crates, never
+/// an orchestration module. Exact, shrink-only list.
+const FOUNDATION: &[&str] = &[
+    "error",
+    "model",
+    "state",
+    "paging",
+    "time",
+    "network",
+    "execution",
+    "workers",
+    "ports",
+    "events",
+    "file_writer",
+    "storage",
+    "build_config",
+];
+
+/// Non-FOUNDATION items that foundation modules and leaf submodules may name:
+/// crate-root re-exports, leaf host/threading/test traits, native adapter
+/// bridges behind `cfg(feature = "native")`, and leaf submodules. Exact list.
+const FOUNDATION_EXTRA_MAY_NAME: &[&str] = &[
+    "Error",
+    "MaybeSend",
+    "TestGate",
+    "cast::port",
+    "file_host",
+    "native",
+    "parental::gate",
+    "store_host",
+    "testing",
+    "threading",
+];
+
+fn foundation_member(name: &str) -> bool {
+    if matches!(name, "parental/gate.rs" | "cast/port.rs" | "cast/pairing.rs") {
+        return true;
+    }
+    FOUNDATION.iter().any(|module| {
+        name == format!("{module}.rs") || name.starts_with(&format!("{module}/"))
+    })
+}
+
+#[test]
+fn foundation_modules_depend_only_on_foundation() {
+    let sources = runtime_sources();
+    let tests = test_modules(&sources);
+    let mut extra_used = BTreeSet::new();
+    for (name, code) in &sources {
+        if !foundation_member(name) || tests.contains(name) {
+            continue;
+        }
+        let code = shipped(code);
+        for item in crate_named(&code, false) {
+            if FOUNDATION.contains(&item.as_str()) {
+                continue;
+            }
+            assert!(
+                FOUNDATION_EXTRA_MAY_NAME.contains(&item.as_str()),
+                "{name} names crate::{item}; foundation modules may name only FOUNDATION \
+                 modules or listed leaf dependencies"
+            );
+            extra_used.insert(item);
+        }
+    }
+    exact(
+        &extra_used,
+        FOUNDATION_EXTRA_MAY_NAME,
+        "foundation extra dependency",
+    );
+}
+
 #[test]
 fn declarations_include_local_statics_but_not_lifetimes() {
     assert_eq!(statics("fn f() { static mut local: u32 = 0; }"), ["local"]);

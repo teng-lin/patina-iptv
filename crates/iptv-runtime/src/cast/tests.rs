@@ -1,4 +1,5 @@
 use super::*;
+use std::pin::Pin;
 use iptv_core::parental::Target;
 use iptv_guide::playback::SourceAuthority;
 use iptv_providers::{

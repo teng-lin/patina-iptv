@@ -29,11 +29,25 @@ use iptv_providers::{HttpRequest, HttpResponse};
 
 use crate::threading::MaybeSend;
 
+/// The part of the provider network configuration that no setting changes
+/// (limits, the development fixture override). Playback transport reads it
+/// on player threads, which act for no owner.
+pub fn base_network_config() -> NetworkConfig {
+    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
+    let mut config = NetworkConfig::default();
+    #[cfg(debug_assertions)]
+    {
+        config.allow_private_fixture = cfg!(any(test, feature = "test-support"))
+            || crate::build_config::DEV_PLAYLIST.is_some();
+    }
+    config
+}
+
 /// Extra native trust anchors shared by the default provider and player transports.
 /// Player threads may read this policy before a runtime owner exists.
 #[cfg(feature = "native")]
 pub fn default_playback_trust_anchors() -> Vec<Vec<u8>> {
-    crate::native::network::adapter_config(&crate::settings::base_network_config()).extra_roots_der
+    crate::native::network::adapter_config(&base_network_config()).extra_roots_der
 }
 
 /// A boxed future of an adapter: `Send` when the runtime is threaded.

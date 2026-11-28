@@ -4,9 +4,9 @@ pub(crate) mod gate;
 
 use crate::Runtime;
 pub use gate::Error;
-pub(crate) use gate::{
-    SETTINGS_LOCKED_REASON, Snapshot, TransferredGroups, now_ms, policy_settings,
-};
+#[allow(unused_imports)]
+pub(crate) use gate::SETTINGS_LOCKED_REASON;
+pub(crate) use gate::{Snapshot, TransferredGroups, now_ms, policy_settings};
 use iptv_core::parental::{Access, ContentKind, Pin, Policy, Target, UnlockWindow};
 use iptv_library::SourceId;
 use std::{

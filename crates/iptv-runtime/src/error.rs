@@ -28,6 +28,8 @@ enum ErrorKind {
 const PROVIDER_CAPACITY_REASON: &str =
     iptv_core::message::key("No provider connection available; check Streams at once");
 
+pub(crate) const SETTINGS_LOCKED_REASON: &str = "Unlock parental controls before changing settings";
+
 pub struct Error(ErrorKind);
 
 impl Error {
@@ -35,7 +37,7 @@ impl Error {
     pub fn unavailable_reason(&self) -> Option<&'static str> {
         match &self.0 {
             ErrorKind::Unavailable(reason) | ErrorKind::RestartRequired(reason) => Some(reason),
-            ErrorKind::SettingsLocked => Some(crate::parental::SETTINGS_LOCKED_REASON),
+            ErrorKind::SettingsLocked => Some(SETTINGS_LOCKED_REASON),
             ErrorKind::ProviderCapacity => Some(PROVIDER_CAPACITY_REASON),
             _ => None,
         }
@@ -120,7 +122,7 @@ impl Error {
     pub fn unavailable(reason: &'static str) -> Self {
         match reason {
             PROVIDER_CAPACITY_REASON => Self(ErrorKind::ProviderCapacity),
-            crate::parental::SETTINGS_LOCKED_REASON => Self(ErrorKind::SettingsLocked),
+            SETTINGS_LOCKED_REASON => Self(ErrorKind::SettingsLocked),
             "cannot start store worker" => Self(ErrorKind::WorkerUnavailable),
             _ => Self(ErrorKind::Unavailable(reason)),
         }
@@ -141,7 +143,7 @@ impl Error {
             ErrorKind::Storage(error) => error,
             ErrorKind::Unavailable(reason) => iptv_store_sqlite::StoreError::Unavailable(reason),
             ErrorKind::SettingsLocked => {
-                iptv_store_sqlite::StoreError::Unavailable(crate::parental::SETTINGS_LOCKED_REASON)
+                iptv_store_sqlite::StoreError::Unavailable(SETTINGS_LOCKED_REASON)
             }
             ErrorKind::RestartRequired(reason) => {
                 iptv_store_sqlite::StoreError::RestartRequired(reason)
@@ -229,7 +231,7 @@ impl From<iptv_store_sqlite::StoreError> for Error {
     fn from(error: iptv_store_sqlite::StoreError) -> Self {
         let kind = match error {
             iptv_store_sqlite::StoreError::Unavailable(reason)
-                if reason == crate::parental::SETTINGS_LOCKED_REASON =>
+                if reason == SETTINGS_LOCKED_REASON =>
             {
                 ErrorKind::SettingsLocked
             }

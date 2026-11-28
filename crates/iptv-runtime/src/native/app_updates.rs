@@ -92,7 +92,7 @@ impl crate::Runtime {
         let (_cancel_on_drop, cancel) = tokio::sync::oneshot::channel::<()>();
         // Catalog restores swap the profile directory. Trust state must survive that swap.
         use sha2::{Digest, Sha256};
-        let state = crate::backup::sibling(self.data_dir(), "app-update")
+        let state = crate::storage::sibling(self.data_dir(), "app-update")
             .join(format!("{:x}", Sha256::digest(feed.as_bytes())));
         self.services()
             .spawn(async move {
