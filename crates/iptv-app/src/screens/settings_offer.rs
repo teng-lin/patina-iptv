@@ -17,6 +17,7 @@ pub const WIRED: &[&str] = &[
     "vod.autoplay_next_episode",
     "general.language",
     "general.double_back_to_exit",
+    "general.airplay_casting",
     "channels.show_favorites",
     "channels.show_recent",
     "channels.show_all_channels",
@@ -215,6 +216,14 @@ pub fn offer(device: Device, key: &str) -> Offer {
         return Offer::Hidden;
     }
     let host = device.host;
+    if key == "general.airplay_casting"
+        && !matches!(
+            host.platform,
+            iptv_core::capabilities::Platform::Linux | iptv_core::capabilities::Platform::Windows
+        )
+    {
+        return Offer::Hidden;
+    }
     if matches!(
         key,
         "general.check_updates" | "general.app_update_frequency"
@@ -418,6 +427,16 @@ mod tests {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
             assert_eq!(offer("general.user_agent"), Offer::Active);
+            let airplay = if matches!(
+                device.host.platform,
+                iptv_core::capabilities::Platform::Linux
+                    | iptv_core::capabilities::Platform::Windows
+            ) {
+                Offer::Active
+            } else {
+                Offer::Hidden
+            };
+            assert_eq!(offer("general.airplay_casting"), airplay);
             assert_eq!(offer("epg.update_now"), Offer::Hidden);
             assert_eq!(offer("epg.manage_sources"), Offer::Active);
             assert_eq!(offer("epg.add_source"), Offer::Hidden);

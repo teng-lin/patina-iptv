@@ -25,6 +25,7 @@ pub struct BindingsKey(pub(crate) &'static str);
 pub const LANGUAGE: TextKey = TextKey("general.language");
 pub const CLOCK: EnumKey = EnumKey("general.clock");
 pub const APP_UPDATE_FREQUENCY: EnumKey = EnumKey("general.app_update_frequency");
+pub const AIRPLAY_CASTING: BoolKey = BoolKey("general.airplay_casting");
 
 // Input (iptv-nav).
 pub const LONG_PRESS: DurationKey = DurationKey("remote.long_press");
@@ -95,6 +96,7 @@ pub const ALL: &[(&str, &str)] = &[
     (LANGUAGE.0, "text"),
     (CLOCK.0, "enum"),
     (APP_UPDATE_FREQUENCY.0, "enum"),
+    (AIRPLAY_CASTING.0, "bool"),
     (LONG_PRESS.0, "duration"),
     (DIGIT_TIMEOUT.0, "duration"),
     (KEY_OVERRIDES.0, "key_bindings"),

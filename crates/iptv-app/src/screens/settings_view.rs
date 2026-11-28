@@ -320,8 +320,15 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
 }
 
 fn store(key: &'static str, value: Value) {
-    if let Err(error) = save_setting(key, value) {
-        notify_setting_error(error);
+    let enabling_linux_airplay = crate::host::LINUX
+        && key == iptv_settings::keys::AIRPLAY_CASTING.as_str()
+        && value == Value::Bool(true);
+    match save_setting(key, value) {
+        Ok(()) if enabling_linux_airplay => notify(tr(
+            "AirPlay enabled. If a firewall like UFW is active, allow TCP 49152 and UDP 49153 from your receiver.",
+        )),
+        Ok(()) => {}
+        Err(error) => notify_setting_error(error),
     }
 }
 

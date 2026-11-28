@@ -142,6 +142,7 @@ pub fn label(key: &str) -> &'static str {
         "general.keyboard" => tr("On-screen keyboard"),
         "general.user_agent" => tr("Default User-Agent"),
         "general.udp_proxy" => tr("UDP relay"),
+        "general.airplay_casting" => tr("AirPlay casting"),
         "general.usage_statistics" => tr("Share anonymous usage counts"),
         "general.app_update_frequency" => tr("Automatically check for app updates"),
         "general.auto_update" => tr("Update by itself"),

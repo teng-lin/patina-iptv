@@ -111,6 +111,13 @@ address:
 sudo ufw allow from 192.0.2.10 to any port 49152 proto tcp
 ```
 
+For AirPlay on Linux (enabled in **Settings → General → AirPlay casting**), also
+allow the UDP timing port (49153 by default, or `PATINA_AIRPLAY_TIMING_PORT`):
+
+```sh
+sudo ufw allow from 192.0.2.10 to any port 49153 proto udp
+```
+
 If your firewall already permits a different port from the receiver, quit
 Patina and launch it with that port. For example, if TCP 53317 is available
 and allowed:

@@ -112,6 +112,13 @@ pub static GENERAL: &[Setting] = &[
     .advanced(),
     // default: ours
     general(
+        "network",
+        "general.airplay_casting",
+        boolean(false),
+        key("Show AirPlay receivers alongside Chromecast in the Cast picker."),
+    ),
+    // default: ours
+    general(
         "privacy",
         "general.usage_statistics",
         boolean(false),

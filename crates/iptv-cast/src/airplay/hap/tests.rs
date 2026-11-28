@@ -681,3 +681,46 @@ async fn pending_endpoint_attempts_share_the_original_connection_deadline() {
     assert_eq!(error, AuthFault::TimedOut);
     assert_eq!(started.elapsed(), CONNECTION_TIMEOUT);
 }
+
+#[tokio::test(start_paused = true)]
+async fn routable_endpoints_are_tried_before_link_local_ipv6() {
+    use std::cell::RefCell;
+
+    let link_local = SocketAddr::V6(std::net::SocketAddrV6::new(
+        "fe80::1".parse().unwrap(),
+        7000,
+        0,
+        2,
+    ));
+    let ipv4: SocketAddr = "192.0.2.10:7000".parse().unwrap();
+    let attempted = RefCell::new(Vec::new());
+    let (chosen, _) = first_reachable_endpoint(&[link_local, ipv4], |address| {
+        let attempted = &attempted;
+        async move {
+            attempted.borrow_mut().push(address);
+            Ok(())
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(chosen, ipv4);
+    assert_eq!(*attempted.borrow(), vec![ipv4]);
+
+    // Link-local IPv6 is still used when no routable address connects.
+    let attempted = RefCell::new(Vec::new());
+    let (chosen, _) = first_reachable_endpoint(&[link_local, ipv4], |address| {
+        let attempted = &attempted;
+        async move {
+            attempted.borrow_mut().push(address);
+            if address == link_local {
+                Ok(())
+            } else {
+                Err(Fault::Unreachable)
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(chosen, link_local);
+    assert_eq!(*attempted.borrow(), vec![ipv4, link_local]);
+}

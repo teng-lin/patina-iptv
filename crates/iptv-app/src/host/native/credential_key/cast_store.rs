@@ -1,18 +1,28 @@
-//! Persistent AirPlay pairings stay in the Linux session's Secret Service.
+//! Persistent AirPlay pairings stay in the desktop OS credential store.
+#[cfg(target_os = "linux")]
 use super::linux::Entry;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use iptv_cast::{Credential, CredentialKey, CredentialStore, StoreError};
+#[cfg(windows)]
+use keyring::Entry;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::{self, File, OpenOptions},
     io,
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use zeroize::Zeroizing;
 
+#[derive(Clone)]
 pub(in crate::host::native) struct CastStore {
+    inner: Arc<CastStoreInner>,
+}
+
+struct CastStoreInner {
     directory: PathBuf,
+    #[cfg(target_os = "linux")]
     label: String,
     lease: tokio::sync::OnceCell<Lease>,
 }
@@ -26,13 +36,11 @@ impl Lease {
     fn open(directory: &Path) -> io::Result<Self> {
         fs::create_dir_all(directory)?;
         let directory = directory.canonicalize()?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(directory.join(".airplay-pairing-lock"))?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let lock = options.open(directory.join(".airplay-pairing-lock"))?;
         lock.try_lock()?;
         Ok(Self {
             namespace: URL_SAFE_NO_PAD.encode(directory.as_os_str().as_encoded_bytes()),
@@ -43,10 +51,15 @@ impl Lease {
 
 impl CastStore {
     pub(in crate::host::native) fn new(directory: &Path, label: String) -> Self {
+        #[cfg(not(target_os = "linux"))]
+        let _ = label;
         Self {
-            directory: directory.to_owned(),
-            label,
-            lease: tokio::sync::OnceCell::new(),
+            inner: Arc::new(CastStoreInner {
+                directory: directory.to_owned(),
+                #[cfg(target_os = "linux")]
+                label,
+                lease: tokio::sync::OnceCell::new(),
+            }),
         }
     }
 
@@ -56,9 +69,10 @@ impl CastStore {
         work: impl FnOnce(Entry) -> Result<T, StoreError> + Send + 'static,
     ) -> Result<T, StoreError> {
         let lease = self
+            .inner
             .lease
             .get_or_try_init(|| async {
-                let directory = self.directory.clone();
+                let directory = self.inner.directory.clone();
                 tokio::task::spawn_blocking(move || Lease::open(&directory))
                     .await
                     .map_err(StoreError::new)?
@@ -67,12 +81,18 @@ impl CastStore {
             .await?;
         let account = format!("{}:{}", lease.namespace, key);
         let lock = lease.lock.clone();
-        let label = self.label.clone();
+        #[cfg(target_os = "linux")]
+        let label = self.inner.label.clone();
         tokio::task::spawn_blocking(move || {
             // A cancelled waiter can detach from an OS call. Hold the lease
             // until the blocking operation actually returns.
             let _lease = lock;
-            work(Entry::new("org.iptv-rs.airplay", &account, label).map_err(StoreError::new)?)
+            #[cfg(target_os = "linux")]
+            let entry =
+                Entry::new("org.iptv-rs.airplay", &account, label).map_err(StoreError::new)?;
+            #[cfg(windows)]
+            let entry = Entry::new("org.iptv-rs.airplay", &account).map_err(StoreError::new)?;
+            work(entry)
         })
         .await
         .map_err(StoreError::new)?
@@ -105,8 +125,17 @@ impl CastStore {
     }
 
     async fn remove_record(&self, key: &str) -> Result<(), StoreError> {
-        self.run(key, |entry| entry.delete_secret().map_err(StoreError::new))
-            .await
+        self.run(key, |entry| {
+            #[cfg(target_os = "linux")]
+            let result = entry.delete_secret();
+            #[cfg(windows)]
+            let result = match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(error) => Err(error),
+            };
+            result.map_err(StoreError::new)
+        })
+        .await
     }
 }
 

@@ -16,8 +16,16 @@ use std::{
 mod pairing;
 pub use pairing::{PairingPrompt, PairingRequest, pairing_prompt};
 
+/// Whether the host cast port includes AirPlay receivers alongside Chromecast.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AirPlayMode {
+    Disabled,
+    Enabled,
+}
+
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
 pub trait Port: Send + Sync {
+    fn configure_airplay(&self, _mode: AirPlayMode) {}
     fn discover(&self) -> Task<'_, Vec<Receiver>>;
     fn forget(&self, _receiver: Receiver) -> Task<'_, ()> {
         Box::pin(std::future::ready(Err(Error::Unsupported)))
@@ -201,16 +209,27 @@ impl Runtime {
             port.flush().await;
         }
     }
-    pub async fn cast_receivers(&self) -> Result<Vec<Receiver>, Error> {
-        if self.services().ports().cast.is_none() && self.native_cast_available() {
-            return Ok(Vec::new());
-        }
+    fn configured_cast_port(&self) -> Result<Arc<dyn Port>, Error> {
         let port = self
             .services()
             .ports()
             .cast
             .clone()
             .ok_or(Error::Unavailable)?;
+        let mode = if self.setting_flag(iptv_settings::keys::AIRPLAY_CASTING) {
+            AirPlayMode::Enabled
+        } else {
+            AirPlayMode::Disabled
+        };
+        port.configure_airplay(mode);
+        Ok(port)
+    }
+
+    pub async fn cast_receivers(&self) -> Result<Vec<Receiver>, Error> {
+        if self.services().ports().cast.is_none() && self.native_cast_available() {
+            return Ok(Vec::new());
+        }
+        let port = self.configured_cast_port()?;
         self.spawn_network(async move { port.discover().await })
             .await
             .map_err(|_| Error::Unavailable)?
@@ -230,12 +249,7 @@ impl Runtime {
             .and_then(|active| active.remote.controls())
     }
     pub async fn forget_cast_pairing(&self, receiver: Receiver) -> Result<(), Error> {
-        let port = self
-            .services()
-            .ports()
-            .cast
-            .clone()
-            .ok_or(Error::Unavailable)?;
+        let port = self.configured_cast_port()?;
         self.spawn_network(async move { port.forget(receiver).await })
             .await
             .map_err(|_| Error::Unavailable)?
@@ -263,12 +277,7 @@ impl Runtime {
         grant: ExternalPlaybackAuthorization,
         pairing: PairingPrompt,
     ) -> Result<Box<dyn Prepared>, Error> {
-        let port = self
-            .services()
-            .ports()
-            .cast
-            .clone()
-            .ok_or(Error::Unavailable)?;
+        let port = self.configured_cast_port()?;
         let generation = self.cast.generation.clone();
         let services = self.services();
         if !services.tasks_ready() {
