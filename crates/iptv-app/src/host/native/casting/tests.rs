@@ -31,10 +31,43 @@ fn cast_relay_uses_a_fixed_default_or_an_explicit_tcp_port() {
     }
 }
 
+/// Runs `test` alone in a child of this executable and returns true there.
+///
+/// Rebinding a relay's port at once proves that its listener closed, but only
+/// in a process that spawns nothing: on Linux a child spawned by a parallel
+/// test holds a copy of every descriptor until it execs, so the port stays
+/// bound after the relay closed its own.
+#[cfg(feature = "test-support")]
+fn in_spawn_free_process(test: &str) -> bool {
+    const CHILD: &str = "PATINA_RELAY_RETIREMENT_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        return true;
+    }
+    let (_, module) = module_path!().split_once("::").unwrap();
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &format!("{module}::{test}"), "--nocapture"])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        result.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    false
+}
+
 #[cfg(all(feature = "test-support", not(target_os = "android")))]
 #[tokio::test]
 async fn dropping_a_pending_handoff_outside_the_runtime_retires_its_receiver_and_relay() {
     use iptv_cast::test_support::{self, Event};
+
+    if !in_spawn_free_process(
+        "dropping_a_pending_handoff_outside_the_runtime_retires_its_receiver_and_relay",
+    ) {
+        return;
+    }
 
     let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let receiver = test_support::Receiver::start(
@@ -115,26 +148,7 @@ async fn dropping_a_pending_handoff_outside_the_runtime_retires_its_receiver_and
 async fn locally_rejected_loads_release_the_relay_port_before_returning() {
     use iptv_cast::test_support;
 
-    const CHILD: &str = "PATINA_RELAY_RETIREMENT_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        // A concurrent Linux spawn can inherit the listening socket until exec,
-        // retaining its port after the relay has closed its own descriptor.
-        // Keep the immediate-reuse assertion strict in a process with no spawns.
-        let result = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "host::native::casting::tests::locally_rejected_loads_release_the_relay_port_before_returning",
-                "--nocapture",
-            ])
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&result.stdout);
-        assert!(
-            result.status.success() && stdout.contains("1 passed"),
-            "{stdout}\n{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+    if !in_spawn_free_process("locally_rejected_loads_release_the_relay_port_before_returning") {
         return;
     }
 
@@ -184,6 +198,10 @@ async fn locally_rejected_loads_release_the_relay_port_before_returning() {
 async fn canceled_retirement_and_stop_waiters_share_one_relay_shutdown() {
     use iptv_cast::test_support::{self, Event};
     use std::{future::poll_fn, task::Poll};
+
+    if !in_spawn_free_process("canceled_retirement_and_stop_waiters_share_one_relay_shutdown") {
+        return;
+    }
 
     let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let (release, stop) = tokio::sync::oneshot::channel();
