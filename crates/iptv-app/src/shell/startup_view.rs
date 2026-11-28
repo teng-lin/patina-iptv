@@ -265,20 +265,25 @@ fn run_effect(chrome: crate::ChromeUi, app: crate::SharedUi, effect: Effect) {
                 let owner = crate::wiring::runtime_owner::runtime();
                 let root = owner.data_dir().to_owned();
                 let label = crate::kit::i18n::tr("Patina backup");
-                let file = match crate::host::backup_documents::select_import(root, label).await {
-                    Ok(Some(file)) => file,
-                    Ok(None) => {
-                        finish_work(chrome, None);
-                        return;
-                    }
-                    Err(error) => {
-                        let reason = iptv_runtime::backup::report("choosing a backup", error);
-                        finish_work(chrome, Some(Notice::Message(reason)));
-                        return;
-                    }
-                };
+                let file =
+                    match crate::host::backup_documents::select_import(root.clone(), label).await {
+                        Ok(Some(file)) => file,
+                        Ok(None) => {
+                            finish_work(chrome, None);
+                            return;
+                        }
+                        Err(error) => {
+                            let reason = iptv_runtime::backup::report("choosing a backup", error);
+                            finish_work(chrome, Some(Notice::Message(reason)));
+                            return;
+                        }
+                    };
                 let path = file.path.clone();
+                // The restore renames the data directory, which Windows refuses
+                // while the desktop log inside it is open.
+                crate::host::diagnostics::shutdown();
                 let restored = owner.recover_corrupt_restore_backup(path).await;
+                crate::host::diagnostics::activate_storage(&root);
                 drop(file);
                 match restored {
                     Ok(_) => {
