@@ -117,7 +117,7 @@ fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewa
             crate::host::LinuxFirewall::Unknown => {}
         }
     }
-    if firewall == crate::host::LinuxFirewall::Firewalld && !lines.is_empty() {
+    if matches!(firewall, crate::host::LinuxFirewall::Firewalld) && !lines.is_empty() {
         lines.push("sudo firewall-cmd --reload".to_owned());
     }
     lines.join("\n")
@@ -127,7 +127,7 @@ fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewa
 fn firewall_notes(help: &FirewallHelp, firewall: crate::host::LinuxFirewall) -> String {
     let source = firewall_source(help);
     let mut notes = Vec::new();
-    if firewall == crate::host::LinuxFirewall::Unknown {
+    if matches!(firewall, crate::host::LinuxFirewall::Unknown) {
         let port = |port: Option<u16>| port.map_or_else(|| "-".to_owned(), |p| p.to_string());
         notes.push(trf(
             "No ufw or firewalld was found. In your firewall, allow TCP {tcp} and UDP {udp} from {source}.",
