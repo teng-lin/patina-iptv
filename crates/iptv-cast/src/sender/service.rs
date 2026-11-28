@@ -156,7 +156,7 @@ impl Candidate {
 pub(crate) struct ScanSink(Arc<Mutex<Option<Vec<Candidate>>>>);
 
 impl ScanSink {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Arc::new(Mutex::new(Some(Vec::new()))))
     }
 
@@ -188,7 +188,7 @@ impl ScanSink {
         }
     }
 
-    fn finish(&self) -> Vec<Candidate> {
+    pub(crate) fn finish(&self) -> Vec<Candidate> {
         self.0.lock().unwrap().take().unwrap_or_default()
     }
 }

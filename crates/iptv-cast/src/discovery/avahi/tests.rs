@@ -179,3 +179,84 @@ fn public_discovery_keeps_early_avahi_signals_and_filters_unusable_services() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[cfg(feature = "airplay")]
+#[test]
+fn airplay_avahi_browse_resolves_ipv4_and_ipv6_services() {
+    let (_bus, address) = private_bus();
+    let server = connection(&address);
+    server.request_name(AVAHI, false, true, false).unwrap();
+    let worker = std::thread::spawn(move || {
+        let mut resolved = 0;
+        while resolved < 2 {
+            let m = server
+                .channel()
+                .blocking_pop_message(Duration::from_secs(5))
+                .unwrap()
+                .expect("generated method call");
+            if m.interface().as_deref() != Some(SERVER) {
+                continue;
+            }
+            match m.member().as_deref() {
+                Some("ServiceBrowserNew") => {
+                    let path = Path::new("/airplay_browser").unwrap();
+                    for protocol in [IPV4, IPV6] {
+                        let signal = Message::new_signal(&*path, BROWSER, "ItemNew")
+                            .unwrap()
+                            .append3(2_i32, protocol, "Generated AirPlay")
+                            .append3(AIRPLAY_SERVICE, "local", 0_u32);
+                        server.send(signal).unwrap();
+                    }
+                    server
+                        .send(Message::new_signal(&*path, BROWSER, "AllForNow").unwrap())
+                        .unwrap();
+                    server.send(m.method_return().append1(path)).unwrap();
+                }
+                Some("ServiceResolverNew") => {
+                    let (link, protocol, name): (i32, i32, String) = m.read3().unwrap();
+                    let path = Path::new(format!("/airplay_resolve{resolved}")).unwrap();
+                    resolved += 1;
+                    let ip = if protocol == IPV6 {
+                        "fe80::10"
+                    } else {
+                        "192.0.2.10"
+                    };
+                    let txt = vec![
+                        b"deviceid=02:AA:BB:CC:DD:EE".to_vec(),
+                        b"flags=0x4".to_vec(),
+                    ];
+                    let found = Message::new_signal(&*path, RESOLVER, "Found")
+                        .unwrap()
+                        .append3(link, protocol, name)
+                        .append3(AIRPLAY_SERVICE, "local", "airplay.local")
+                        .append3(protocol, ip, 7000_u16)
+                        .append2(txt, 0_u32);
+                    server.send(found).unwrap();
+                    server.send(m.method_return().append1(path)).unwrap();
+                }
+                other => panic!("unexpected Avahi request {other:?}"),
+            }
+        }
+        server.channel().flush();
+    });
+
+    let records = browse_records(
+        &connection(&address),
+        AIRPLAY_SERVICE,
+        PROTO_UNSPEC,
+        Instant::now() + Duration::from_secs(2),
+    )
+    .unwrap();
+    worker.join().unwrap();
+    assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .iter()
+            .any(|r| r.address == "192.0.2.10".parse::<IpAddr>().unwrap())
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| r.address == "fe80::10".parse::<IpAddr>().unwrap())
+    );
+}

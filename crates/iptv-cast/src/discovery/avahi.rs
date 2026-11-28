@@ -18,6 +18,7 @@ const PROTO_UNSPEC: i32 = -1;
 const IPV4: i32 = 0;
 const IPV6: i32 = 1;
 
+#[derive(Clone)]
 pub(crate) struct ResolvedRecord {
     #[cfg_attr(
         not(feature = "airplay"),
