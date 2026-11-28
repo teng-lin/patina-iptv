@@ -268,7 +268,7 @@ fn exercise(data: &Path, combined_key: bool) {
             }
         }
     });
-    step(app.wait_for_within("text:Saved portal channel · Portal", IMPORT));
+    step(app.wait_for_within("text:Saved portal channel", IMPORT));
     step(crate::isolated::wait_outside(
         &mut app,
         "portal authentication is waiting",
@@ -278,7 +278,7 @@ fn exercise(data: &Path, combined_key: bool) {
     // Refreshing the other source now produces can_resume=true only after the
     // saved portal channel is visible, while its own auth remains gated.
     portal.release_m3u();
-    step(app.wait_for_within("text:Ready M3U · M3U", IMPORT));
+    step(app.wait_for_within("text:Ready M3U", IMPORT));
     assert_eq!(iptv_app::player_opens(0), before);
     assert!(!iptv_app::player_has_source(0));
     assert!(opened.lock().unwrap().is_empty());
@@ -388,7 +388,7 @@ fn adding_playlist_reauthenticates_a_cached_portal_after_startup_auth_failed() {
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
-    step(app.wait_for_within("text:Authenticated portal channel · Portal", IMPORT));
+    step(app.wait_for_within("text:Authenticated portal channel", IMPORT));
     assert!(
         portal.auth_attempts() > failed_attempts,
         "the cached portal must authenticate again"

@@ -166,6 +166,17 @@ pub trait Schedule {
     /// The channel's archive window in days (0: no catch-up).
     fn catchup_days(&self, channel: usize) -> u8;
     fn channel_name(&self, channel: usize) -> String;
+    /// The owning playlist's name when the schedule knows it.
+    fn channel_playlist(&self, _channel: usize) -> Option<&str> {
+        None
+    }
+    /// The owning category's label for `channel`, independent of whether its
+    /// playlist section is collapsed in the group browser.
+    fn channel_group_label(&self, channel: usize) -> Option<GroupName> {
+        crate::lists::group_of(self, channel)
+            .filter(|&group| !self.group_is_playlist(group))
+            .map(|group| self.group_label(group))
+    }
     /// The provider's channel number when it has one, else the 1-based
     /// position. (The guide numbers rows by their place in the list it
     /// shows: the active list view.)

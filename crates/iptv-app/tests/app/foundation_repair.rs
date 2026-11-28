@@ -59,16 +59,13 @@ fn assert_playback_unchanged(
     assert_eq!(players[0].id, player);
     assert!(!players[0].hidden);
     assert!(
-        nodes.iter().any(
-            |node| state.views.get(&node.id).is_some_and(|props| matches!(
-                props.accessibility.label.as_deref(),
-                Some("Synthetic Viewer" | "Synthetic Viewer · Synthetic viewer")
-            ) && props
-                .accessibility
-                .state
-                .selected)
-        ),
-        "focus retains the same viewer channel across source-qualified name presentation"
+        nodes
+            .iter()
+            .any(|node| state.views.get(&node.id).is_some_and(|props| {
+                props.accessibility.label.as_deref() == Some("Synthetic Viewer")
+                    && props.accessibility.state.selected
+            })),
+        "focus retains the same viewer channel with clean channel name"
     );
 }
 
