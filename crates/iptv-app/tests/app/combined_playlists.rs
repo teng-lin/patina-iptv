@@ -529,6 +529,112 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     );
 }
 
+/// A local M3U server that answers only once released.
+fn held_playlist(playlist: &'static str) -> (String, Arc<(Mutex<bool>, std::sync::Condvar)>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/synthetic.m3u", listener.local_addr().unwrap());
+    let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let held = release.clone();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let held = held.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 2 {
+                    line.clear();
+                }
+                let (released, signal) = &*held;
+                drop(
+                    signal
+                        .wait_while(released.lock().unwrap(), |released| !*released)
+                        .unwrap(),
+                );
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: audio/x-mpegurl\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{playlist}",
+                    playlist.len()
+                );
+            });
+        }
+    });
+    (url, release)
+}
+
+/// The combined guide with its second playlist, Beta, on screen while the
+/// first, Alpha, is still downloading. Setting the returned flag lets Alpha in.
+fn second_playlist_first(
+    home: &crate::isolated::Home,
+) -> (Headless, Arc<(Mutex<bool>, std::sync::Condvar)>) {
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut settings = Settings::new();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut store = crate::isolated::open_database(dir.join("iptv.sqlite")).unwrap();
+    let (url, release) = held_playlist(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"News\",Only Alpha\n\
+         http://stream.example.test/Alpha\n",
+    );
+    store
+        .add_source(&Source {
+            name: "Alpha".into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new(url),
+                user_agent: None,
+                referrer: None,
+            }),
+        })
+        .unwrap();
+    seed(&mut store, home.path(), "Beta");
+    store.set_all_playlists(true).unwrap();
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for_within("id:guide-row >> text:Only Beta", Duration::from_secs(20)));
+    step(app.wait_for("id:guide-header-details >> text:Beta · News"));
+    assert!(!app.shows("id:guide-row >> text:Only Alpha"));
+    (app, release)
+}
+
+fn release_playlist(release: &(Mutex<bool>, std::sync::Condvar)) {
+    *release.0.lock().unwrap() = true;
+    release.1.notify_all();
+}
+
+#[test]
+fn an_untouched_combined_guide_stays_at_the_top_as_an_earlier_playlist_loads() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, release) = second_playlist_first(&home);
+    release_playlist(&release);
+    step(app.wait_for_within("id:guide-row >> text:Only Alpha", Duration::from_secs(20)));
+    step(app.wait_for("id:guide-header-details >> text:Alpha · News"));
+    step(app.wait_for("id:guide-header-details >> text:Only Alpha"));
+}
+
+#[test]
+fn a_chosen_combined_guide_row_is_followed_as_an_earlier_playlist_loads() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, release) = second_playlist_first(&home);
+    // Away and back: the same first row, now the viewer's choice.
+    step(app.press_key("right"));
+    step(app.press_key("down"));
+    step(app.wait_for("id:guide-header-details >> text:Only Beta"));
+    step(app.press_key("up"));
+    step(app.wait_for("id:guide-header-details >> text:Shared"));
+    release_playlist(&release);
+    step(app.wait_for_within("id:guide-row >> text:Only Alpha", Duration::from_secs(20)));
+    step(app.wait_for("id:guide-header-details >> text:Shared"));
+    step(app.wait_for("id:guide-header-details >> text:Beta · News"));
+}
+
 #[test]
 fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     let Some(home) = isolated!() else { return };

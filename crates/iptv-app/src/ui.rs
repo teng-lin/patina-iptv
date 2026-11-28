@@ -145,6 +145,10 @@ pub(crate) struct GuideUi {
     /// started from: browse playback keeps that channel while the pan
     /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
     pub pan_anchor: Signal<Option<iptv_presentation::browse_playback::PanAnchor>>,
+    /// The focused row of the combined guide is the app's default, not a
+    /// channel the viewer or the app chose: a catalog swap goes to the top
+    /// of the list rather than follow it (`lists::restore`).
+    pub default_row: Stored<bool>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
     /// The guide rows on screen, as the list reports them.
@@ -349,6 +353,7 @@ impl Ui {
                 browse_playback: signal(Default::default()),
                 autoplay_held: signal(None),
                 pan_anchor: signal(None),
+                default_row: stored(false),
                 list: signal(Rc::new(ChannelList::build(
                     iptv_presentation::lists::ALL,
                     &*schedule(),
@@ -455,6 +460,7 @@ impl Ui {
                 }
                 ui.playback.pending_zap.set(None);
                 browse_playback::activity(ui);
+                crate::guide::lists::claim_row(ui.guide);
             }));
         });
         player_panels::bind_auto_hide(app, ui.playback);

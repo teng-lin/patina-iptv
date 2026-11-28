@@ -431,6 +431,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
             ui.chrome.exit_deadline.set(None);
         }
         crate::playback::browse_playback::activity(ui);
+        crate::guide::lists::claim_row(ui.guide);
     }
     // Menu has no hold: held, its repeats would close and reopen what its
     // press opened (a menu, the play bar).
