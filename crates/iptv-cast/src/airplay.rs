@@ -25,7 +25,7 @@ use tokio::{
     task::JoinHandle,
     time::{Instant, sleep_until},
 };
-use video::{MediaState, Video, VideoFault};
+use video::{MediaState, TimingPort, Video, VideoFault};
 use wire::Fault;
 
 const SERVICE: &str = "_airplay._tcp.local.";
@@ -34,7 +34,7 @@ const APPROVAL_WINDOW: Duration = Duration::from_secs(60);
 const MAX_ROUTES: usize = 128;
 
 pub(crate) struct AirPlay {
-    timing_port: Option<NonZeroU16>,
+    timing_port: TimingPort,
     #[cfg(test)]
     browse_daemon: Option<Box<dyn Fn() -> ServiceDaemon + Send + Sync>>,
 }
@@ -42,10 +42,19 @@ pub(crate) struct AirPlay {
 impl AirPlay {
     pub(crate) fn new(timing_port: Option<NonZeroU16>) -> Self {
         Self {
-            timing_port,
+            timing_port: TimingPort {
+                port: timing_port,
+                fallback: false,
+            },
             #[cfg(test)]
             browse_daemon: None,
         }
+    }
+
+    /// Bind an ephemeral timing port when the preferred one is unavailable.
+    pub(crate) fn with_timing_fallback(mut self, fallback: bool) -> Self {
+        self.timing_port.fallback = fallback;
+        self
     }
 
     fn new_daemon(&self) -> Result<ServiceDaemon, ErrorKind> {
@@ -70,20 +79,54 @@ impl AirPlay {
             .ok_or_else(|| failure(ErrorKind::Unsupported, Stage::Connect))?;
         // Resolve in the current network before requesting user approval. A
         // changed address is fine, but two instances claiming one ID are ambiguous.
-        let records = browse(
-            self.new_daemon()
-                .map_err(|kind| failure(kind, Stage::Connect))?,
-            Instant::now() + ROUTE_RESOLVE,
-            Some(identity),
-            None,
-        )
-        .await
-        .map_err(|kind| failure(kind, Stage::Connect))?;
+        let deadline = Instant::now() + ROUTE_RESOLVE;
+        let records = self
+            .discover_records(deadline, Some(identity), None)
+            .await
+            .map_err(|kind| failure(kind, Stage::Connect))?;
         let record = records
             .resolve_unique(identity)
             .map_err(|kind| failure(kind, Stage::Connect))?;
         self.connect_addresses(&record.addresses, record.pin_hint, credential)
             .await
+    }
+
+    async fn discover_records(
+        &self,
+        deadline: Instant,
+        identity: Option<&str>,
+        sink: Option<&ScanSink>,
+    ) -> Result<Records, ErrorKind> {
+        #[cfg(all(target_os = "linux", feature = "avahi"))]
+        {
+            // Unit tests never read the host's Avahi daemon: real LAN devices
+            // would make them nondeterministic.
+            let use_avahi = !cfg!(test);
+            if use_avahi {
+                // Keep part of the common budget for mDNS if Avahi is
+                // unavailable or cannot see this network.
+                let avahi_deadline = std::time::Instant::now()
+                    + deadline.saturating_duration_since(Instant::now()) / 2;
+                if let Ok(Ok(resolved)) = tokio::task::spawn_blocking(move || {
+                    crate::discovery::avahi::discover_airplay(avahi_deadline)
+                })
+                .await
+                {
+                    let records = Records::from_avahi(resolved, identity);
+                    let matched = match identity {
+                        Some(id) => records.unique(id).is_some(),
+                        None => !records.instances.is_empty(),
+                    };
+                    if matched {
+                        if let Some(sink) = sink {
+                            records.publish(sink);
+                        }
+                        return Ok(records);
+                    }
+                }
+            }
+        }
+        browse(self.new_daemon()?, deadline, identity, sink).await
     }
 
     async fn connect_addresses(
@@ -157,16 +200,10 @@ impl Backend for AirPlay {
 
     fn discover(&self, deadline: Instant, sink: ScanSink) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            browse(
-                self.new_daemon()
-                    .map_err(|kind| failure(kind, Stage::Discovery))?,
-                deadline,
-                None,
-                Some(&sink),
-            )
-            .await
-            .map(|_| ())
-            .map_err(|kind| failure(kind, Stage::Discovery))
+            self.discover_records(deadline, None, Some(&sink))
+                .await
+                .map(|_| ())
+                .map_err(|kind| failure(kind, Stage::Discovery))
         })
     }
 
@@ -188,10 +225,14 @@ enum PinHint {
 
 impl PinHint {
     fn from_service(info: &ResolvedService) -> Self {
+        Self::from_txt(|name| info.get_property_val_str(name))
+    }
+
+    fn from_txt<'a>(get: impl Fn(&str) -> Option<&'a str>) -> Self {
         const PIN_REQUIRED: u32 = 0x8;
         const PASSWORD_REQUIRED: u32 = 0x80;
         let flags = ["sf", "flags"].map(|name| {
-            let value = info.get_property_val_str(name)?;
+            let value = get(name)?;
             let digits = value
                 .strip_prefix("0x")
                 .or_else(|| value.strip_prefix("0X"))
@@ -203,11 +244,9 @@ impl PinHint {
         });
         // TXT access hints only choose the on-screen flow. Authentication
         // still depends on the handshake on the selected connection.
-        if info.get_property_val_str("act") == Some("2")
-            || info.get_property_val_str("acl") == Some("1")
-            || info
-                .get_property_val_str("pw")
-                .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+        if get("act") == Some("2")
+            || get("acl") == Some("1")
+            || get("pw").is_some_and(|value| value.eq_ignore_ascii_case("true"))
             || flags
                 .iter()
                 .flatten()
@@ -391,6 +430,103 @@ impl Records {
             _ => {}
         }
     }
+
+    #[cfg(all(target_os = "linux", feature = "avahi"))]
+    fn from_avahi(
+        resolved: Vec<crate::discovery::avahi::ResolvedRecord>,
+        identity: Option<&str>,
+    ) -> Self {
+        use std::net::IpAddr;
+
+        let mut records = Self::default();
+        let mut grouped: BTreeMap<String, Record> = BTreeMap::new();
+        for entry in resolved {
+            if entry.port == 0 {
+                continue;
+            }
+            let address = match entry.address {
+                IpAddr::V4(ip) if !ip.is_unspecified() && !ip.is_multicast() => {
+                    SocketAddr::from((ip, entry.port))
+                }
+                IpAddr::V6(ip) if !ip.is_unspecified() && !ip.is_multicast() => {
+                    let scope = if ip.is_unicast_link_local() {
+                        match u32::try_from(entry.interface) {
+                            Ok(index) if index != 0 => index,
+                            _ => continue,
+                        }
+                    } else {
+                        0
+                    };
+                    SocketAddr::V6(SocketAddrV6::new(ip, entry.port, 0, scope))
+                }
+                _ => continue,
+            };
+            let txt = |key: &str| {
+                entry.txt.iter().find_map(|raw| {
+                    let text = std::str::from_utf8(raw).ok()?;
+                    let (name, value) = text.split_once('=')?;
+                    name.eq_ignore_ascii_case(key).then_some(value)
+                })
+            };
+            let record_identity = txt("deviceid").and_then(normalize_identity);
+            if identity.is_some_and(|want| record_identity.as_deref() != Some(want)) {
+                continue;
+            }
+            let name = entry
+                .name
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(80)
+                .collect::<String>();
+            let key = entry.name.to_ascii_lowercase();
+            let pin_hint = PinHint::from_txt(txt);
+            grouped
+                .entry(key)
+                .and_modify(|existing| {
+                    if !existing.addresses.contains(&address) {
+                        existing.addresses.push(address);
+                        existing.addresses.sort_unstable();
+                    }
+                    if existing.identity.is_none() {
+                        existing.identity = record_identity.clone();
+                    }
+                    // A sparse resolve must not hide a PIN another resolve requires.
+                    if pin_hint == PinHint::Required || existing.pin_hint == PinHint::Unspecified {
+                        existing.pin_hint = pin_hint;
+                    }
+                })
+                .or_insert_with(|| Record {
+                    identity: record_identity,
+                    name: if name.trim().is_empty() {
+                        "AirPlay".into()
+                    } else {
+                        name
+                    },
+                    addresses: vec![address],
+                    pin_hint,
+                });
+        }
+        for (key, record) in grouped {
+            records.update(key, Some(record), None);
+        }
+        records
+    }
+
+    #[cfg(all(target_os = "linux", feature = "avahi"))]
+    fn publish(&self, sink: &ScanSink) {
+        let mut seen = std::collections::BTreeSet::new();
+        for record in self.instances.values() {
+            match &record.identity {
+                Some(id) if seen.insert(id.as_str()) => {
+                    if let Some(unique) = self.unique(id) {
+                        sink.push(unique.candidate());
+                    }
+                }
+                Some(_) => {}
+                None => sink.push(record.candidate()),
+            }
+        }
+    }
 }
 
 async fn browse(
@@ -485,7 +621,7 @@ fn video_error(fault: VideoFault, stage: Stage, delivery: Delivery) -> Error {
 struct AirPairing {
     challenge: Option<JoinHandle<Result<Challenge, AuthFailure>>>,
     expires: Instant,
-    timing_port: Option<NonZeroU16>,
+    timing_port: TimingPort,
 }
 
 impl Drop for AirPairing {
@@ -534,11 +670,11 @@ impl PairDriver for AirPairing {
 struct AirDriver {
     video: Video,
     trust: PeerTrust,
-    timing_port: Option<NonZeroU16>,
+    timing_port: TimingPort,
 }
 
 impl AirDriver {
-    fn new(secure: SecureSession, timing_port: Option<NonZeroU16>) -> Result<Self, Error> {
+    fn new(secure: SecureSession, timing_port: TimingPort) -> Result<Self, Error> {
         let trust = secure.trust;
         let video = Video::new(secure)
             .map_err(|fault| video_error(fault, Stage::Connect, Delivery::NotSent))?;

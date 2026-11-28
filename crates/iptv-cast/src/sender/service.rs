@@ -156,7 +156,7 @@ impl Candidate {
 pub(crate) struct ScanSink(Arc<Mutex<Option<Vec<Candidate>>>>);
 
 impl ScanSink {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Arc::new(Mutex::new(Some(Vec::new()))))
     }
 
@@ -188,7 +188,7 @@ impl ScanSink {
         }
     }
 
-    fn finish(&self) -> Vec<Candidate> {
+    pub(crate) fn finish(&self) -> Vec<Candidate> {
         self.0.lock().unwrap().take().unwrap_or_default()
     }
 }
@@ -247,6 +247,8 @@ pub struct CastBuilder {
     airplay_enabled: bool,
     #[cfg(feature = "airplay")]
     airplay_timing_port: Option<std::num::NonZeroU16>,
+    #[cfg(feature = "airplay")]
+    airplay_timing_fallback: bool,
 }
 
 impl CastBuilder {
@@ -269,6 +271,14 @@ impl CastBuilder {
         self
     }
 
+    /// Treat the AirPlay timing port as a preference: bind an OS-selected
+    /// port when it is already in use.
+    #[cfg(feature = "airplay")]
+    pub fn airplay_timing_port_fallback(mut self, fallback: bool) -> Self {
+        self.airplay_timing_fallback = fallback;
+        self
+    }
+
     /// Create a sender while entered in a live Tokio runtime with I/O and
     /// time enabled. Returns an error when there are no enabled backends.
     pub fn build(self) -> Result<Cast, Error> {
@@ -280,9 +290,10 @@ impl CastBuilder {
         let backends = {
             let mut backends = backends;
             if self.airplay_enabled {
-                backends.push(Arc::new(crate::airplay::AirPlay::new(
-                    self.airplay_timing_port,
-                )));
+                backends.push(Arc::new(
+                    crate::airplay::AirPlay::new(self.airplay_timing_port)
+                        .with_timing_fallback(self.airplay_timing_fallback),
+                ));
             }
             backends
         };
@@ -379,6 +390,8 @@ impl Cast {
             airplay_enabled: true,
             #[cfg(feature = "airplay")]
             airplay_timing_port: None,
+            #[cfg(feature = "airplay")]
+            airplay_timing_fallback: false,
         }
     }
 

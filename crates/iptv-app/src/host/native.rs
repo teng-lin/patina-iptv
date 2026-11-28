@@ -154,6 +154,167 @@ pub(crate) fn language_changed(tag: &str) {
     let _ = tag;
 }
 
+/// Detects the active LAN IPv4 subnet (e.g. `192.168.1.0/24`) on Linux desktops.
+pub(crate) fn local_ipv4_subnet() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let default_ip = default_route_ipv4();
+        let candidates = lan_ipv4_interfaces();
+        if let Some(default_ip) = default_ip
+            && let Some((_, cidr)) = candidates.iter().find(|(ip, _)| *ip == default_ip)
+        {
+            return Some(cidr.clone());
+        }
+        if let Some((_, cidr)) = candidates.iter().find(|(ip, _)| ip.is_private()) {
+            return Some(cidr.clone());
+        }
+        default_ip.map(|ip| {
+            let [a, b, c, _] = ip.octets();
+            format!("{a}.{b}.{c}.0/24")
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Detects whether the Linux host has UFW or firewalld installed, or neither.
+pub(crate) fn detect_linux_firewall() -> super::LinuxFirewall {
+    #[cfg(target_os = "linux")]
+    {
+        if std::path::Path::new("/etc/ufw/ufw.conf").exists() || command_in_path("ufw") {
+            return super::LinuxFirewall::Ufw;
+        }
+        if command_in_path("firewall-cmd") {
+            return super::LinuxFirewall::Firewalld;
+        }
+        super::LinuxFirewall::Unknown
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        super::LinuxFirewall::Ufw
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn command_in_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
+}
+
+#[cfg(target_os = "linux")]
+fn default_route_ipv4() -> Option<std::net::Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("192.0.2.1:80").ok()?;
+    let std::net::SocketAddr::V4(addr) = socket.local_addr().ok()? else {
+        return None;
+    };
+    Some(*addr.ip())
+}
+
+#[cfg(target_os = "linux")]
+fn lan_ipv4_interfaces() -> Vec<(std::net::Ipv4Addr, String)> {
+    use std::net::Ipv4Addr;
+
+    let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+    // SAFETY: `getifaddrs` writes a linked list pointer into `head` on success
+    // (return value 0), which we always release with `freeifaddrs` before returning.
+    if unsafe { libc::getifaddrs(&mut head) } != 0 {
+        return Vec::new();
+    }
+    struct Guard(*mut libc::ifaddrs);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                // SAFETY: `self.0` was allocated by `getifaddrs`.
+                unsafe { libc::freeifaddrs(self.0) };
+            }
+        }
+    }
+    let _guard = Guard(head);
+    let mut results = Vec::new();
+    let mut cursor = head;
+    while !cursor.is_null() {
+        // SAFETY: `cursor` is a valid node in the list returned by `getifaddrs`.
+        let iface = unsafe { &*cursor };
+        cursor = iface.ifa_next;
+        let flags = iface.ifa_flags as i32;
+        if flags & libc::IFF_UP == 0
+            || flags & libc::IFF_LOOPBACK != 0
+            || flags & libc::IFF_POINTOPOINT != 0
+            || iface.ifa_addr.is_null()
+            || iface.ifa_netmask.is_null()
+        {
+            continue;
+        }
+        // SAFETY: `ifa_addr` and `ifa_netmask` are non-null `sockaddr` pointers.
+        let (addr_family, mask_family) = unsafe {
+            (
+                i32::from((*iface.ifa_addr).sa_family),
+                i32::from((*iface.ifa_netmask).sa_family),
+            )
+        };
+        if addr_family != libc::AF_INET || mask_family != libc::AF_INET {
+            continue;
+        }
+        // SAFETY: Both `sa_family` values were verified to be `AF_INET`.
+        let (ip, mask) = unsafe {
+            let addr = &*(iface.ifa_addr as *const libc::sockaddr_in);
+            let netmask = &*(iface.ifa_netmask as *const libc::sockaddr_in);
+            (
+                Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr)),
+                Ipv4Addr::from(u32::from_be(netmask.sin_addr.s_addr)),
+            )
+        };
+        if let Some(cidr) = cidr_from_ipv4_mask(ip, mask) {
+            results.push((ip, cidr));
+        }
+    }
+    results
+}
+
+#[cfg(target_os = "linux")]
+fn cidr_from_ipv4_mask(ip: std::net::Ipv4Addr, mask: std::net::Ipv4Addr) -> Option<String> {
+    let mask_bits = u32::from(mask);
+    let prefix = mask_bits.leading_ones();
+    if prefix == 0 || prefix == 32 || (mask_bits << prefix) != 0 {
+        return None;
+    }
+    let network = std::net::Ipv4Addr::from(u32::from(ip) & mask_bits);
+    Some(format!("{network}/{prefix}"))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod lan_subnet_tests {
+    use super::cidr_from_ipv4_mask;
+
+    #[test]
+    fn cidr_uses_exact_contiguous_netmask_prefix() {
+        assert_eq!(
+            cidr_from_ipv4_mask(
+                "10.20.30.40".parse().unwrap(),
+                "255.255.0.0".parse().unwrap()
+            ),
+            Some("10.20.0.0/16".into())
+        );
+        assert_eq!(
+            cidr_from_ipv4_mask(
+                "192.0.2.55".parse().unwrap(),
+                "255.255.254.0".parse().unwrap()
+            ),
+            Some("192.0.2.0/23".into())
+        );
+        assert_eq!(
+            cidr_from_ipv4_mask(
+                "192.0.2.55".parse().unwrap(),
+                "255.0.255.0".parse().unwrap()
+            ),
+            None
+        );
+    }
+}
+
 /// Public entry points of the native hosts.
 pub mod exports {
     /// Installs a generated receiver for an isolated headless app journey.

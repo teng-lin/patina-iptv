@@ -25,6 +25,9 @@ pub(crate) struct CastUi {
     pub(crate) remote: Memo<bool>,
     pub(crate) prompt: Memo<Option<Prompt>>,
     pub(crate) pairing: Stored<Option<iptv_runtime::cast::PairingRequest>>,
+    /// The last scan, tagged with the AirPlay setting it ran under: the host
+    /// drops its routes when that setting changes, so older entries cannot start.
+    pub(crate) cached_receivers: Stored<(bool, Vec<Receiver>)>,
     pub(crate) external: crate::playback::external_player::ExternalUi,
 }
 
@@ -40,6 +43,7 @@ impl CastUi {
             remote: computed(move || state.with(|state| state.remote)),
             prompt: computed(move || state.with(State::prompt)),
             pairing: stored(None),
+            cached_receivers: stored((false, Vec::new())),
             external: crate::playback::external_player::ExternalUi::new(),
         }
     }
@@ -72,7 +76,15 @@ pub(super) fn discover(ui: Ui) {
     if ui.cast.discovering.get_untracked() {
         return;
     }
-    show_cast_receivers(ui, Vec::new());
+    let airplay = crate::wiring::settings::flag(iptv_settings::keys::AIRPLAY_CASTING);
+    let cached = ui.cast.cached_receivers.with(|(scanned_with, cached)| {
+        if (crate::host::LINUX || crate::host::WINDOWS) && *scanned_with != airplay {
+            Vec::new()
+        } else {
+            cached.clone()
+        }
+    });
+    show_cast_receivers(ui, cached);
     if !runtime().network_cast_available() {
         return;
     }
@@ -81,17 +93,20 @@ pub(super) fn discover(ui: Ui) {
     crate::wiring::tasks::spawn_in_app(async move {
         let result = runtime().cast_receivers().await;
         ui.cast.state.update(|state| state.discovering = false);
-        let still_open = ui.screens.chooser.with_untracked(|open| {
-            open.as_ref()
-                .is_some_and(|open| open.kind == ChooserKind::Cast)
-        });
-        if !still_open || channel != ui.playback.player.main().key.get_untracked() || !available(ui)
-        {
-            return;
-        }
-        // Keep current and local destinations usable when discovery fails.
         if let Ok(receivers) = result {
-            show_cast_receivers(ui, receivers);
+            ui.cast
+                .cached_receivers
+                .replace((airplay, receivers.clone()));
+            let still_open = ui.screens.chooser.with_untracked(|open| {
+                open.as_ref()
+                    .is_some_and(|open| open.kind == ChooserKind::Cast)
+            });
+            if still_open
+                && channel == ui.playback.player.main().key.get_untracked()
+                && available(ui)
+            {
+                show_cast_receivers(ui, receivers);
+            }
         }
     });
 }
@@ -186,6 +201,12 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let ticket = owner.next_cast_intent();
     let current = move || runtime().cast_intent_current(ticket);
     ui.cast.state.update(|state| state.busy = true);
+    if let Target::Network(network) = &receiver {
+        notify(&trf(
+            "Connecting to {name}…",
+            &[("name", (&network.name).into())],
+        ));
+    }
     if airplay && runtime().native_cast_view().is_none() {
         open_chooser(ui, ChooserKind::AirPlay);
     }
@@ -313,6 +334,30 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 crate::screens::cast_pairing::offer_forget(ui.cast, ticket, receiver, e);
             } else if !returning_local {
                 report(e);
+                if crate::host::LINUX
+                    && current()
+                    && let Some(peer_ip) = owner.cast_last_peer_ip()
+                {
+                    match e {
+                        Error::NoRequest { relay_port } => {
+                            crate::screens::cast_pairing::show_firewall_blocked(
+                                ui.cast,
+                                peer_ip,
+                                Some(relay_port),
+                                None,
+                            );
+                        }
+                        Error::AirPlayTiming { port } => {
+                            crate::screens::cast_pairing::show_firewall_blocked(
+                                ui.cast,
+                                peer_ip,
+                                None,
+                                Some(port),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             if retired && pending_stop_current(ui.cast) {

@@ -3,9 +3,9 @@
 use std::path::Path;
 
 use iptv_runtime::{Error, model::DatabaseKey};
-#[cfg(all(target_os = "linux", not(feature = "test-support")))]
+#[cfg(all(any(target_os = "linux", windows), not(feature = "test-support")))]
 mod cast_store;
-#[cfg(all(target_os = "linux", not(feature = "test-support")))]
+#[cfg(all(any(target_os = "linux", windows), not(feature = "test-support")))]
 pub(super) use cast_store::CastStore;
 #[cfg(all(target_os = "linux", not(feature = "test-support")))]
 mod linux;

@@ -7,9 +7,20 @@ use iptv_core::{
 };
 use std::{any::Any, future::Future, pin::Pin, sync::Arc};
 
+/// Whether the host cast port includes AirPlay receivers alongside Chromecast.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AirPlayMode {
+    Disabled,
+    Enabled,
+}
+
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
 
 pub trait Port: Send + Sync {
+    fn configure_airplay(&self, _mode: AirPlayMode) {}
+    fn last_peer_ip(&self) -> Option<String> {
+        None
+    }
     fn discover(&self) -> Task<'_, Vec<Receiver>>;
     fn forget(&self, _receiver: Receiver) -> Task<'_, ()> {
         Box::pin(std::future::ready(Err(Error::Unsupported)))

@@ -553,6 +553,15 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
             offer: &crate::screens::settings_offer::offer_now,
         };
         state(ui.screens, |s| match s.focused_row(&ctx) {
+            Some(Row::Setting(st))
+                if crate::host::LINUX && st.key == iptv_settings::keys::AIRPLAY_CASTING.as_str() =>
+            {
+                let (tcp, udp) = crate::screens::cast_pairing::airplay_ports();
+                trf(
+                    "Show AirPlay receivers alongside Chromecast. By default, this computer's firewall must allow TCP {tcp} and UDP {udp} from your TV or AirPlay device.",
+                    &[("tcp", tcp.to_string().as_str().into()), ("udp", udp.to_string().as_str().into())],
+                )
+            }
             Some(Row::Setting(st)) => tr(st.summary).replace('`', ""),
             Some(Row::Command(c)) => words::description(c.key)
                 .unwrap_or_else(|| tr(c.summary))

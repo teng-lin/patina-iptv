@@ -303,10 +303,10 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                     || !crate::wiring::runtime_owner::runtime().parental_settings_allowed())
             {
                 crate::screens::parental_view::protected_settings(ui.screens, move || {
-                    store(key, value)
+                    store(ui.cast, key, value)
                 });
             } else {
-                store(key, value);
+                store(ui.cast, key, value);
             }
         }
         // Playlist rows act on the settings as the commands do: behind the
@@ -325,9 +325,16 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
     }
 }
 
-fn store(key: &'static str, value: Value) {
-    if let Err(error) = save_setting(key, value) {
-        notify_setting_error(error);
+fn store(cast: crate::screens::casting::CastUi, key: &'static str, value: Value) {
+    let enabling_linux_airplay = crate::host::LINUX
+        && key == iptv_settings::keys::AIRPLAY_CASTING.as_str()
+        && value == Value::Bool(true);
+    match save_setting(key, value) {
+        Ok(()) if enabling_linux_airplay => {
+            crate::screens::cast_pairing::show_linux_airplay_setup(cast);
+        }
+        Ok(()) => {}
+        Err(error) => notify_setting_error(error),
     }
 }
 

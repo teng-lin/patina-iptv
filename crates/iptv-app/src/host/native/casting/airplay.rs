@@ -1,35 +1,38 @@
-//! Receiver-owned PIN approval and Linux host configuration.
-#[cfg(target_os = "linux")]
+//! Receiver-owned PIN approval and desktop host configuration.
+#[cfg(any(target_os = "linux", windows))]
 use iptv_cast::CastBuilder;
 use iptv_cast::{Connection, Pairing, PinCode};
 use iptv_core::cast::Error;
 use iptv_runtime::cast::PairingPrompt;
 use std::time::Duration;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use std::{
     ffi::{OsStr, OsString},
     num::NonZeroU16,
-    path::{Path, PathBuf},
+    path::Path,
 };
 use tokio::time::{Instant, timeout_at};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
+const DEFAULT_TIMING_PORT: NonZeroU16 = NonZeroU16::new(49153).expect("non-zero timing port");
+
+#[cfg(any(target_os = "linux", windows))]
 pub(super) struct Configuration {
-    directory: PathBuf,
-    pairing_label: String,
+    #[cfg(not(feature = "test-support"))]
+    store: crate::host::native::credential_key::CastStore,
     timing_port: Option<OsString>,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 impl Configuration {
-    pub(super) fn from_env(directory: &Path, pairing_label: String) -> Option<Self> {
-        (std::env::var_os("PATINA_RUST_AIRPLAY").as_deref() == Some(OsStr::new("1"))).then(|| {
-            Self {
-                directory: directory.to_owned(),
-                pairing_label,
-                timing_port: std::env::var_os("PATINA_AIRPLAY_TIMING_PORT"),
-            }
-        })
+    pub(super) fn new(directory: &Path, pairing_label: String) -> Self {
+        #[cfg(feature = "test-support")]
+        let _ = (directory, pairing_label);
+        Self {
+            #[cfg(not(feature = "test-support"))]
+            store: crate::host::native::credential_key::CastStore::new(directory, pairing_label),
+            timing_port: std::env::var_os("PATINA_AIRPLAY_TIMING_PORT"),
+        }
     }
 
     pub(super) fn configure(&self, builder: CastBuilder) -> CastBuilder {
@@ -37,15 +40,15 @@ impl Configuration {
         // so a bad value cannot prevent Chromecast discovery.
         let builder = builder
             .airplay_enabled(true)
-            .airplay_timing_port(timing_port(self.timing_port.as_deref()).unwrap_or_default());
+            .airplay_timing_port(timing_port(self.timing_port.as_deref()).ok())
+            // Only an explicit port is a hard requirement.
+            .airplay_timing_port_fallback(self.timing_port.is_none());
         #[cfg(not(feature = "test-support"))]
         {
-            use crate::host::native::credential_key::CastStore;
-            builder.credential_store(CastStore::new(&self.directory, self.pairing_label.clone()))
+            builder.credential_store(self.store.clone())
         }
         #[cfg(feature = "test-support")]
         {
-            let _ = (&self.directory, &self.pairing_label);
             builder
         }
     }
@@ -55,16 +58,15 @@ impl Configuration {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn timing_port(value: Option<&OsStr>) -> Result<Option<NonZeroU16>, Error> {
+#[cfg(any(target_os = "linux", windows))]
+fn timing_port(value: Option<&OsStr>) -> Result<NonZeroU16, Error> {
+    let Some(value) = value else {
+        return Ok(DEFAULT_TIMING_PORT);
+    };
     value
-        .map(|value| {
-            value
-                .to_str()
-                .and_then(|port| port.parse().ok())
-                .ok_or(Error::InvalidAirPlayTimingPort)
-        })
-        .transpose()
+        .to_str()
+        .and_then(|port| port.parse().ok())
+        .ok_or(Error::InvalidAirPlayTimingPort)
 }
 
 pub(super) async fn pair(
@@ -104,15 +106,15 @@ pub(super) async fn pair(
         .map_err(|error| super::map_error(&error))
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, any(target_os = "linux", windows)))]
 mod tests {
     use super::*;
 
     #[test]
-    fn timing_listener_can_use_an_ephemeral_or_explicit_port() {
+    fn timing_listener_uses_default_or_explicit_port() {
         let parse = |value: Option<&str>| timing_port(value.map(OsStr::new));
-        assert_eq!(parse(None::<&str>), Ok(None));
-        assert_eq!(parse(Some("47475")), Ok(NonZeroU16::new(47475)));
+        assert_eq!(parse(None::<&str>), Ok(DEFAULT_TIMING_PORT));
+        assert_eq!(parse(Some("47475")), Ok(NonZeroU16::new(47475).unwrap()));
         for bad in ["", "0", "65536", "12x"] {
             assert_eq!(parse(Some(bad)), Err(Error::InvalidAirPlayTimingPort));
         }

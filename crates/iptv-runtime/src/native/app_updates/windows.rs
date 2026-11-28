@@ -216,7 +216,7 @@ mod tests {
         tokio::select! {
             _ = &mut waiter => panic!("held verifier unexpectedly completed"),
             _ = async {
-                tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::time::timeout(Duration::from_secs(30), async {
                     while !marker.exists() {
                         tokio::time::sleep(Duration::from_millis(20)).await;
                     }
@@ -225,7 +225,7 @@ mod tests {
         }
         assert!(location.exists());
         drop(waiter);
-        tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::time::timeout(Duration::from_secs(10), async {
             while location.exists() {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }

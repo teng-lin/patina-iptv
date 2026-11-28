@@ -1,7 +1,7 @@
 //! Receiver approval belongs to the window that chose the destination.
 use crate::{
     Ui,
-    kit::i18n::tr,
+    kit::i18n::{tr, trf},
     kit::overlay::Overlay,
     kit::scale::Scale,
     kit::ui_kit,
@@ -9,7 +9,7 @@ use crate::{
     wiring::runtime_owner::runtime,
 };
 use iptv_core::cast::{Error, Receiver};
-use iptv_presentation::cast::{Effect, Prompt, State};
+use iptv_presentation::cast::{Effect, FirewallHelp, Prompt, State};
 use iptv_runtime::cast::{PairingPrompt, pairing_prompt};
 use nsh_core::prelude::*;
 
@@ -36,6 +36,130 @@ pub(crate) fn offer_forget(
     cast.pairing.replace(None);
     cast.state
         .update(|state| state.offer_forget(ticket, receiver, reason));
+}
+
+pub(crate) fn show_linux_airplay_setup(cast: crate::screens::casting::CastUi) {
+    let (tcp_port, udp_port) = airplay_ports();
+    // An undetected subnet stays a visible placeholder, never a guess.
+    let subnet = crate::host::local_ipv4_subnet();
+    cast.pairing.replace(None);
+    cast.state.update(|state| {
+        state.open_firewall_help(FirewallHelp {
+            peer_ip: None,
+            tcp_port: Some(tcp_port),
+            udp_port: Some(udp_port),
+            subnet,
+            copy_selected: true,
+        });
+    });
+}
+
+pub(crate) fn show_firewall_blocked(
+    cast: crate::screens::casting::CastUi,
+    peer_ip: String,
+    tcp_port: Option<u16>,
+    udp_port: Option<u16>,
+) {
+    cast.pairing.replace(None);
+    cast.state.update(|state| {
+        state.open_firewall_help(FirewallHelp {
+            peer_ip: Some(peer_ip),
+            tcp_port,
+            udp_port,
+            subnet: None,
+            copy_selected: true,
+        });
+    });
+}
+
+/// The relay and timing ports the sender listens on, as the dialog and footer name them.
+pub(crate) fn airplay_ports() -> (u16, u16) {
+    (
+        configured_port("PATINA_CAST_RELAY_PORT", 49152),
+        configured_port("PATINA_AIRPLAY_TIMING_PORT", 49153),
+    )
+}
+
+fn configured_port(env_var: &str, default: u16) -> u16 {
+    std::env::var(env_var)
+        .ok()
+        .and_then(|value| value.parse::<std::num::NonZeroU16>().ok())
+        .map_or(default, std::num::NonZeroU16::get)
+}
+
+fn firewall_commands(help: &FirewallHelp) -> String {
+    firewall_commands_for(help, crate::host::detect_linux_firewall())
+}
+
+const SUBNET_PLACEHOLDER: &str = "LAN_SUBNET";
+
+fn firewall_source(help: &FirewallHelp) -> &str {
+    help.peer_ip
+        .as_deref()
+        .or(help.subnet.as_deref())
+        .unwrap_or(SUBNET_PLACEHOLDER)
+}
+
+fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewall) -> String {
+    let source = firewall_source(help);
+    let family = if source.contains(':') { "ipv6" } else { "ipv4" };
+    let mut lines = Vec::new();
+    for (port, proto) in [(help.tcp_port, "tcp"), (help.udp_port, "udp")] {
+        let Some(port) = port else { continue };
+        match firewall {
+            crate::host::LinuxFirewall::Ufw => lines.push(format!(
+                "sudo ufw allow from {source} to any port {port} proto {proto}"
+            )),
+            // Permanent, like ufw, so the rule survives a reload or reboot.
+            crate::host::LinuxFirewall::Firewalld => lines.push(format!(
+                "sudo firewall-cmd --permanent --add-rich-rule='rule family=\"{family}\" source address=\"{source}\" port port=\"{port}\" protocol=\"{proto}\" accept'"
+            )),
+            crate::host::LinuxFirewall::Unknown => {}
+        }
+    }
+    if matches!(firewall, crate::host::LinuxFirewall::Firewalld) && !lines.is_empty() {
+        lines.push("sudo firewall-cmd --reload".to_owned());
+    }
+    lines.join("\n")
+}
+
+/// What the commands cannot say: a missing firewall CLI, an undetected subnet, IPv6.
+fn firewall_notes(help: &FirewallHelp, firewall: crate::host::LinuxFirewall) -> String {
+    let source = firewall_source(help);
+    let mut notes = Vec::new();
+    if matches!(firewall, crate::host::LinuxFirewall::Unknown) {
+        let port = |port: Option<u16>| port.map_or_else(|| "-".to_owned(), |p| p.to_string());
+        notes.push(trf(
+            "No ufw or firewalld was found. In your firewall, allow TCP {tcp} and UDP {udp} from {source}.",
+            &[
+                ("tcp", port(help.tcp_port).as_str().into()),
+                ("udp", port(help.udp_port).as_str().into()),
+                ("source", source.into()),
+            ],
+        ));
+    }
+    if source == SUBNET_PLACEHOLDER {
+        notes.push(tr("Replace LAN_SUBNET with your network, such as 192.168.1.0/24.").to_owned());
+    }
+    if help.peer_ip.is_none() {
+        notes.push(
+            tr("These rules cover IPv4. If your TV connects over IPv6, also allow its IPv6 address.")
+                .to_owned(),
+        );
+    }
+    notes.join("\n")
+}
+
+fn copy_firewall_commands(cast: crate::screens::casting::CastUi) {
+    let commands = cast
+        .state
+        .with_untracked(|state| state.firewall_help().map(firewall_commands));
+    if let Some(commands) = commands
+        && !commands.is_empty()
+    {
+        set_clipboard(commands);
+        crate::kit::toast::notify(tr("Copied firewall command."));
+    }
 }
 
 pub(crate) fn is_open(cast: crate::screens::casting::CastUi) -> bool {
@@ -112,6 +236,18 @@ pub(crate) fn key(ui: Ui, action: iptv_nav::Action) {
         }
         return;
     }
+    if let Some(Prompt::Firewall { copy_selected }) = ui.cast.prompt.get_untracked() {
+        match action {
+            Action::MoveLeft | Action::MoveRight => ui
+                .cast
+                .state
+                .update(|state| state.select_firewall_copy(action == Action::MoveLeft)),
+            Action::Select if copy_selected => copy_firewall_commands(ui.cast),
+            Action::Select | Action::Back | Action::ShowMenu => close(ui.cast),
+            _ => {}
+        }
+        return;
+    }
     match action {
         Action::Back | Action::ShowMenu => close(ui.cast),
         Action::Select => submit(ui.cast),
@@ -135,11 +271,86 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
                             move || matches!(ui.cast.prompt.get(), Some(Prompt::Forget { .. })),
                             move || forget_card(ui, scale),
                         )
-                        .otherwise(move || pin_card(ui, scale)),
+                        .otherwise(move || {
+                            when(
+                                move || {
+                                    matches!(ui.cast.prompt.get(), Some(Prompt::Firewall { .. }))
+                                },
+                                move || firewall_card(ui, scale),
+                            )
+                            .otherwise(move || pin_card(ui, scale))
+                        }),
                     ),
                 )
         },
     )
+}
+
+fn firewall_card(ui: Ui, scale: Scale) -> View {
+    let wants_copy = move || {
+        matches!(
+            ui.cast.prompt.get(),
+            Some(Prompt::Firewall {
+                copy_selected: true
+            })
+        )
+    };
+    let help = move || ui.cast.state.with(|state| state.firewall_help().cloned());
+    view()
+        .gap(move || scale.px(14.0))
+        .child(ui_kit::title(scale, move || {
+            if help().is_some_and(|h| h.peer_ip.is_some()) {
+                tr("Blocked by this computer's firewall")
+            } else {
+                tr("Allow AirPlay in this computer's firewall")
+            }
+        }))
+        .child(ui_kit::body(scale, move || match help() {
+            Some(FirewallHelp {
+                peer_ip: Some(ip), ..
+            }) => trf(
+                "Your TV or AirPlay device ({ip}) could not reach this computer. Run this in a terminal to allow it:",
+                &[("ip", ip.as_str().into())],
+            ),
+            _ => tr(
+                "Your TV or AirPlay device connects back to this computer. Run this in a terminal to allow it (or replace the subnet with one device's IP):",
+            )
+            .to_owned(),
+        }))
+        .child(
+            view()
+                .p(move || scale.px(12.0))
+                .rounded(px(crate::theme::RADIUS))
+                .bg(crate::tint(0x000000, 0x60))
+                .child(ui_kit::caption(scale, move || {
+                    help().map_or_else(String::new, |h| firewall_commands(&h))
+                })),
+        )
+        .child(ui_kit::caption(scale, move || {
+            help().map_or_else(String::new, |h| {
+                firewall_notes(&h, crate::host::detect_linux_firewall())
+            })
+        }))
+        .child(
+            view()
+                .flex_row()
+                .gap(move || scale.px(12.0))
+                .justify_end()
+                .child(ui_kit::button(
+                    ui,
+                    scale,
+                    tr("Copy command"),
+                    wants_copy,
+                    move || copy_firewall_commands(ui.cast),
+                ))
+                .child(ui_kit::button(
+                    ui,
+                    scale,
+                    tr("Done"),
+                    move || !wants_copy(),
+                    move || close(ui.cast),
+                )),
+        )
 }
 
 fn forget_card(ui: Ui, scale: Scale) -> View {
@@ -217,4 +428,56 @@ fn pin_card(ui: Ui, scale: Scale) -> View {
             |ui| close(ui.cast),
             |ui| submit(ui.cast),
         ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firewall_commands_format_subnet_and_exact_peer_rules() {
+        use crate::host::LinuxFirewall;
+
+        let setup = FirewallHelp {
+            peer_ip: None,
+            tcp_port: Some(49152),
+            udp_port: Some(49153),
+            subnet: Some("192.0.2.0/24".into()),
+            copy_selected: true,
+        };
+        assert_eq!(
+            firewall_commands_for(&setup, LinuxFirewall::Ufw),
+            "sudo ufw allow from 192.0.2.0/24 to any port 49152 proto tcp\n\
+             sudo ufw allow from 192.0.2.0/24 to any port 49153 proto udp"
+        );
+        assert_eq!(
+            firewall_commands_for(&setup, LinuxFirewall::Firewalld),
+            "sudo firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49152\" protocol=\"tcp\" accept'\n\
+             sudo firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"192.0.2.0/24\" port port=\"49153\" protocol=\"udp\" accept'\n\
+             sudo firewall-cmd --reload"
+        );
+        assert_eq!(firewall_commands_for(&setup, LinuxFirewall::Unknown), "");
+        assert!(firewall_notes(&setup, LinuxFirewall::Unknown).contains("TCP 49152 and UDP 49153"));
+
+        let undetected = FirewallHelp {
+            subnet: None,
+            ..setup.clone()
+        };
+        assert!(
+            firewall_commands_for(&undetected, LinuxFirewall::Ufw).contains("from LAN_SUBNET ")
+        );
+        assert!(firewall_notes(&undetected, LinuxFirewall::Ufw).contains("Replace LAN_SUBNET"));
+
+        let blocked = FirewallHelp {
+            peer_ip: Some("192.0.2.10".into()),
+            tcp_port: None,
+            udp_port: Some(49153),
+            subnet: None,
+            copy_selected: true,
+        };
+        assert_eq!(
+            firewall_commands_for(&blocked, LinuxFirewall::Ufw),
+            "sudo ufw allow from 192.0.2.10 to any port 49153 proto udp"
+        );
+    }
 }

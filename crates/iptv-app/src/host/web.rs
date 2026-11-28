@@ -60,6 +60,14 @@ const DIRECTORY: &str = "/patina";
 #[cfg(not(feature = "browser-package"))]
 pub(crate) const DIAGNOSTIC_DIR: &str = DIRECTORY;
 
+pub(crate) fn local_ipv4_subnet() -> Option<String> {
+    None
+}
+
+pub(crate) fn detect_linux_firewall() -> super::LinuxFirewall {
+    super::LinuxFirewall::Ufw
+}
+
 /// The runtime's ports on a browser TV. The runtime reads the host's
 /// clocks too: the Worker has no other.
 pub(crate) fn ports(directory: PathBuf, _pairing_label: String) -> iptv_runtime::Ports {

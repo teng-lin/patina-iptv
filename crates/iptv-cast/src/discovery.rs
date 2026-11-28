@@ -1,6 +1,6 @@
 //! A bounded snapshot of receivers on the current network.
 #[cfg(all(target_os = "linux", feature = "avahi"))]
-mod avahi;
+pub(crate) mod avahi;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use std::{collections::BTreeMap, io, net::SocketAddr, time::Duration};

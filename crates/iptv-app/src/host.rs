@@ -27,6 +27,23 @@ pub(crate) use web::*;
 
 use iptv_core::capabilities::{Host, Platform};
 
+/// The firewall CLI detected on Linux desktops for AirPlay setup hints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinuxFirewall {
+    Ufw,
+    #[cfg_attr(
+        all(not(test), not(target_os = "linux")),
+        expect(dead_code, reason = "constructed only on Linux hosts")
+    )]
+    Firewalld,
+    /// Neither CLI was found; the dialog names the ports instead of a command.
+    #[cfg_attr(
+        all(not(test), not(target_os = "linux")),
+        expect(dead_code, reason = "constructed only on Linux hosts")
+    )]
+    Unknown,
+}
+
 /// The host as its build describes it, before the device reports its form
 /// factor and input: for the facilities that follow the operating system
 /// alone (background recording, login registration, the alarm

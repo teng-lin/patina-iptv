@@ -1145,3 +1145,99 @@ async fn verification_refusal_does_not_send_a_trust_message_to_another_address()
         "exactly one peer should receive a verification request"
     );
 }
+
+#[cfg(all(target_os = "linux", feature = "avahi"))]
+#[test]
+fn avahi_records_merge_dual_stack_addresses_filter_unsafe_entries_and_publish_unique_routes() {
+    use crate::discovery::avahi::ResolvedRecord;
+    use std::net::IpAddr;
+
+    let entry = |interface, name: &str, address: &str, port, txt: &[&str]| ResolvedRecord {
+        interface,
+        name: name.into(),
+        address: address.parse::<IpAddr>().unwrap(),
+        port,
+        txt: txt.iter().map(|s| s.as_bytes().to_vec()).collect(),
+    };
+    let resolved = vec![
+        // Ignored: port 0, unspecified, multicast, link-local without scope.
+        entry(
+            1,
+            "Zero Port",
+            "192.0.2.1",
+            0,
+            &["deviceid=02:00:00:00:00:01"],
+        ),
+        entry(
+            1,
+            "Unspec",
+            "0.0.0.0",
+            7000,
+            &["deviceid=02:00:00:00:00:02"],
+        ),
+        entry(
+            1,
+            "Multicast",
+            "224.0.0.1",
+            7000,
+            &["deviceid=02:00:00:00:00:03"],
+        ),
+        entry(
+            0,
+            "Unscoped V6",
+            "fe80::1",
+            7000,
+            &["deviceid=02:00:00:00:00:04"],
+        ),
+        // Dual-stack receiver: IPv4 + scoped link-local IPv6 + global IPv6 merged into one record.
+        entry(2, "Living\x07Room", "fe80::10", 7000, &["sf=0x8"]),
+        entry(
+            2,
+            "living\x07room",
+            "192.0.2.10",
+            7000,
+            &["deviceid=02:AA:BB:CC:DD:EE", "sf=0x8"],
+        ),
+        entry(
+            2,
+            "Living\x07Room",
+            "2001:db8::10",
+            7000,
+            &["deviceid=02:AA:BB:CC:DD:EE", "sf=0x8"],
+        ),
+        // Duplicate identity across two instances must not be published.
+        entry(
+            1,
+            "Dup A",
+            "192.0.2.20",
+            7000,
+            &["deviceid=02:11:22:33:44:55"],
+        ),
+        entry(
+            1,
+            "Dup B",
+            "192.0.2.21",
+            7000,
+            &["deviceid=02:11:22:33:44:55"],
+        ),
+        // Identity-less receiver with blank name falls back to "AirPlay".
+        entry(1, "   ", "192.0.2.30", 7000, &[]),
+    ];
+
+    let records = Records::from_avahi(resolved.clone(), None);
+    let living = records.resolve_unique("02aabbccddee").unwrap();
+    assert_eq!(living.name, "LivingRoom");
+    assert_eq!(living.pin_hint, PinHint::Required);
+    assert_eq!(living.addresses.len(), 3);
+    assert!(records.resolve_unique("021122334455").is_err());
+
+    let sink = ScanSink::new();
+    records.publish(&sink);
+    let published = sink.finish();
+    assert_eq!(published.len(), 2);
+
+    // Identity-filtered scan retains only the requested deviceid.
+    let filtered = Records::from_avahi(resolved, Some("02aabbccddee"));
+    assert_eq!(filtered.instances.len(), 1);
+    assert!(filtered.resolve_unique("02aabbccddee").is_ok());
+}

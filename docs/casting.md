@@ -5,21 +5,21 @@ session URL for the selected receiver and keeps the upstream credentials and
 request headers on the sending device. Keep Patina running and connected
 while the receiver plays. Choose **Play here** to return to local playback.
 
-Apple hosts use the system AirPlay picker. The experimental Linux AirPlay
-sender can be enabled by starting Patina with `PATINA_RUST_AIRPLAY=1`. Its
-destinations carry an AirPlay label. On Android and Linux, Patina connects
-without a code when the receiver accepts a temporary session. If the receiver
-requires a PIN, approve pairing on the receiver and enter the four-digit code
-it shows. Patina stores verified pairings on Android and in the current Linux
-user's Secret Service. If a paired receiver's identity changes, Patina asks
-before forgetting the stored pairing.
+Apple hosts use the system AirPlay picker. On Linux and Windows, enable
+**AirPlay casting** in **Settings → General** to show AirPlay receivers
+alongside Chromecast. Its destinations carry an AirPlay label. On Android,
+Linux, and Windows, Patina connects without a code when the receiver accepts a
+temporary session. If the receiver requires a PIN, approve pairing on the
+receiver and enter the four-digit code it shows. Patina stores verified pairings
+in Android Keystore, the Linux user's Secret Service, or Windows Credential
+Manager. If a paired receiver's identity changes, Patina asks before forgetting
+the stored pairing.
 
 `PATINA_CAST_RELAY_PORT` controls the sender's TCP listener and defaults to
-49152. Linux AirPlay also has a UDP timing listener. Set
-`PATINA_AIRPLAY_TIMING_PORT` to choose its port or leave it unset for an
-ephemeral port. Use the port in the failure message when checking receiver
-reachability. The relay restricts fetches to the selected peer and the
-session URL. Keep the URL private.
+49152. Desktop AirPlay also has a UDP timing listener, which defaults to 49153
+(set `PATINA_AIRPLAY_TIMING_PORT` to choose a different port). Use the port in
+the failure message when checking receiver reachability. The relay restricts
+fetches to the selected peer and the session URL. Keep the URL private.
 
 An AirPlay receiver may accept the request before it starts playing.
 Patina publishes the handoff after it sees owned playback. Controls appear

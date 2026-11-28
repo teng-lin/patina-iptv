@@ -397,6 +397,10 @@ pub(super) async fn open_candidates(addresses: &[SocketAddr]) -> Result<(SocketA
     first_reachable_endpoint(addresses, Wire::connect).await
 }
 
+fn is_link_local_v6(address: &SocketAddr) -> bool {
+    matches!(address, SocketAddr::V6(v6) if v6.ip().is_unicast_link_local() || v6.scope_id() != 0)
+}
+
 async fn first_reachable_endpoint<T, F>(
     addresses: &[SocketAddr],
     connect: impl Fn(SocketAddr) -> F,
@@ -405,22 +409,32 @@ where
     F: Future<Output = wire::Result<T>>,
 {
     let mut ipv4 = addresses.iter().copied().filter(SocketAddr::is_ipv4);
-    let mut ipv6 = addresses.iter().copied().filter(SocketAddr::is_ipv6);
-    let addresses: Vec<_> = std::iter::from_fn(|| {
-        let pair = [ipv4.next(), ipv6.next()];
+    let mut routable_v6 = addresses
+        .iter()
+        .copied()
+        .filter(|addr| addr.is_ipv6() && !is_link_local_v6(addr));
+    let routable: Vec<_> = std::iter::from_fn(|| {
+        let pair = [ipv4.next(), routable_v6.next()];
         pair.iter().any(Option::is_some).then_some(pair)
     })
     .flatten()
     .flatten()
     .collect();
-    let batches = addresses.chunks(TCP_BATCH_SIZE);
+    let link_local_v6: Vec<_> = addresses.iter().copied().filter(is_link_local_v6).collect();
+    // Try routable addresses before link-local IPv6 so dual-stack receivers
+    // never race a scoped fe80:: address against a relay-compatible IPv4/IPv6
+    // endpoint.
+    let batches: Vec<&[SocketAddr]> = routable
+        .chunks(TCP_BATCH_SIZE)
+        .chain(link_local_v6.chunks(TCP_BATCH_SIZE))
+        .collect();
     let count = batches.len();
     let start = Instant::now();
     let deadline = start + CONNECTION_TIMEOUT;
     let mut timed_out = false;
     // Reserve part of the original budget for each batch. Several pending
     // addresses cannot occupy all slots until the overall deadline.
-    for (index, batch) in batches.enumerate() {
+    for (index, batch) in batches.into_iter().enumerate() {
         if Instant::now() >= deadline {
             return Err(AuthFault::TimedOut);
         }

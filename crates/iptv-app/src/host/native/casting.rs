@@ -10,12 +10,14 @@ use iptv_core::{
 };
 use iptv_net::playback::{ExternalAdmission, PlaybackRelay};
 use iptv_runtime::cast::{
-    Admitted, Authorization, PairingPrompt, Port, Prepared, Remote, Retirement, Task,
+    Admitted, AirPlayMode, Authorization, PairingPrompt, Port, Prepared, Remote, Retirement, Task,
 };
+#[cfg(any(target_os = "linux", windows))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     num::NonZeroU16,
     path::Path,
     sync::{Arc, Mutex, OnceLock},
@@ -23,12 +25,12 @@ use std::{
 };
 use tokio::runtime::Handle;
 use tokio::{
-    sync::{OnceCell, watch},
+    sync::watch,
     task::JoinHandle,
     time::{Instant, timeout, timeout_at},
 };
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod airplay;
 #[cfg(target_os = "android")]
 pub(super) mod android;
@@ -38,12 +40,15 @@ mod android_credential;
 mod android_events;
 
 pub(super) struct Sender {
-    client: OnceCell<Client>,
+    client: tokio::sync::Mutex<Option<Client>>,
     routes: Mutex<Routes>,
+    last_peer: Mutex<Option<IpAddr>>,
     #[cfg(feature = "test-support")]
     loopback: Option<SocketAddr>,
-    #[cfg(target_os = "linux")]
-    airplay: Option<airplay::Configuration>,
+    #[cfg(any(target_os = "linux", windows))]
+    airplay: airplay::Configuration,
+    #[cfg(any(target_os = "linux", windows))]
+    airplay_enabled: AtomicBool,
 }
 
 #[derive(Default)]
@@ -53,9 +58,11 @@ struct Routes {
     topology: Option<String>,
 }
 
+#[derive(Clone)]
 struct Client {
     cast: Cast,
     airplay: bool,
+    generation: u64,
 }
 
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(5);
@@ -110,61 +117,104 @@ impl Sender {
     #[cfg(feature = "test-support")]
     pub(super) fn for_loopback(address: SocketAddr) -> Self {
         Self {
-            client: OnceCell::new(),
+            client: tokio::sync::Mutex::new(None),
             routes: Mutex::default(),
+            last_peer: Mutex::default(),
             loopback: Some(address),
-            #[cfg(target_os = "linux")]
-            airplay: None,
+            #[cfg(any(target_os = "linux", windows))]
+            airplay: airplay::Configuration::new(Path::new("."), String::new()),
+            #[cfg(any(target_os = "linux", windows))]
+            airplay_enabled: AtomicBool::new(false),
         }
     }
 
     pub(super) fn new(directory: &Path, _pairing_label: String) -> Self {
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         let _ = directory;
         Self {
-            client: OnceCell::new(),
+            client: tokio::sync::Mutex::new(None),
             routes: Mutex::default(),
+            last_peer: Mutex::default(),
             #[cfg(feature = "test-support")]
             loopback: None,
-            #[cfg(target_os = "linux")]
-            airplay: airplay::Configuration::from_env(directory, _pairing_label),
+            #[cfg(any(target_os = "linux", windows))]
+            airplay: airplay::Configuration::new(directory, _pairing_label),
+            #[cfg(any(target_os = "linux", windows))]
+            airplay_enabled: AtomicBool::new(false),
         }
     }
 
-    async fn client(&self) -> Result<&Client, Error> {
-        self.client
-            .get_or_try_init(|| async {
-                #[cfg(feature = "test-support")]
-                if let Some(address) = self.loopback {
-                    return Ok(Client {
-                        cast: iptv_cast::test_support::sender(address)
-                            .map_err(|error| map_error(&error))?,
-                        airplay: false,
-                    });
-                }
-                #[cfg(target_os = "linux")]
-                if let Some(config) = &self.airplay {
-                    return Ok(Client {
-                        cast: config
-                            .configure(Cast::builder())
-                            .build()
-                            .map_err(|error| map_error(&error))?,
-                        airplay: true,
-                    });
-                }
-                let builder = Cast::builder();
-                #[cfg(target_os = "android")]
-                let builder = builder.credential_store(android::CastStore);
-                let airplay = cfg!(target_os = "android");
-                Ok(Client {
-                    cast: builder
-                        .airplay_enabled(airplay)
-                        .build()
-                        .map_err(|error| map_error(&error))?,
-                    airplay,
-                })
-            })
-            .await
+    async fn client(&self) -> Result<Client, Error> {
+        let mut slot = self.client.lock().await;
+        #[cfg(feature = "test-support")]
+        if let Some(address) = self.loopback {
+            if let Some(client) = slot.as_ref() {
+                return Ok(client.clone());
+            }
+            let client = Client {
+                cast: iptv_cast::test_support::sender(address)
+                    .map_err(|error| map_error(&error))?,
+                airplay: false,
+                generation: 1,
+            };
+            *slot = Some(client.clone());
+            return Ok(client);
+        }
+        #[cfg(any(target_os = "linux", windows))]
+        let want_airplay = self.airplay_enabled.load(Ordering::Acquire);
+        #[cfg(not(any(target_os = "linux", windows)))]
+        let want_airplay = cfg!(target_os = "android");
+        if let Some(client) = slot.as_ref()
+            && client.airplay == want_airplay
+        {
+            return Ok(client.clone());
+        }
+        let generation = slot
+            .as_ref()
+            .map_or(1, |previous| previous.generation.wrapping_add(1));
+        #[cfg(any(target_os = "linux", windows))]
+        let client = if want_airplay {
+            Client {
+                cast: self
+                    .airplay
+                    .configure(Cast::builder())
+                    .build()
+                    .map_err(|error| map_error(&error))?,
+                airplay: true,
+                generation,
+            }
+        } else {
+            Client {
+                cast: Cast::builder()
+                    .airplay_enabled(false)
+                    .build()
+                    .map_err(|error| map_error(&error))?,
+                airplay: false,
+                generation,
+            }
+        };
+        #[cfg(not(any(target_os = "linux", windows)))]
+        let client = {
+            let builder = Cast::builder();
+            #[cfg(target_os = "android")]
+            let builder = builder.credential_store(android::CastStore);
+            Client {
+                cast: builder
+                    .airplay_enabled(want_airplay)
+                    .build()
+                    .map_err(|error| map_error(&error))?,
+                airplay: want_airplay,
+                generation,
+            }
+        };
+        if slot.is_some()
+            && let Ok(mut routes) = self.routes.lock()
+        {
+            // Routes are bound to the Cast owner that discovered them.
+            *routes = Routes::default();
+        }
+        *slot = Some(client.clone());
+        Ok(client)
     }
 
     fn route(&self, receiver: &Receiver) -> Result<Route, Error> {
@@ -179,12 +229,37 @@ impl Sender {
 }
 
 impl Port for Sender {
+    fn configure_airplay(&self, mode: AirPlayMode) {
+        #[cfg(any(target_os = "linux", windows))]
+        self.airplay_enabled
+            .store(mode == AirPlayMode::Enabled, Ordering::Release);
+        #[cfg(not(any(target_os = "linux", windows)))]
+        let _ = mode;
+    }
+
+    fn last_peer_ip(&self) -> Option<String> {
+        self.last_peer
+            .lock()
+            .ok()
+            .and_then(|peer| peer.map(|ip| ip.to_string()))
+    }
+
     fn forget(&self, receiver: Receiver) -> Task<'_, ()> {
         Box::pin(async move {
-            self.client()
-                .await?
+            // Pair each cached route with the Cast owner that discovered it so
+            // forgetting still succeeds even after a live AirPlay mode toggle.
+            let existing = {
+                let slot = self.client.lock().await;
+                slot.clone()
+                    .and_then(|client| self.route(&receiver).ok().map(|route| (client, route)))
+            };
+            let (client, route) = match existing {
+                Some(pair) => pair,
+                None => (self.client().await?, self.route(&receiver)?),
+            };
+            client
                 .cast
-                .forget(&self.route(&receiver)?)
+                .forget(&route)
                 .await
                 .map_err(|error| map_error(&error))
         })
@@ -207,6 +282,17 @@ impl Port for Sender {
                 .map_err(|error| map_error(&error))?;
             #[cfg(target_os = "android")]
             let current = android::topology()?;
+            // Do not publish routes from a Cast client that was replaced mid-scan.
+            let current_generation = self
+                .client
+                .lock()
+                .await
+                .as_ref()
+                .map(|active| active.generation);
+            if current_generation != Some(client.generation) {
+                // Not an empty scan: the UI keeps what it last showed.
+                return Err(Error::Cancelled);
+            }
             let mut route_cache = self.routes.lock().map_err(|_| Error::Unavailable)?;
             *route_cache = Routes::default();
             #[cfg(target_os = "android")]
@@ -256,11 +342,9 @@ impl Port for Sender {
         pairing_prompt: PairingPrompt,
     ) -> Task<'_, Box<dyn Prepared>> {
         Box::pin(async move {
-            #[cfg(target_os = "linux")]
-            if receiver.protocol == NetworkProtocol::AirPlay
-                && let Some(config) = &self.airplay
-            {
-                config.validate()?;
+            #[cfg(any(target_os = "linux", windows))]
+            if receiver.protocol == NetworkProtocol::AirPlay {
+                self.airplay.validate()?;
             }
             let relay_port =
                 configured_relay_port(std::env::var_os("PATINA_CAST_RELAY_PORT").as_deref())?;
@@ -312,11 +396,11 @@ impl Port for Sender {
                         })
                         .await?
                     }
-                    #[cfg(target_os = "linux")]
+                    #[cfg(any(target_os = "linux", windows))]
                     {
                         airplay::pair(pairing, pairing_prompt, || Ok(())).await?
                     }
-                    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                    #[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
                     {
                         drop(pairing_prompt);
                         pairing.cancel().await;
@@ -340,6 +424,9 @@ impl Port for Sender {
                 return Err(Error::PairingIdentityChanged);
             }
             let (local, remote) = connection.control_addrs().ok_or(Error::Unavailable)?;
+            if let Ok(mut peer) = self.last_peer.lock() {
+                *peer = Some(remote.ip());
+            }
             let listen = match relay_listen_addr(local, relay_port) {
                 Ok(listen) => listen,
                 Err(error) => {

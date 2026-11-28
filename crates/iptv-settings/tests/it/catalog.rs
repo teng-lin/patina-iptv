@@ -66,6 +66,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("general.clock", choice(&c::CLOCK, "auto"), GL, ""),
         ("general.keyboard", choice(&c::KEYBOARD, "system"), GL, ""),
         ("general.udp_proxy", text(HostPort, 261, ""), GL, "a"),
+        ("general.airplay_casting", boolean(false), GL, ""),
         ("general.usage_statistics", boolean(false), GL, ""),
         (
             "general.app_update_frequency",
