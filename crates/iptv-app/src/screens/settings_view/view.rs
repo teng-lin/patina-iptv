@@ -540,7 +540,7 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
             Some(Row::Setting(st))
                 if crate::host::LINUX && st.key == iptv_settings::keys::AIRPLAY_CASTING.as_str() =>
             {
-                tr("Show AirPlay receivers alongside Chromecast. This computer's firewall must allow TCP 49152 and UDP 49153 from your TV or AirPlay device.").to_owned()
+                tr("Show AirPlay receivers alongside Chromecast. By default, this computer's firewall must allow TCP 49152 and UDP 49153 from your TV or AirPlay device.").to_owned()
             }
             Some(Row::Setting(st)) => tr(st.summary).replace('`', ""),
             Some(Row::Command(c)) => words::description(c.key)

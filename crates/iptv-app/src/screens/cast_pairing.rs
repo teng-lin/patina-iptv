@@ -261,11 +261,11 @@ fn firewall_card(ui: Ui, scale: Scale) -> View {
             Some(FirewallHelp {
                 peer_ip: Some(ip), ..
             }) => trf(
-                "Your TV or AirPlay device ({ip}) could not reach this computer. If you use UFW, run this in a terminal:",
+                "Your TV or AirPlay device ({ip}) could not reach this computer. Run this in a terminal to allow it:",
                 &[("ip", ip.as_str().into())],
             ),
             _ => tr(
-                "Your TV or AirPlay device connects back to this computer. If you use UFW, run this in a terminal (or replace the subnet with one device's IP):",
+                "Your TV or AirPlay device connects back to this computer. Run this in a terminal to allow it (or replace the subnet with one device's IP):",
             )
             .to_owned(),
         }))

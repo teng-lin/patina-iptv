@@ -246,10 +246,20 @@ impl Port for Sender {
 
     fn forget(&self, receiver: Receiver) -> Task<'_, ()> {
         Box::pin(async move {
-            self.client()
-                .await?
+            // Pair each cached route with the Cast owner that discovered it so
+            // forgetting still succeeds even after a live AirPlay mode toggle.
+            let existing = {
+                let slot = self.client.lock().await;
+                slot.clone()
+                    .and_then(|client| self.route(&receiver).ok().map(|route| (client, route)))
+            };
+            let (client, route) = match existing {
+                Some(pair) => pair,
+                None => (self.client().await?, self.route(&receiver)?),
+            };
+            client
                 .cast
-                .forget(&self.route(&receiver)?)
+                .forget(&route)
                 .await
                 .map_err(|error| map_error(&error))
         })
