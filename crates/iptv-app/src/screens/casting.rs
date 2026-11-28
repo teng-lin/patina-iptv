@@ -4,6 +4,7 @@ use crate::{
     chrome::chooser,
     chrome::i18n::{tr, trf},
     chrome::toast::notify,
+    runtime::model::{ResolveFailure, StreamPurpose},
     wiring::runtime_owner::{runtime, schedule},
 };
 use iptv_core::{
@@ -104,6 +105,7 @@ pub(crate) fn destination_selected(value: &str) -> bool {
 pub(crate) fn play_here(ui: Ui) {
     if ui.cast.busy.get_untracked() {
         let owner = runtime();
+        owner.cancel_stream_resolution(StreamPurpose::Cast);
         let ticket = if ui.cast.remote.get_untracked() {
             // Let an outstanding command finish on the current receiver.
             owner.cast_intent()
@@ -163,7 +165,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let Some((epg, local)) = iptv_guide::combined::epg_channel(&*guide, channel) else {
         return;
     };
-    let Some(authority) = epg.resolution_authority(local) else {
+    let Some(authority) = crate::runtime::Runtime::playback_authority(&*guide, channel) else {
         return;
     };
     let resolution = epg.resolve(
@@ -171,7 +173,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         None,
         crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
-    let context = epg.shared_playback();
+    let context = crate::runtime::Runtime::playback_context(&*guide, channel);
     let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
         return;
     };
@@ -204,48 +206,20 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 Ok(grant)
             };
             check().await?;
-            let mut source = match resolution {
-                iptv_guide::playback::Resolution::Play(source) => source,
-                iptv_guide::playback::Resolution::StalkerLink(link) => {
-                    let iptv_guide::playback::StalkerLink {
-                        session: mut portal,
-                        cmd,
-                        channel_headers,
-                    } = *link;
-                    let client = owner.link_client(crate::wiring::settings::network_config());
-                    let (source, portal) = owner
-                        .spawn_network(async move {
-                            let net = client.await.ok()?;
-                            let url = iptv_import::stalker_link(
-                                &net,
-                                &mut portal,
-                                &cmd,
-                                false,
-                                &iptv_import::CancelToken::new(),
-                            )
-                            .await
-                            .ok()?;
-                            Some((
-                                iptv_guide::playback::StalkerLink::source(
-                                    &portal,
-                                    url,
-                                    &channel_headers,
-                                ),
-                                portal,
-                            ))
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                        .ok_or(Error::Unavailable)?;
-                    check().await?;
-                    if let Some(context) = context {
-                        context.update_stalker_session(portal);
-                    }
-                    source
-                }
-                _ => return Err(Error::Unsupported),
-            };
+            if !current() || pending_stop_current(ui) || pending_local_current(ui) {
+                return Err(Error::Cancelled);
+            }
+            let mut source = owner
+                .resolve_stream(StreamPurpose::Cast, resolution, context)
+                .await
+                .map_err(|failure| match failure {
+                    ResolveFailure::Cancelled => Error::Cancelled,
+                    ResolveFailure::Unavailable => Error::Unsupported,
+                    ResolveFailure::Network
+                    | ResolveFailure::TimedOut
+                    | ResolveFailure::Portal(_) => Error::Unavailable,
+                })?;
+            check().await?;
             owner.apply_user_agent(&mut source.headers);
             // Revalidate network identity while an existing cast still owns
             // its relay. Preparing this connection does not bind the new relay.
@@ -430,11 +404,13 @@ pub(crate) fn supports(ui: Ui, command: Command) -> bool {
     !ui.cast.remote.get() || ui.cast.controls.with(|controls| controls.supports(command))
 }
 pub(crate) fn stop(ui: Ui) {
+    runtime().cancel_stream_resolution(StreamPurpose::Cast);
     control(ui, Command::Stop, false);
 }
 fn control(ui: Ui, command: Command, resume_local: bool) {
     if ui.cast.busy.get_untracked() {
         if command == Command::Stop && !resume_local {
+            runtime().cancel_stream_resolution(StreamPurpose::Cast);
             ui.cast
                 .state
                 .update(|state| state.stop_pending = Some(runtime().cast_intent()));

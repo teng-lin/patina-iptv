@@ -21,8 +21,7 @@ impl Choice {
         program: Program,
         playing_context: bool,
     ) -> Option<Self> {
-        let authority = iptv_guide::combined::epg_channel(schedule, channel)
-            .and_then(|(epg, local)| epg.resolution_authority(local));
+        let authority = crate::runtime::Runtime::playback_authority(schedule, channel);
         Some(Self {
             list,
             playing_context,
@@ -46,8 +45,7 @@ impl Choice {
         let (channel, Playback::CatchUp { start, .. }) = self.pending.remap(schedule)? else {
             return None;
         };
-        let authority = iptv_guide::combined::epg_channel(schedule, channel)
-            .and_then(|(epg, local)| epg.resolution_authority(local));
+        let authority = crate::runtime::Runtime::playback_authority(schedule, channel);
         let program = schedule.program_at(channel, start);
         if (self.playing_context && playing != Some(channel))
             || authority != self.authority

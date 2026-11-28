@@ -647,6 +647,46 @@ fn grouped_and_aliased_paths_expose_their_dependencies() {
     assert!(paths_from(&source, "super").contains(&vec!["super", "wiring", "data", "catalog"]));
 }
 
+/// Value types from `iptv_import` that UI code may name outside `src/host/`.
+/// Operations (such as `stalker_link`) belong in `iptv-runtime`.
+const IMPORT_VALUES_OUTSIDE_HOST: &[&str] = &["CancelToken"];
+
+/// Known intentional exception: artwork downloads use `Network::client` directly.
+const IMPORT_FETCH_EXCEPTIONS: &[&str] = &["chrome/content_image.rs"];
+
+#[test]
+fn domain_import_operations_stay_outside_views() {
+    let (root, files) = app_sources();
+    for file in files {
+        let name = file_name(&root, &file);
+        if host_file(&name) || name.ends_with("/tests.rs") {
+            continue;
+        }
+        let source = shipped(&code(&file));
+        let token_list: Vec<_> = tokens(&source).collect();
+        for (at, &token) in token_list.iter().enumerate() {
+            if token == "iptv_import" && token_list.get(at + 1) != Some(&"::") {
+                panic!(
+                    "{name} aliases or imports bare `iptv_import`; move provider I/O operations into iptv-runtime"
+                );
+            }
+        }
+        for path in paths_from(&source, "iptv_import") {
+            let item = path.first().copied().unwrap_or("");
+            if IMPORT_VALUES_OUTSIDE_HOST.contains(&item) {
+                continue;
+            }
+            if item == "Fetch" && IMPORT_FETCH_EXCEPTIONS.contains(&name.as_str()) {
+                continue;
+            }
+            panic!(
+                "{name} names iptv_import::{}; move provider I/O operations into iptv-runtime",
+                path.join("::")
+            );
+        }
+    }
+}
+
 #[test]
 fn host_cannot_reach_views_through_root_imports() {
     let (root, _) = app_sources();

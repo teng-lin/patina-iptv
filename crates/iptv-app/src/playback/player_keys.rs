@@ -164,8 +164,10 @@ pub(crate) fn play_pause(ui: Ui, key: RemoteKey, press: Press) {
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
-    crate::wiring::runtime_owner::runtime().next_cast_intent();
-    crate::wiring::runtime_owner::runtime().cancel_pending_native_cast();
+    let owner = crate::wiring::runtime_owner::runtime();
+    owner.next_cast_intent();
+    owner.cancel_stream_resolution(crate::runtime::model::StreamPurpose::Cast);
+    owner.cancel_pending_native_cast();
     if ui.cast.remote.get_untracked() {
         crate::screens::casting::stop(ui);
         return;

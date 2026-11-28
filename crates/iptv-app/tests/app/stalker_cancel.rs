@@ -36,8 +36,10 @@ const CHANNELS: &str = concat!(
 struct Slow {
     requests: usize,
     asked: bool,
+    asked_count: usize,
     /// The app closed the connection before an answer.
     abandoned: bool,
+    abandoned_count: usize,
     quick_asked: bool,
     quick_calls: usize,
 }
@@ -81,14 +83,24 @@ fn answer(mut stream: TcpStream, state: &(Mutex<Slow>, Condvar)) {
         "get_genres" => GENRES.to_owned(),
         "get_ordered_list" => CHANNELS.to_owned(),
         "create_link" if path.contains("slow") => {
-            state.0.lock().unwrap().asked = true;
+            {
+                let mut seen = state.0.lock().unwrap();
+                seen.asked = true;
+                seen.asked_count += 1;
+            }
             state.1.notify_all();
             // No answer: wait until the app hangs up (or the test ends).
             // Several individually scaled waits can follow this request.
             // A mock-server deadline is not evidence of app cancellation.
             let budget = crate::isolated::scaled_duration(WAIT.saturating_mul(8));
             let closed = wait_for_cancel(&mut stream, budget);
-            state.0.lock().unwrap().abandoned = closed;
+            {
+                let mut seen = state.0.lock().unwrap();
+                seen.abandoned = closed;
+                if closed {
+                    seen.abandoned_count += 1;
+                }
+            }
             state.1.notify_all();
             return;
         }
@@ -401,4 +413,154 @@ fn cached_static_stalker_playback_keeps_its_origin_without_a_portal_session() {
         0,
         "static playback must not start a portal handshake or create_link"
     );
+}
+
+#[derive(Clone, Default)]
+struct PendingCastPort;
+
+impl iptv_runtime::cast::Port for PendingCastPort {
+    fn discover(&self) -> iptv_runtime::cast::Task<'_, Vec<iptv_core::cast::Receiver>> {
+        Box::pin(async {
+            Ok(vec![iptv_core::cast::Receiver {
+                id: "googlecast:slow-portal-tv".into(),
+                name: "Generated TV".into(),
+                protocol: iptv_core::cast::NetworkProtocol::GoogleCast,
+            }])
+        })
+    }
+
+    fn prepare(
+        &self,
+        _receiver: iptv_core::cast::Receiver,
+        _source: iptv_core::playback::PlaySource,
+        _pairing: iptv_runtime::cast::PairingPrompt,
+    ) -> iptv_runtime::cast::Task<'_, Box<dyn iptv_runtime::cast::Prepared>> {
+        Box::pin(async { Err(iptv_core::cast::Error::Cancelled) })
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_portal_with_options(
+    home: &crate::isolated::Home,
+    resume_last: bool,
+    external_news_group: bool,
+) -> (Headless, Arc<(Mutex<Slow>, Condvar)>) {
+    let data = home.data_dir();
+    std::fs::create_dir_all(&data).unwrap();
+    let mut settings = Settings::new();
+    settings
+        .set("general.resume_last_channel", Value::Bool(resume_last))
+        .unwrap();
+    settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    let (url, state) = serve();
+    let mut store = crate::isolated::open_database(data.join("iptv.sqlite")).unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Portal".into(),
+            config: SourceConfig::Stalker(StalkerCredentials {
+                portal_url: format!("{url}/portal.php"),
+                mac: MacAddress::parse("00:1A:79:00:00:44").unwrap(),
+                serial: None,
+                device_id: None,
+                device_id2: None,
+                signature: None,
+                signature2: None,
+                login: None,
+                password: None,
+            }),
+        })
+        .unwrap();
+    let groups = parse_genres(&HttpResponse::ok(GENRES), ContentKind::Live).unwrap();
+    let channels = parse_channel_page(&HttpResponse::ok(CHANNELS)).unwrap();
+    let quick = channels.items.items[1].id.as_str().to_owned();
+    store
+        .replace_catalog(source, &groups.items, &channels.items.items, &[], &[])
+        .unwrap();
+    store
+        .set_source_policy(source, SourcePolicy::default())
+        .unwrap();
+    if external_news_group {
+        store
+            .set_guide_group_preference(
+                source,
+                groups.items[0].id.as_str(),
+                iptv_core::organization::GroupPreference::ExternalPlayer(true),
+            )
+            .unwrap();
+    }
+    store.set_active_source(source).unwrap();
+    drop(store);
+    std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
+    if resume_last {
+        std::fs::write(data.join(format!("last_channel-{}", source.0)), quick).unwrap();
+    }
+    let app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    (app, state)
+}
+
+#[test]
+fn stopping_cast_while_a_stalker_link_is_pending_cancels_the_portal_request() {
+    let Some(home) = isolated!() else { return };
+    iptv_app::install_test_cast_port(Arc::new(PendingCastPort));
+    let (mut app, state) = start_portal(&home);
+    app.set_environment("a desktop", |e| {
+        e.idiom = nsh_core::platform::Idiom::Desktop;
+        e.os = if cfg!(target_os = "macos") {
+            nsh_core::platform::Os::MacOs
+        } else {
+            nsh_core::platform::Os::Linux
+        };
+    })
+    .unwrap();
+    crate::isolated::wait_outside(&mut app, "local slow link", WAIT, || {
+        state.0.lock().unwrap().asked_count == 1
+    })
+    .unwrap();
+    if !app.screen().matches("id:play-bar-back").unwrap() {
+        app.press("id:video").unwrap();
+    }
+    app.wait_for_within("id:play-bar-back", WAIT).unwrap();
+    app.play_bar_option("Cast to TV").unwrap();
+    app.wait_for_within("id:chooser-items >> text:Generated TV", WAIT)
+        .unwrap();
+    app.press("id:chooser-items >> text:Generated TV").unwrap();
+    crate::isolated::wait_outside(&mut app, "cast slow link", WAIT, || {
+        state.0.lock().unwrap().asked_count == 2
+    })
+    .unwrap();
+    // Stopping playback while Cast is starting cancels both the local and Cast Stalker requests.
+    app.press_remote(nsh_tv::RemoteKey::Stop).unwrap();
+    crate::isolated::wait_outside(&mut app, "cast link cancelled", WAIT, || {
+        state.0.lock().unwrap().abandoned_count == 2
+    })
+    .unwrap();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn closing_an_external_handoff_while_a_stalker_link_is_pending_cancels_the_portal_request() {
+    let Some(home) = isolated!() else { return };
+    iptv_app::set_external_player_handler(Some(true));
+    let (mut app, state) = start_portal_with_options(&home, false, true);
+    app.wait_for_within("text:News", WAIT).unwrap();
+    // Enter the News group (which has external_player enabled).
+    app.press("text:News").unwrap();
+    app.wait_for_within("text:Slow portal channel", WAIT)
+        .unwrap();
+    // Selecting Slow portal channel starts an external-player Stalker link lookup.
+    app.press("text:Slow portal channel").unwrap();
+    crate::isolated::wait_outside(&mut app, "external slow link", WAIT, || {
+        state.0.lock().unwrap().asked
+    })
+    .unwrap();
+    // Pressing Back cancels the pending external handoff and its Stalker request.
+    app.back().unwrap();
+    crate::isolated::wait_outside(&mut app, "external link cancelled", WAIT, || {
+        state.0.lock().unwrap().abandoned
+    })
+    .unwrap();
 }
