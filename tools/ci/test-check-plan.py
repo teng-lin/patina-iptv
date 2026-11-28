@@ -375,13 +375,19 @@ class Plan(unittest.TestCase):
             self.assertIn(module, command[command.index("--") + 1:])
         self.assertNotIn("--skip", self.by_name["workspace-tests"])
 
-    def test_native_tier_compiles_tests_and_builds_production_without_shared_execution(self):
+    def test_native_tier_compiles_tests_and_runs_only_platform_suites(self):
         for host in ("macos", "windows"):
             native = {step["name"]: step["argv"] for step in checks.plan(tier="native", host=host)}
             expected = {"native-test-compilation", "native-player-tests", "app-build"}
             if host == "windows":
                 expected.add("windows-updater-tests")
                 self.assertIn("app_updates::windows::tests", native["windows-updater-tests"])
+                expected.add("windows-app-tests")
+                app = native["windows-app-tests"]
+                self.assertEqual(packages(app), list(checks.workspace_crates()))
+                self.assertEqual([app[i + 1] for i, argument in enumerate(app) if argument == "--test"],
+                                 list(checks.APP_HARNESSES))
+                self.assertNotIn("--skip", app)
             self.assertEqual(set(native), expected)
             self.assertIn("--all-targets", native["native-test-compilation"])
             self.assertNotIn("--features", native["app-build"])
