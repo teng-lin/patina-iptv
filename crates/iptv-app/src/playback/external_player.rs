@@ -491,15 +491,7 @@ fn open_from(
                 return;
             }
             connect_handoff(
-                ui,
-                owner,
-                ticket,
-                target,
-                expected,
-                group_id,
-                source,
-                current,
-                resolve,
+                ui, owner, ticket, target, expected, group_id, source, current, resolve,
             )
             .await;
         });

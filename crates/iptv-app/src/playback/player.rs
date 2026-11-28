@@ -1070,9 +1070,14 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
     let authority = resolution_authority(&*schedule, channel);
     match resolution {
         Resolution::Play(source) => load_authorized(ui, surface, session, source, authority),
-        resolution @ Resolution::StalkerLink(_) => {
-            resolve_link(ui, surface, session, resolution, schedule.clone(), authority)
-        }
+        resolution @ Resolution::StalkerLink(_) => resolve_link(
+            ui,
+            surface,
+            session,
+            resolution,
+            schedule.clone(),
+            authority,
+        ),
         Resolution::Unavailable(why) => {
             let detail = match why {
                 Unavailable::NoChannel => key("no channel").to_owned(),
@@ -1338,7 +1343,10 @@ fn cancel_resolve(surface: usize) {
 
 fn resolve_failure(failure: ResolveFailure) -> (ErrorKind, String) {
     match failure {
-        ResolveFailure::Network => (ErrorKind::Network, crate::chrome::i18n::tr("Network").into()),
+        ResolveFailure::Network => (
+            ErrorKind::Network,
+            crate::chrome::i18n::tr("Network").into(),
+        ),
         ResolveFailure::TimedOut => (
             ErrorKind::Network,
             crate::chrome::i18n::tr("The request timed out").into(),

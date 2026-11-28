@@ -121,11 +121,7 @@ impl Drop for MockPortal {
     }
 }
 
-fn handle(
-    mut stream: TcpStream,
-    state: &(Mutex<PortalState>, Condvar),
-    handshakes: &AtomicUsize,
-) {
+fn handle(mut stream: TcpStream, state: &(Mutex<PortalState>, Condvar), handshakes: &AtomicUsize) {
     let _ = stream.set_read_timeout(Some(WAIT));
     let mut request = Vec::new();
     let mut buffer = [0u8; 2048];
@@ -380,16 +376,15 @@ async fn stale_result_does_not_overwrite_portal_session() {
             // finish_stream_resolution must reject it as stale and keep "token-2".
             assert_eq!(first.await, Err(ResolveFailure::Cancelled));
 
-            let page =
-                iptv_providers::stalker::parse_channel_page(&iptv_providers::HttpResponse::ok(
-                    concat!(
-                        r#"{"js":{"total_items":"1","max_page_items":"14","data":["#,
-                        r#"{"id":"100","name":"Probe","number":"1","#,
-                        r#""cmd":"ffmpeg http://stream.example.test/probe.ts","#,
-                        r#""tv_genre_id":"1","use_http_tmp_link":"1","use_load_balancing":"0"}]}}"#,
-                    ),
-                ))
-                .unwrap();
+            let page = iptv_providers::stalker::parse_channel_page(
+                &iptv_providers::HttpResponse::ok(concat!(
+                    r#"{"js":{"total_items":"1","max_page_items":"14","data":["#,
+                    r#"{"id":"100","name":"Probe","number":"1","#,
+                    r#""cmd":"ffmpeg http://stream.example.test/probe.ts","#,
+                    r#""tv_genre_id":"1","use_http_tmp_link":"1","use_load_balancing":"0"}]}}"#,
+                )),
+            )
+            .unwrap();
             let Resolution::StalkerLink(next) = iptv_guide::playback::resolve(
                 Some(&shared_ctx),
                 &page.items.items[0],
@@ -430,10 +425,7 @@ async fn executor_refusal_reports_network_failure_instead_of_cancelled() {
     }
     struct RefusingExecution;
     impl iptv_runtime::execution::Execution for RefusingExecution {
-        fn lane(
-            &self,
-            _: &'static str,
-        ) -> std::io::Result<Box<dyn iptv_runtime::execution::Lane>> {
+        fn lane(&self, _: &'static str) -> std::io::Result<Box<dyn iptv_runtime::execution::Lane>> {
             Err(std::io::Error::other("unused"))
         }
         fn worker(&self, _: String, _: iptv_runtime::execution::Job) -> std::io::Result<()> {
