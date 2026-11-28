@@ -663,6 +663,11 @@ hardware; headless and emulator results do not count.
 | Tizen 5.5 bridge | In a non-English TV language, the Worker loads the packaged `i18n/<tag>.tsv` and the question uses it. |
 | Seller Office | At the first submission, confirm that the home-screen confirmation is accepted (CO-US-05). |
 
+A partial phone run on 0.1.9 returned home from welcome and the guide rail, but
+repeated swipes on library recovery with details closed did not leave, and the
+predictive preview was not verified
+([record](https://github.com/teng-lin/patina-iptv/issues/331#issuecomment-7172256362)).
+
 Use synthetic playlists and a dedicated test application or profile, never a
 household one. Record physical and emulator runs separately, with the commit,
 NSH revision, package SHA-256, device, OS or firmware, input mode, language and

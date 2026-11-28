@@ -12,8 +12,9 @@
 <body>
 <main>
   <h1>Patina IPTV Privacy Policy</h1>
-  <p>Last updated: November 24, 2026.</p>
-  <p>This policy applies to Patina IPTV for Android tablets, Android TV and iPad.
+  <p>Last updated: November 28, 2026.</p>
+  <p>This policy applies to Patina IPTV for Android phones, tablets and TV, iPad,
+    macOS, Windows and Linux. Some features are available only on some of these.
     Patina is maintained by the Patina IPTV project. For privacy questions or
     requests, email <a href="mailto:teng.lin@gmail.com">teng.lin@gmail.com</a>.</p>
 
@@ -26,10 +27,16 @@
     or to the location you choose where that option is available.</p>
   <p>Patina encrypts the local catalog and imported playlist copies, including
     the provider credentials stored there. The catalog key is protected using
-    Android Keystore or the Apple Keychain. Patina excludes its private data
-    from automatic system backups. Backups you export from Patina can contain
+    Android Keystore, the Apple Keychain, Windows Credential Manager or the Linux
+    Secret Service. On Android and iPad, Patina excludes its private data from
+    automatic system backups. On computers, your own backup tools may copy app
+    files. Backups you export from Patina can contain
     playlists, credentials, settings and history. Exported backups and recorded
     video files are unencrypted. Keep them in a location you trust.</p>
+  <p>Patina keeps diagnostic messages about the app on your device, including a
+    report of its last crash and, on computers, log files. It removes addresses,
+    credentials, tokens and storage paths from these records before keeping
+    them. This automatic removal may not catch everything.</p>
 
   <h2>Connections and sharing</h2>
   <p>On Android, macOS, Windows and Linux, Patina checks GitHub for new app releases
@@ -57,6 +64,19 @@
     configure. Guide updates can make requests automatically, and an Android
     recording you start can continue requesting media while the app is in the
     background.</p>
+  <p>When you cast, Patina looks for receivers on your local network and sends the
+    video to the Chromecast or AirPlay receiver you choose. Provider addresses
+    and credentials stay in Patina; the receiver gets a temporary address on your
+    device. Depending on the receiver and platform, the video can cross your
+    local network without encryption, so cast only on a network you trust. If you
+    pair with an AirPlay receiver, Patina or your device's system may store that
+    pairing. The receiver and its maker, such as Google or Apple, apply their own
+    privacy policies.</p>
+  <p><strong>Send a diagnostic log</strong> in Settings creates a report only when
+    you ask and confirm. It contains app, version and device-type details and
+    recent diagnostic messages. You choose whether to save, share or copy it, and
+    Patina does not upload it. The storage location or app you choose receives
+    it.</p>
   <p>If you export a backup or recording, the storage location or service you
     select can receive the file. If you choose an external player where
     supported, that player receives the requested media and applies its own
@@ -73,7 +93,9 @@
   <p>Patina keeps app data on your device until it is cleared, replaced or
     removed. You can remove playlists and clear viewing and search history in
     the app. Clearing the app's storage on Android or deleting the app and its
-    data from the device removes its local app data. Delete exported backups
+    data from the device removes its local app data. On a computer, removing the
+    app can leave its data folder and stored key behind; delete them as well to
+    remove local data. Delete exported backups, diagnostic logs
     and recordings saved elsewhere from their storage location. Contact your
     IPTV provider to ask about data held by that provider.</p>
 </main>
