@@ -51,6 +51,9 @@
   guard and refuses to play streams. Fetch the pinned runtime first
   (`python3 tools/mpv-runtime-unix/runtime.py fetch --platform linux --destination target/mpv-runtime-linux`)
   and run with `LD_LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
+- **Changelog is user-facing only.** `CHANGELOG.md` records only user-facing
+  changes and fixes. Refactors, tests, CI, tooling and documentation get no
+  entry.
 - **Check before finishing:** `cargo test -p iptv-core -p iptv-presentation`, the wasm
   builds of both crates, `cargo build -p iptv-app`, and for Android changes a run on
   `tab36` and/or `tv36`.

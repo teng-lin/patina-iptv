@@ -7,11 +7,37 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-11-28
+
 ### Added
 
 - Cast to AirPlay receivers from Linux and Windows. Turn on **AirPlay casting**
   in Settings. On Linux, Patina shows the firewall command that lets your TV
   connect back.
+- **Check for updates** on Android, macOS, Windows and Linux shows your version,
+  the latest release and its notes. Patina checks GitHub weekly by default; you
+  can change how often or turn checks off. Download the package for your device
+  from the same screen.
+- If your saved library is damaged, Patina lets you restore a backup or start
+  fresh at launch, and keeps a copy of the damaged library.
+- **Send a diagnostic log** in Settings saves or shares a report with addresses
+  and credentials removed. Nothing is sent unless you ask.
+- Choose whether Favorites, Recently watched and All channels appear in the
+  channel categories.
+- On Android TV, you can require a second Back press to leave Patina.
+- Previous channel and Next channel buttons sit beside Play on computers,
+  tablets and phones during live playback.
+
+### Changed
+
+- The full-screen play bar is smaller and covers less of the picture. Open
+  **Details** to read the program description.
+
+### Fixed
+
+- Channel names in a guide that combines playlists no longer end with the
+  playlist name.
+- The channel list opened during playback shows channel logos.
 
 ## [0.1.12] - 2026-11-27
 
@@ -616,7 +642,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/teng-lin/patina-iptv/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/teng-lin/patina-iptv/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/teng-lin/patina-iptv/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...v0.1.10
