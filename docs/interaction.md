@@ -155,14 +155,14 @@ In the guide:
   system cancels (a notification shade, a call) stops where it is,
   without a fling. A drag that started on a channel or a program, past
   or upcoming, never chooses it: under the threshold a touch is still a
-  tap (`iptv_app::timeline`).
+  tap (`iptv_presentation::guide::timeline`).
 - **Now:** crossing the drag threshold, in the guide or the channel list,
   cancels a preview `guide.autoplay` was waiting to start; it does not
   come back until the focus moves to another channel. The threshold is
   read from the first finger's own touches, so a drag at the list's end
   that scrolls nothing counts too, and so does a scroll view taking over a
   finger that moved; a still finger's cancel does not
-  (`iptv_app::timeline::Threshold`). A tap's
+  (`iptv_presentation::guide::timeline::Threshold`). A tap's
   own choice still plays after its switch delay. Scrolling never tunes,
   records or opens a menu or details (`BrowsePlayback::dragged`;
   `tests/app/tablet_gestures.rs`).

@@ -2,6 +2,7 @@
 
 mod floor;
 pub mod moves;
+pub mod timeline;
 pub use floor::view_range;
 
 use iptv_core::guide::{Airing, Program, Schedule, VISIBLE};

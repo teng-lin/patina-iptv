@@ -1,5 +1,5 @@
 use super::*;
-use crate::guide::{DAY, HISTORY, HORIZON};
+use iptv_core::guide::{DAY, HISTORY, HORIZON};
 
 /// 8 dp per minute: a 1200 dp program area shows [`VISIBLE`] minutes.
 const PPM: f32 = 8.0;

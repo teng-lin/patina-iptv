@@ -17,11 +17,13 @@
 //! by the view's offset in it, so a pan rebuilds cells only when the band
 //! moves (every [`MARGIN`] or so), not every frame.
 
-use crate::guide::{STEP, VISIBLE, home_window};
+use iptv_core::guide::VISIBLE;
+
+use super::{STEP, home_window};
 
 /// How far (dp) a finger moves before its drag picks an axis, and that
-/// axis (shared with the swipe that changes channel, `touch_zap.rs`).
-pub use iptv_presentation::drag::{Lock, SLOP};
+/// axis (shared with the swipe that changes channel, [`crate::touch_zap`]).
+pub use crate::drag::{Lock, SLOP};
 /// A fling's speed falls by `e^(-FRICTION · seconds)`, so from `v` it
 /// travels `v / FRICTION`: with 2.0 about half a second's worth, as an iOS
 /// list's normal deceleration (0.998 per ms, `-ln 0.998 · 1000` ≈ 2.0)
