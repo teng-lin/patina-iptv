@@ -17,9 +17,11 @@ pub(crate) mod port;
 pub use pairing::{PairingPrompt, PairingRequest, pairing_prompt};
 pub use port::{Admitted, Authorization, NativePort, Port, Prepared, Remote, Retirement, Task};
 
+impl port::AuthorizationServices for crate::store_service::Services {}
+
 impl Authorization {
     fn services(&self) -> &crate::store_service::Services {
-        self.services
+        (&*self.services as &dyn std::any::Any)
             .downcast_ref::<crate::store_service::Services>()
             .expect("Authorization holds store_service::Services")
     }

@@ -58,9 +58,24 @@ pub struct ProbeRequest {
     pub target: ProbeTarget,
 }
 
+/// Sealed marker implemented only by `inspection::probe::Snapshot`.
+pub(crate) trait ProbeSnapshot: Any + Send + Sync {}
+
 /// An active lease pinning a staged probe snapshot during guide repair.
 #[derive(Clone)]
-pub struct ProbeLease(pub(crate) Arc<dyn Any + Send + Sync>);
+pub struct ProbeLease(Arc<dyn ProbeSnapshot>);
+
+impl ProbeLease {
+    pub(crate) fn new(snapshot: Arc<impl ProbeSnapshot + 'static>) -> Self {
+        Self(snapshot)
+    }
+
+    pub(crate) fn downcast_ref<T: ProbeSnapshot + 'static>(&self) -> &T {
+        (&*self.0 as &dyn Any)
+            .downcast_ref::<T>()
+            .expect("ProbeLease holds its sealed probe snapshot")
+    }
+}
 
 /// Validation and persistence are distinct: a failed save is never success.
 #[derive(Debug)]

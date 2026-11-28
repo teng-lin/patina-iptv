@@ -345,9 +345,6 @@ pub fn save_collapsed(
         .set_collapsed_playlists(collapsed)
 }
 
-#[allow(unused_imports)]
-pub(crate) use crate::state::RefreshSource;
-
 /// Refresh policy belongs to the application; the host supplies timers and
 /// foreground notifications. No device wakeups are requested in the background.
 pub fn start_scheduler(owner: &Rc<super::Runtime>) {

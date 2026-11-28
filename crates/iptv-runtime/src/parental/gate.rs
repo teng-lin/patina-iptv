@@ -134,5 +134,3 @@ impl ExternalPlaybackAuthorization {
         self.access.playback_current(&self.target, &self.grants)
     }
 }
-
-pub(crate) use crate::error::SETTINGS_LOCKED_REASON;

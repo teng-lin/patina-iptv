@@ -298,7 +298,7 @@ mod tests {
     fn classifiers_use_error_kinds_and_keep_catalog_reasons() {
         assert!(
             Error::from(iptv_store_sqlite::StoreError::Unavailable(
-                crate::parental::SETTINGS_LOCKED_REASON
+                SETTINGS_LOCKED_REASON
             ))
             .settings_locked()
         );

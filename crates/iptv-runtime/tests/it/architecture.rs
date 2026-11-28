@@ -584,6 +584,7 @@ const STORE_SERVICE_MAY_NAME: &[&str] = &[
     "TestGate",
     // Infrastructure modules.
     "credential_store",
+    "error",
     "execution",
     "file_writer",
     "guide_checks",
@@ -629,61 +630,130 @@ fn first_segment(text: &str) -> (&str, &str) {
     (&text[..end], &text[end..])
 }
 
-fn push_crate_item(item: &str, found: &mut BTreeSet<String>) {
-    let (first, rest) = first_segment(item);
-    if first.is_empty() {
-        return;
+fn module_path(file: &str) -> Vec<String> {
+    if file == "lib.rs" {
+        return Vec::new();
     }
-    if matches!(first, "parental" | "cast")
-        && let Some(after) = rest.trim_start().strip_prefix("::")
-    {
-        let after = after.trim_start();
-        if let Some(group) = after.strip_prefix('{') {
-            for sub in expand_group(group) {
-                let (second, _) = first_segment(&sub);
-                if !second.is_empty() {
-                    found.insert(format!("{first}::{second}"));
-                }
-            }
-        } else {
-            let (second, _) = first_segment(after);
-            if !second.is_empty() {
-                found.insert(format!("{first}::{second}"));
-            } else {
-                found.insert(first.to_owned());
-            }
-        }
-        return;
-    }
-    found.insert(first.to_owned());
+    let trimmed = file
+        .strip_suffix("/mod.rs")
+        .or_else(|| file.strip_suffix(".rs"))
+        .unwrap_or(file);
+    trimmed.split('/').map(str::to_owned).collect()
 }
 
-/// First `crate::` segments named in `code` (expanding `{a, b::c}` groups and
-/// matching `parental::*` / `cast::*` at two segments). When `super_is_crate`
-/// is true (e.g. a top-level `foo/mod.rs`), `super::` is treated as `crate::`.
-fn crate_named(code: &str, super_is_crate: bool) -> BTreeSet<String> {
-    let word = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
-    let prefixes: &[&str] = if super_is_crate {
-        &["crate::", "super::"]
+fn inline_mod_name(line: &str) -> Option<&str> {
+    let mut rest = line.trim_start();
+    if let Some(after) = rest.strip_prefix("pub") {
+        let after = after.trim_start();
+        if let Some(in_parens) = after.strip_prefix('(') {
+            let (_, after_parens) = in_parens.split_once(')')?;
+            rest = after_parens.trim_start();
+        } else if after.starts_with("mod ") {
+            rest = after;
+        } else {
+            return None;
+        }
+    }
+    let after = rest.strip_prefix("mod ")?;
+    let (name, tail) = first_segment(after);
+    if !name.is_empty() && tail.trim_start().starts_with('{') {
+        Some(name)
     } else {
-        &["crate::"]
+        None
+    }
+}
+
+fn push_resolved_segments(prefix: &[String], tail: &str, found: &mut BTreeSet<String>) {
+    let mut base: Vec<String> = prefix.to_vec();
+    let mut rest = tail.trim_start();
+    while let Some(after) = rest.strip_prefix("super::") {
+        base.pop();
+        rest = after.trim_start();
+    }
+    let items: Vec<String> = if let Some(group) = rest.strip_prefix('{') {
+        expand_group(group)
+    } else {
+        vec![rest.to_owned()]
     };
-    let mut found = BTreeSet::new();
-    for prefix in prefixes {
-        for (at, _) in code.match_indices(prefix) {
-            let before = &code[..at];
-            if before.chars().next_back().is_some_and(word) || before.ends_with("::") {
-                continue;
-            }
-            let rest = &code[at + prefix.len()..];
-            if let Some(group) = rest.strip_prefix('{') {
-                for item in expand_group(group) {
-                    push_crate_item(&item, &mut found);
+    for item in items {
+        let (first, after_first) = first_segment(&item);
+        if first.is_empty() {
+            continue;
+        }
+        let mut segments = base.clone();
+        segments.push(first.to_owned());
+        if segments.len() == 1
+            && matches!(segments[0].as_str(), "parental" | "cast" | "native")
+            && let Some(after) = after_first.trim_start().strip_prefix("::")
+        {
+            let after = after.trim_start();
+            if let Some(group) = after.strip_prefix('{') {
+                for sub in expand_group(group) {
+                    let (second, _) = first_segment(&sub);
+                    if !second.is_empty() {
+                        found.insert(format!("{}::{second}", segments[0]));
+                    }
                 }
             } else {
-                push_crate_item(rest, &mut found);
+                let (second, _) = first_segment(after);
+                if !second.is_empty() {
+                    found.insert(format!("{}::{second}", segments[0]));
+                } else {
+                    found.insert(segments[0].clone());
+                }
+            }
+            continue;
+        }
+        if matches!(segments[0].as_str(), "parental" | "cast" | "native") && segments.len() >= 2 {
+            found.insert(format!("{}::{}", segments[0], segments[1]));
+        } else {
+            found.insert(segments[0].clone());
+        }
+    }
+}
+
+/// Crate-rooted module targets named in `code` via `crate::` or `super::`
+/// (resolved against `file`'s module path and any enclosing inline `mod { }`
+/// blocks). Expands `{a, b::c}` groups and matches `parental::*`, `cast::*`,
+/// and `native::*` at two segments.
+fn crate_named(code: &str, file: &str) -> BTreeSet<String> {
+    let word = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
+    let mut current = module_path(file);
+    let mut mod_depths: Vec<i32> = Vec::new();
+    let mut depth = 0_i32;
+    let mut found = BTreeSet::new();
+    let mut offset = 0usize;
+    for raw_line in code.split_inclusive('\n') {
+        let line = raw_line.trim_end_matches(['\r', '\n']);
+        if let Some(name) = inline_mod_name(line) {
+            current.push(name.to_owned());
+            mod_depths.push(depth);
+        }
+        for prefix in ["crate::", "super::"] {
+            for (at, _) in line.match_indices(prefix) {
+                let before = &line[..at];
+                if before.chars().next_back().is_some_and(word) || before.ends_with("::") {
+                    continue;
+                }
+                let rest = &code[offset + at + prefix.len()..];
+                if prefix == "crate::" {
+                    push_resolved_segments(&[], rest, &mut found);
+                } else {
+                    let parent = if current.is_empty() {
+                        &[][..]
+                    } else {
+                        &current[..current.len() - 1]
+                    };
+                    push_resolved_segments(parent, rest, &mut found);
+                }
             }
         }
+        depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
+        while mod_depths.last().is_some_and(|&d| depth <= d) {
+            mod_depths.pop();
+            current.pop();
+        }
+        offset += raw_line.len();
     }
     found
 }
@@ -698,8 +768,10 @@ fn store_service_names_only_infrastructure() {
             continue;
         }
         let code = shipped(code);
-        let super_is_crate = name == "store_service/mod.rs";
-        for item in crate_named(&code, super_is_crate) {
+        for item in crate_named(&code, name) {
+            if item == "store_service" {
+                continue;
+            }
             assert!(
                 STORE_SERVICE_MAY_NAME.contains(&item.as_str()),
                 "{name} names crate::{item}; store_service may name only listed infrastructure \
@@ -736,9 +808,11 @@ const FOUNDATION_EXTRA_MAY_NAME: &[&str] = &[
     "Error",
     "MaybeSend",
     "TestGate",
+    "cast::pairing",
     "cast::port",
     "file_host",
-    "native",
+    "native::execution",
+    "native::network",
     "parental::gate",
     "store_host",
     "testing",
@@ -764,7 +838,7 @@ fn foundation_modules_depend_only_on_foundation() {
             continue;
         }
         let code = shipped(code);
-        for item in crate_named(&code, false) {
+        for item in crate_named(&code, name) {
             if FOUNDATION.contains(&item.as_str()) {
                 continue;
             }
@@ -780,6 +854,40 @@ fn foundation_modules_depend_only_on_foundation() {
         &extra_used,
         FOUNDATION_EXTRA_MAY_NAME,
         "foundation extra dependency",
+    );
+}
+
+#[test]
+fn crate_named_resolves_super_inline_mods_and_two_segment_paths() {
+    assert_eq!(
+        crate_named(
+            "use super::{Services, StoreError};\nuse super::super::imports::Imported;\n\
+             use crate::parental::{gate::Snapshot, State};\nuse crate::native::app_updates;",
+            "store_service/epg_repo.rs"
+        ),
+        [
+            "imports",
+            "native::app_updates",
+            "parental::State",
+            "parental::gate",
+            "store_service",
+        ]
+        .map(str::to_owned)
+        .into()
+    );
+    assert_eq!(
+        crate_named(
+            "mod host {\n    fn clock() -> super::Clock {}\n}\nuse super::Error;",
+            "time.rs"
+        ),
+        ["Error", "time"].map(str::to_owned).into()
+    );
+    assert_eq!(
+        crate_named(
+            "use super::{\n    pairing::PairingPrompt,\n};",
+            "cast/port.rs"
+        ),
+        ["cast::pairing"].map(str::to_owned).into()
     );
 }
 

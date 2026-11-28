@@ -435,11 +435,11 @@ impl Drop for Snapshot {
 
 /// Pins the exact snapshot against eviction. The writer must additionally
 /// compare source/feed incarnations with its transaction's current metadata.
+impl crate::model::ProbeSnapshot for Snapshot {}
+
 impl ProbeLease {
     fn snapshot(&self) -> &Snapshot {
-        self.0
-            .downcast_ref::<Snapshot>()
-            .expect("ProbeLease holds a probe Snapshot")
+        self.downcast_ref::<Snapshot>()
     }
 
     /// Private configuration value; callers must preserve SecretUrl redaction.
@@ -1097,7 +1097,7 @@ impl Runtime {
         if stage.evidence != *evidence {
             return Err(InspectionError::StaleEvidence);
         }
-        let lease = ProbeLease(stage.clone());
+        let lease = ProbeLease::new(stage.clone());
         lease.check()?;
         Ok(lease)
     }

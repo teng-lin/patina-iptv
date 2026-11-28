@@ -44,10 +44,13 @@ pub trait Prepared: Send {
     fn allow(self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted>;
 }
 
+/// Sealed marker implemented only by `store_service::Services` in `cast.rs`.
+pub(super) trait AuthorizationServices: Any + Send + Sync {}
+
 /// Monitors the playback grant while the receiver owns an unpublished relay.
 pub struct Authorization {
     pub(super) grant: ExternalPlaybackAuthorization,
-    pub(super) services: Box<dyn Any + Send + Sync>,
+    pub(super) services: Box<dyn AuthorizationServices>,
 }
 
 pub struct Admitted {

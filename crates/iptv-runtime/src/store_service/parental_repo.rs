@@ -1,7 +1,8 @@
 //! Store operations that enforce parental credentials and grants.
 
 use super::{Services, Store, StoreError};
-use crate::parental::gate::{Error, SETTINGS_LOCKED_REASON, Snapshot, now_ms, policy_settings};
+use crate::error::SETTINGS_LOCKED_REASON;
+use crate::parental::gate::{Error, Snapshot, now_ms, policy_settings};
 use iptv_core::parental::{ContentKind, Pin, Target};
 use iptv_library::SourceId;
 use iptv_providers::model::SourceConfig;
