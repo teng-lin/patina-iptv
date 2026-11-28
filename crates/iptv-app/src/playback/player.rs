@@ -1369,12 +1369,7 @@ fn resolve_link(
     let context =
         target(ui, surface).and_then(|(channel, _)| Runtime::playback_context(&*schedule, channel));
     let owner = crate::wiring::runtime_owner::runtime();
-    let request = owner.resolve_stream(
-        StreamPurpose::Surface(surface),
-        session,
-        resolution,
-        context,
-    );
+    let request = owner.resolve_stream(StreamPurpose::Surface(surface), resolution, context);
     let _task = ui.playback.player.owner.run(|| {
         spawn(crate::wiring::runtime_owner::in_runtime(async move {
             let resolved = request.await;

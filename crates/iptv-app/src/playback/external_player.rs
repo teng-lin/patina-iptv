@@ -475,7 +475,7 @@ fn open_from(
         let owner = crate::wiring::runtime_owner::runtime();
         crate::wiring::tasks::spawn_in_app(async move {
             let source = match owner
-                .resolve_stream(StreamPurpose::External, ticket, resolution, context)
+                .resolve_stream(StreamPurpose::External, resolution, context)
                 .await
             {
                 Ok(source) => source,

@@ -663,6 +663,14 @@ fn domain_import_operations_stay_outside_views() {
             continue;
         }
         let source = shipped(&code(&file));
+        let token_list: Vec<_> = tokens(&source).collect();
+        for (at, &token) in token_list.iter().enumerate() {
+            if token == "iptv_import" && token_list.get(at + 1) != Some(&"::") {
+                panic!(
+                    "{name} aliases or imports bare `iptv_import`; move provider I/O operations into iptv-runtime"
+                );
+            }
+        }
         for path in paths_from(&source, "iptv_import") {
             let item = path.first().copied().unwrap_or("");
             if IMPORT_VALUES_OUTSIDE_HOST.contains(&item) {

@@ -165,7 +165,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let Some((epg, local)) = iptv_guide::combined::epg_channel(&*guide, channel) else {
         return;
     };
-    let Some(authority) = epg.resolution_authority(local) else {
+    let Some(authority) = crate::runtime::Runtime::playback_authority(&*guide, channel) else {
         return;
     };
     let resolution = epg.resolve(
@@ -173,7 +173,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         None,
         crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
-    let context = epg.shared_playback();
+    let context = crate::runtime::Runtime::playback_context(&*guide, channel);
     let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
         return;
     };
@@ -206,8 +206,11 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 Ok(grant)
             };
             check().await?;
+            if !current() || pending_stop_current(ui) || pending_local_current(ui) {
+                return Err(Error::Cancelled);
+            }
             let mut source = owner
-                .resolve_stream(StreamPurpose::Cast, ticket, resolution, context)
+                .resolve_stream(StreamPurpose::Cast, resolution, context)
                 .await
                 .map_err(|failure| match failure {
                     ResolveFailure::Cancelled => Error::Cancelled,

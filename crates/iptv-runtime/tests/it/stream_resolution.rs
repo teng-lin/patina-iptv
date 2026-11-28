@@ -32,6 +32,7 @@ struct PortalState {
     slow_abandoned: usize,
     quick_asked: usize,
     handshakes: usize,
+    held_responded: bool,
     release_held: bool,
 }
 
@@ -174,7 +175,17 @@ fn handle(
                 .1
                 .wait_timeout_while(guard, WAIT, |s| !s.release_held)
                 .unwrap();
-            r#"{"js":{"cmd":"ffmpeg http://stream.example.test/held-resolved.m3u8"}}"#.to_owned()
+            let body = r#"{"js":{"cmd":"ffmpeg http://stream.example.test/held-resolved.m3u8"}}"#;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.flush();
+            drop(stream);
+            state.0.lock().unwrap().held_responded = true;
+            state.1.notify_all();
+            return;
         }
         "create_link" => {
             {
@@ -229,10 +240,10 @@ async fn starting_a_second_resolution_for_the_same_purpose_cancels_the_first() {
             let (slow, ctx_a) = portal.resolution("ffmpeg http://stream.example.test/slow/1.ts");
             let (quick, ctx_b) = portal.resolution("ffmpeg http://stream.example.test/quick/2.ts");
 
-            let first = owner.resolve_stream(StreamPurpose::External, 1, slow, Some(ctx_a));
+            let first = owner.resolve_stream(StreamPurpose::External, slow, Some(ctx_a));
             portal.wait_for("first slow create_link", |s| s.slow_asked == 1);
 
-            let second = owner.resolve_stream(StreamPurpose::External, 2, quick, Some(ctx_b));
+            let second = owner.resolve_stream(StreamPurpose::External, quick, Some(ctx_b));
             portal.wait_for("first request cancelled", |s| s.slow_abandoned == 1);
 
             assert_eq!(first.await, Err(ResolveFailure::Cancelled));
@@ -254,13 +265,33 @@ async fn cancel_stream_resolution_cancels_the_portal_request() {
             let (_dir, owner) = runtime();
             let (slow, ctx) = portal.resolution("ffmpeg http://stream.example.test/slow/cancel.ts");
 
-            let pending = owner.resolve_stream(StreamPurpose::Cast, 1, slow, Some(ctx));
+            let pending = owner.resolve_stream(StreamPurpose::Cast, slow, Some(ctx));
             portal.wait_for("cast create_link", |s| s.slow_asked == 1);
 
             owner.cancel_stream_resolution(StreamPurpose::Cast);
             portal.wait_for("cast request cancelled", |s| s.slow_abandoned == 1);
 
             assert_eq!(pending.await, Err(ResolveFailure::Cancelled));
+            assert!(owner.drain_services());
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dropping_the_resolution_future_cancels_the_portal_request() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let portal = MockPortal::new();
+            let (_dir, owner) = runtime();
+            let (slow, ctx) = portal.resolution("ffmpeg http://stream.example.test/slow/drop.ts");
+
+            let pending = owner.resolve_stream(StreamPurpose::External, slow, Some(ctx));
+            portal.wait_for("external create_link", |s| s.slow_asked == 1);
+
+            drop(pending);
+            portal.wait_for("dropped future cancelled request", |s| {
+                s.slow_abandoned == 1
+            });
             assert!(owner.drain_services());
         })
         .await;
@@ -277,8 +308,8 @@ async fn shutdown_cancels_pending_external_and_cast_resolutions() {
             let (cast_res, cast_ctx) =
                 portal.resolution("ffmpeg http://stream.example.test/slow/cast.ts");
 
-            let ext = owner.resolve_stream(StreamPurpose::External, 1, ext_res, Some(ext_ctx));
-            let cast = owner.resolve_stream(StreamPurpose::Cast, 1, cast_res, Some(cast_ctx));
+            let ext = owner.resolve_stream(StreamPurpose::External, ext_res, Some(ext_ctx));
+            let cast = owner.resolve_stream(StreamPurpose::Cast, cast_res, Some(cast_ctx));
             portal.wait_for("both slow create_links", |s| s.slow_asked == 2);
 
             assert!(owner.drain_services());
@@ -303,7 +334,6 @@ async fn interactive_deadline_produces_timed_out_and_cancels_request() {
 
             let pending = owner.resolve_stream_with_timeout(
                 StreamPurpose::Surface(0),
-                1,
                 slow,
                 Some(ctx),
                 Duration::from_millis(250),
@@ -324,41 +354,42 @@ async fn stale_result_does_not_overwrite_portal_session() {
             let (held, shared_ctx) =
                 portal.resolution("ffmpeg http://stream.example.test/held/stale.ts");
 
-            // Request 1 authenticates (getting "token-1") and then waits on the portal.
-            let first = owner.resolve_stream(
-                StreamPurpose::External,
-                1,
-                held,
-                Some(shared_ctx.clone()),
-            );
+            // Request 1 authenticates (getting "token-1") and completes on the
+            // network runtime before its future is polled again on this thread.
+            let first =
+                owner.resolve_stream(StreamPurpose::External, held, Some(shared_ctx.clone()));
             portal.wait_for("held create_link after handshake", |s| {
                 s.handshakes == 1 && s.slow_asked == 1
             });
+            portal.release_held();
+            portal.wait_for("held response written", |s| s.held_responded);
+            tokio::time::sleep(Duration::from_millis(40)).await;
 
             // Supersede Request 1 with Request 2 on the same purpose, which completes
             // and writes "token-2" into the shared PlaybackContext.
             let (quick, _) = portal.resolution("ffmpeg http://stream.example.test/quick/fresh.ts");
-            let second = owner.resolve_stream(
-                StreamPurpose::External,
-                2,
-                quick,
-                Some(shared_ctx.clone()),
-            );
+            let second =
+                owner.resolve_stream(StreamPurpose::External, quick, Some(shared_ctx.clone()));
             let resolved = second.await.expect("second resolution succeeds");
             assert_eq!(
                 resolved.url,
                 "http://stream.example.test/quick-resolved.m3u8"
             );
 
-            // Release Request 1; even if it finishes, it is stale and must not overwrite
-            // the shared PlaybackContext with "token-1".
-            portal.release_held();
+            // Request 1 already has Ok((Ok(source), token-1)) waiting on its oneshot;
+            // finish_stream_resolution must reject it as stale and keep "token-2".
             assert_eq!(first.await, Err(ResolveFailure::Cancelled));
 
-            let page = iptv_providers::stalker::parse_channel_page(&iptv_providers::HttpResponse::ok(
-                r#"{"js":{"total_items":"1","max_page_items":"14","data":[{"id":"100","name":"Probe","number":"1","cmd":"ffmpeg http://stream.example.test/probe.ts","tv_genre_id":"1","use_http_tmp_link":"1","use_load_balancing":"0"}]}}"#,
-            ))
-            .unwrap();
+            let page =
+                iptv_providers::stalker::parse_channel_page(&iptv_providers::HttpResponse::ok(
+                    concat!(
+                        r#"{"js":{"total_items":"1","max_page_items":"14","data":["#,
+                        r#"{"id":"100","name":"Probe","number":"1","#,
+                        r#""cmd":"ffmpeg http://stream.example.test/probe.ts","#,
+                        r#""tv_genre_id":"1","use_http_tmp_link":"1","use_load_balancing":"0"}]}}"#,
+                    ),
+                ))
+                .unwrap();
             let Resolution::StalkerLink(next) = iptv_guide::playback::resolve(
                 Some(&shared_ctx),
                 &page.items.items[0],
@@ -376,6 +407,58 @@ async fn stale_result_does_not_overwrite_portal_session() {
                 "stale result must not overwrite the newer portal session"
             );
             assert!(owner.drain_services());
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn executor_refusal_reports_network_failure_instead_of_cancelled() {
+    struct DroppingTasks;
+    impl iptv_runtime::execution::Tasks for DroppingTasks {
+        fn spawn(&self, task: iptv_runtime::execution::Task) {
+            drop(task);
+        }
+        fn spawn_blocking(&self, work: iptv_runtime::execution::Job) {
+            drop(work);
+        }
+        fn block_on(&self, future: iptv_runtime::execution::LocalTask<'_>) {
+            drop(future);
+        }
+        fn delay(&self, _: Duration) -> iptv_runtime::execution::Task {
+            Box::pin(std::future::pending())
+        }
+    }
+    struct RefusingExecution;
+    impl iptv_runtime::execution::Execution for RefusingExecution {
+        fn lane(
+            &self,
+            _: &'static str,
+        ) -> std::io::Result<Box<dyn iptv_runtime::execution::Lane>> {
+            Err(std::io::Error::other("unused"))
+        }
+        fn worker(&self, _: String, _: iptv_runtime::execution::Job) -> std::io::Result<()> {
+            Err(std::io::Error::other("unused"))
+        }
+        fn tasks(&self) -> Box<dyn iptv_runtime::execution::Tasks> {
+            Box::new(DroppingTasks)
+        }
+    }
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let portal = MockPortal::new();
+            let directory = tempfile::tempdir().unwrap();
+            let mut ports = Ports::new(directory.path().into(), |_| {
+                Ok(iptv_runtime::model::DatabaseKey::from_bytes([0x42; 32]))
+            });
+            ports.execution = Arc::new(RefusingExecution);
+            let owner = Rc::new(Runtime::new(ports));
+            let (slow, ctx) = portal.resolution("ffmpeg http://stream.example.test/slow/refuse.ts");
+
+            let result = owner
+                .resolve_stream(StreamPurpose::External, slow, Some(ctx))
+                .await;
+            assert_eq!(result, Err(ResolveFailure::Network));
         })
         .await;
 }

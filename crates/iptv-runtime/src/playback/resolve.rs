@@ -1,7 +1,7 @@
 //! Runtime-owned stream resolution for local playback, external handoffs, and Cast.
 
 use std::future::Future;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use iptv_core::guide::Schedule;
@@ -55,6 +55,29 @@ fn classify_import_error(error: &ImportError) -> ResolveFailure {
             _ => ResolveFailure::Network,
         },
         kind => ResolveFailure::Portal(kind.into()),
+    }
+}
+
+struct ResolutionGuard {
+    owner: Weak<crate::Runtime>,
+    purpose: StreamPurpose,
+    ticket: u64,
+    cancel: CancelToken,
+    armed: bool,
+}
+
+impl Drop for ResolutionGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if let Some(owner) = self.owner.upgrade() {
+            if owner.finish_stream_resolution(self.purpose, self.ticket) {
+                self.cancel.cancel();
+            }
+        } else {
+            self.cancel.cancel();
+        }
     }
 }
 
@@ -120,15 +143,15 @@ impl crate::Runtime {
     /// Resolves `resolution` to a playable source. Stalker links are fetched
     /// on the network runtime under a tracked, cancellable token with a
     /// bounded interactive deadline, and the refreshed portal session is
-    /// written back only if this request is still current.
+    /// written back only if this request is still current. Dropping the
+    /// returned future before completion cancels the in-flight request.
     pub fn resolve_stream(
         self: &Rc<Self>,
         purpose: StreamPurpose,
-        session: u64,
         resolution: Resolution,
         context: Option<Rc<PlaybackContext>>,
     ) -> impl Future<Output = Result<PlaySource, ResolveFailure>> + use<> {
-        self.resolve_stream_within(purpose, session, resolution, context, STALKER_LINK_TIMEOUT)
+        self.resolve_stream_within(purpose, resolution, context, STALKER_LINK_TIMEOUT)
     }
 
     /// Like [`Runtime::resolve_stream`], with an explicit interactive deadline
@@ -137,26 +160,29 @@ impl crate::Runtime {
     pub fn resolve_stream_with_timeout(
         self: &Rc<Self>,
         purpose: StreamPurpose,
-        session: u64,
         resolution: Resolution,
         context: Option<Rc<PlaybackContext>>,
         timeout: Duration,
     ) -> impl Future<Output = Result<PlaySource, ResolveFailure>> + use<> {
-        self.resolve_stream_within(purpose, session, resolution, context, timeout)
+        self.resolve_stream_within(purpose, resolution, context, timeout)
     }
 
     fn resolve_stream_within(
         self: &Rc<Self>,
         purpose: StreamPurpose,
-        _session: u64,
         resolution: Resolution,
         context: Option<Rc<PlaybackContext>>,
         timeout: Duration,
     ) -> impl Future<Output = Result<PlaySource, ResolveFailure>> + use<> {
-        self.cancel_stream_resolution(purpose);
         let pending = match resolution {
-            Resolution::Play(source) => Err(Ok(source)),
-            Resolution::Unavailable(_) => Err(Err(ResolveFailure::Unavailable)),
+            Resolution::Play(source) => {
+                self.cancel_stream_resolution(purpose);
+                Err(Ok(source))
+            }
+            Resolution::Unavailable(_) => {
+                self.cancel_stream_resolution(purpose);
+                Err(Err(ResolveFailure::Unavailable))
+            }
             Resolution::StalkerLink(link) => {
                 let (ticket, cancel) = self.begin_stream_resolution(purpose);
                 let client = crate::playback::link_client(self, self.network_config());
@@ -192,29 +218,41 @@ impl crate::Runtime {
                     };
                     (outcome, portal)
                 });
-                Ok((Rc::downgrade(self), ticket, cancel, request))
+                let guard = ResolutionGuard {
+                    owner: Rc::downgrade(self),
+                    purpose,
+                    ticket,
+                    cancel,
+                    armed: true,
+                };
+                Ok((guard, request))
             }
         };
         async move {
-            let (owner, ticket, cancel, request) = match pending {
+            let (mut guard, request) = match pending {
                 Err(immediate) => return immediate,
                 Ok(pending) => pending,
             };
             let answered = request.await;
-            let Some(owner) = owner.upgrade() else {
+            guard.armed = false;
+            let Some(owner) = guard.owner.upgrade() else {
                 return Err(ResolveFailure::Cancelled);
             };
-            let current = owner.finish_stream_resolution(purpose, ticket);
+            let current = owner.finish_stream_resolution(guard.purpose, guard.ticket);
             if !current {
                 return Err(ResolveFailure::Cancelled);
             }
             let Ok((outcome, portal)) = answered else {
-                return Err(ResolveFailure::Cancelled);
+                return if guard.cancel.is_canceled() {
+                    Err(ResolveFailure::Cancelled)
+                } else {
+                    Err(ResolveFailure::Network)
+                };
             };
             if outcome == Err(ResolveFailure::TimedOut) {
                 return Err(ResolveFailure::TimedOut);
             }
-            if cancel.is_canceled() {
+            if guard.cancel.is_canceled() {
                 return Err(ResolveFailure::Cancelled);
             }
             if portal.is_authorized()
