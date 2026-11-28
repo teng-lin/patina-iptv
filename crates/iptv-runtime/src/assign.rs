@@ -72,5 +72,10 @@ pub(crate) fn save(
         .services()
         .epg()
         .save_choice(source, key, choice, keep);
-    async move { saved.await.map_err(crate::Error::from) }
+    async move {
+        saved
+            .await
+            .map(|rebuilt| rebuilt.map(|schedule| Box::new(Imported::current(*schedule))))
+            .map_err(crate::Error::from)
+    }
 }

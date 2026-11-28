@@ -1,5 +1,16 @@
 //! Native private-directory protection shared by startup and recovery tests.
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
+
+pub fn sibling(root: &Path, suffix: &str) -> PathBuf {
+    root.with_file_name(format!(
+        "{}.{}",
+        root.file_name().unwrap_or_default().to_string_lossy(),
+        suffix
+    ))
+}
 
 /// Correct old installations too. Never follow a link out of private storage.
 pub fn protect_directory(path: &Path, exclude: fn(&Path) -> io::Result<()>) -> io::Result<()> {

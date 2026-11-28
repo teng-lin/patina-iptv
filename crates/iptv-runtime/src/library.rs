@@ -345,12 +345,6 @@ pub fn save_collapsed(
         .set_collapsed_playlists(collapsed)
 }
 
-pub(crate) struct RefreshSource {
-    pub(crate) id: SourceId,
-    pub(crate) last_attempt_at: Option<i64>,
-    pub(crate) policy: SourcePolicy,
-}
-
 /// Refresh policy belongs to the application; the host supplies timers and
 /// foreground notifications. No device wakeups are requested in the background.
 pub fn start_scheduler(owner: &Rc<super::Runtime>) {

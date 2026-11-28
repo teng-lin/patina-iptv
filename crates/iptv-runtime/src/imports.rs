@@ -76,7 +76,13 @@ impl Publication {
         let job = job.clone();
         let auth = authorization.clone();
         let source = services.blocking(move |store| {
-            if !crate::store_service::ParentalRepo::import_allowed(store, &job, &auth)? {
+            if !crate::store_service::ParentalRepo::import_allowed(
+                store,
+                job.stored,
+                &job.source.config,
+                job.edit,
+                &auth,
+            )? {
                 return Ok(Err(PublicationError::Denied));
             }
             let source = match job.stored {
@@ -194,6 +200,20 @@ pub struct Imported {
     pub source: SourceId,
     /// Whether the last channel may start (its stream can be resolved).
     pub resume: bool,
+}
+
+impl Imported {
+    pub(crate) fn current(rebuilt: crate::store_service::RebuiltSchedule) -> Self {
+        Self {
+            groups: rebuilt.groups,
+            channels: rebuilt.channels,
+            playback: Streams::Current,
+            guide: rebuilt.guide,
+            now: rebuilt.now,
+            source: rebuilt.source,
+            resume: rebuilt.resume,
+        }
+    }
 }
 
 /// Where a new schedule gets its playback context.
@@ -1148,7 +1168,9 @@ pub(crate) fn save(
         }
         if !crate::store_service::ParentalRepo::import_allowed(
             store,
-            &job,
+            job.stored,
+            &job.source.config,
+            job.edit,
             &publication.authorization,
         )? {
             return Ok(Err(PublicationError::Denied));
@@ -1276,7 +1298,9 @@ impl crate::publish::Publish for CatalogPublish {
         }
         if !crate::store_service::ParentalRepo::import_allowed(
             live,
-            &self.job,
+            self.job.stored,
+            &self.job.source.config,
+            self.job.edit,
             &self.publication.authorization,
         )? {
             self.outcome

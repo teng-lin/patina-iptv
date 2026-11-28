@@ -172,15 +172,7 @@ fn settle(result: Result<(), WriteError>) -> Settled {
     }
 }
 
-/// Validation and persistence are distinct: a failed save is never success.
-#[derive(Debug)]
-pub enum SaveError {
-    Invalid(SettingsError),
-    ParentalLocked,
-    Storage(std::io::ErrorKind),
-    /// Published to disk, but directory synchronization failed.
-    Durability(std::io::ErrorKind),
-}
+pub use crate::model::SaveError;
 
 impl From<WriteError> for SaveFailure {
     fn from(error: WriteError) -> Self {
@@ -190,33 +182,6 @@ impl From<WriteError> for SaveFailure {
         }
     }
 }
-
-impl From<WriteError> for SaveError {
-    fn from(error: WriteError) -> Self {
-        match error {
-            WriteError::Storage(kind) => Self::Storage(kind),
-            WriteError::Durability(kind) => Self::Durability(kind),
-        }
-    }
-}
-
-impl std::fmt::Display for SaveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ParentalLocked => {
-                f.write_str("Unlock parental controls before changing settings")
-            }
-            Self::Invalid(error) => error.fmt(f),
-            Self::Storage(kind) => write!(f, "Could not save settings ({kind})"),
-            Self::Durability(kind) => write!(
-                f,
-                "Settings updated, but saving safely could not be confirmed ({kind})"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for SaveError {}
 
 pub(crate) fn check_setting_write(owner: &super::Runtime, key: &str) -> Result<(), SaveError> {
     let protect_all = owner.settings().get("parental.require_pin_for").ok()
@@ -501,19 +466,7 @@ pub fn user_agent(settings: &Settings) -> Option<String> {
     (!ua.trim().is_empty()).then(|| ua.trim().to_owned())
 }
 
-/// The part of the provider network configuration that no setting changes
-/// (limits, the development fixture override). Playback transport reads it
-/// on player threads, which act for no owner.
-pub fn base_network_config() -> NetworkConfig {
-    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-    let mut config = NetworkConfig::default();
-    #[cfg(debug_assertions)]
-    {
-        config.allow_private_fixture = cfg!(any(test, feature = "test-support"))
-            || crate::build_config::DEV_PLAYLIST.is_some();
-    }
-    config
-}
+pub use crate::network::base_network_config;
 
 /// The network settings of provider requests: [`base_network_config`] with
 /// `general.user_agent` for requests that do not name their own.

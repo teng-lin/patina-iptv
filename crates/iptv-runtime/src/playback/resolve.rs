@@ -8,37 +8,11 @@ use iptv_core::guide::Schedule;
 use iptv_core::playback::PlaySource;
 use iptv_guide::playback::{PlaybackContext, Resolution, ResolutionAuthority, StalkerLink};
 use iptv_import::{CancelToken, FailureKind, FetchErrorKind, ImportError};
-use iptv_library::ImportErrorKind;
+
+pub use crate::model::{ResolveFailure, StreamPurpose};
 
 /// Interactive deadline for Stalker `create_link` resolution.
 pub const STALKER_LINK_TIMEOUT: Duration = Duration::from_secs(12);
-
-/// Who the resolved stream is for. Each purpose holds at most one pending
-/// resolution per slot; starting a new one cancels the previous one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum StreamPurpose {
-    /// Local player surface (`0..MAX_SURFACES`).
-    Surface(usize),
-    /// External-player handoff.
-    External,
-    /// Cast / AirPlay sender.
-    Cast,
-}
-
-/// Why a stream could not be resolved to a playable source.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ResolveFailure {
-    /// The resolution was cancelled or superseded by a newer request.
-    Cancelled,
-    /// The network client or connection failed.
-    Network,
-    /// The portal did not answer before the interactive deadline.
-    TimedOut,
-    /// The portal refused or returned an unusable response.
-    Portal(ImportErrorKind),
-    /// The channel has no playable stream.
-    Unavailable,
-}
 
 fn classify_import_error(error: &ImportError) -> ResolveFailure {
     match error.kind() {

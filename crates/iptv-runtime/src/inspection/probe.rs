@@ -1,5 +1,6 @@
 //! Disposable encrypted snapshots with leases that pin evidence during repair.
 use super::{InspectionControl, guarded};
+use crate::model::{ProbeLease, ProbeRequest, ProbeTarget};
 use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
 use iptv_epg::{FeedId, ParseOptions, StrictXmltvParser, TimePolicy, XmltvItem};
@@ -26,23 +27,6 @@ pub const PROBE_DEADLINE: Duration = Duration::from_secs(60);
 pub const STAGE_BUDGET: u64 = 512 << 20;
 pub const STAGE_TTL: i64 = 24 * 60 * 60;
 const RESERVATION: u64 = iptv_store_sqlite::INSPECTION_STAGE_BYTES;
-
-/// The input to inspect into a private staged guide snapshot.
-#[derive(Clone, Debug)]
-pub enum ProbeTarget {
-    /// A feed already configured for the source.
-    Configured(FeedId),
-    /// An explicit guide URL whose contents have no durable feed identity.
-    Supplied(SecretUrl),
-}
-/// A guide probe scoped to one playlist.
-#[derive(Clone, Debug)]
-pub struct ProbeRequest {
-    /// The playlist whose access policy and channel identities scope the result.
-    pub source: iptv_library::SourceId,
-    /// The configured or supplied guide input to inspect.
-    pub target: ProbeTarget,
-}
 
 fn now() -> i64 {
     crate::time::now_unix()
@@ -451,12 +435,16 @@ impl Drop for Snapshot {
 
 /// Pins the exact snapshot against eviction. The writer must additionally
 /// compare source/feed incarnations with its transaction's current metadata.
-#[derive(Clone)]
-pub struct ProbeLease(Arc<Snapshot>);
+impl crate::model::ProbeSnapshot for Snapshot {}
+
 impl ProbeLease {
+    fn snapshot(&self) -> &Snapshot {
+        self.downcast_ref::<Snapshot>()
+    }
+
     /// Private configuration value; callers must preserve SecretUrl redaction.
     pub fn location(&self) -> SecretUrl {
-        self.0.location.clone()
+        self.snapshot().location.clone()
     }
     /// Confirms the stage is still in its owning runtime epoch and within its lifetime.
     pub fn validate_alive(&self) -> InspectionResult<()> {
@@ -472,14 +460,15 @@ impl ProbeLease {
         cancel: &CancelToken,
         deadline: Instant,
     ) -> InspectionResult<Vec<iptv_epg::XmltvChannel>> {
-        check(&self.0.services, cancel, deadline)?;
+        let snapshot = self.snapshot();
+        check(&snapshot.services, cancel, deadline)?;
         self.check()?;
-        let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
+        let mut stage = storage(InspectionStage::open(&snapshot.path, &snapshot.key))?;
         let result = bounded(&mut stage, cancel.clone(), deadline, |stage| {
             let mut channels = Vec::new();
             let mut after = String::new();
             loop {
-                check(&self.0.services, cancel, deadline).map_err(|_| {
+                check(&snapshot.services, cancel, deadline).map_err(|_| {
                     iptv_store_sqlite::StoreError::Unavailable("probe channel inspection stopped")
                 })?;
                 let page = stage.channels(&after, "", MAX_PAGE)?;
@@ -496,16 +485,16 @@ impl ProbeLease {
             }
             Ok(channels)
         });
-        check(&self.0.services, cancel, deadline)?;
+        check(&snapshot.services, cancel, deadline)?;
         storage(result)
     }
     /// Evidence identifying the exact leased stage.
     pub fn evidence(&self) -> &ProbeEvidence {
-        &self.0.evidence
+        &self.snapshot().evidence
     }
     /// The playlist incarnation that admitted the probe.
     pub fn source_incarnation(&self) -> &str {
-        &self.0.source_incarnation
+        &self.snapshot().source_incarnation
     }
     fn integrity(
         &self,
@@ -513,19 +502,20 @@ impl ProbeLease {
         cancel: &CancelToken,
         deadline: Instant,
     ) -> InspectionResult<()> {
+        let snapshot = self.snapshot();
         self.check()?;
         let mut hash = Sha256::new();
         let result = stage.for_each_chunk(|bytes| {
-            check(&self.0.services, cancel, deadline).map_err(|_| {
+            check(&snapshot.services, cancel, deadline).map_err(|_| {
                 iptv_store_sqlite::StoreError::Unavailable("probe integrity inspection stopped")
             })?;
             hash.update(bytes);
             Ok(())
         });
-        check(&self.0.services, cancel, deadline)?;
+        check(&snapshot.services, cancel, deadline)?;
         storage(result)?;
         let actual: [u8; 32] = hash.finalize().into();
-        if actual != self.0.evidence.digest {
+        if actual != snapshot.evidence.digest {
             return Err(InspectionError::StaleEvidence);
         }
         Ok(())
@@ -536,13 +526,14 @@ impl ProbeLease {
         cancel: &CancelToken,
         deadline: Instant,
     ) -> InspectionResult<()> {
+        let snapshot = self.snapshot();
         self.check()?;
-        let source = self.0.evidence.source;
-        let source_incarnation = self.0.source_incarnation.clone();
-        let feed = self.0.evidence.feed;
-        let incarnation = self.0.evidence.incarnation.clone();
+        let source = snapshot.evidence.source;
+        let source_incarnation = snapshot.source_incarnation.clone();
+        let feed = snapshot.evidence.feed;
+        let incarnation = snapshot.evidence.incarnation.clone();
         let query_cancel = cancel.clone();
-        let current = self.0.services.analyze(move |store| {
+        let current = snapshot.services.analyze(move |store| {
             store.inspection_read_until(
                 query_cancel,
                 crate::time::expiry(deadline),
@@ -572,12 +563,14 @@ impl ProbeLease {
             cancel: cancel.clone(),
             timeout: deadline.saturating_duration_since(Instant::now()),
         };
-        let valid = self
-            .0
+        let valid = snapshot
             .services
-            .try_block_on(guarded(&self.0.services, &control, deadline, async move {
-                current.await.map_err(|_| InspectionError::Storage)?
-            }))
+            .try_block_on(guarded(
+                &snapshot.services,
+                &control,
+                deadline,
+                async move { current.await.map_err(|_| InspectionError::Storage)? },
+            ))
             .ok_or(InspectionError::Storage)??;
         if !valid {
             return Err(InspectionError::StaleEvidence);
@@ -600,24 +593,24 @@ impl ProbeLease {
         cancel: &CancelToken,
         deadline: Instant,
     ) -> InspectionResult<()> {
+        let snapshot = self.snapshot();
         self.check()?;
-        check(&self.0.services, cancel, deadline)?;
+        check(&snapshot.services, cancel, deadline)?;
         if candidates.len() > 500 {
             return Err(InspectionError::LimitExceeded);
         }
         for candidate in candidates {
-            if candidate.source != self.0.evidence.source
-                || self
-                    .0
+            if candidate.source != snapshot.evidence.source
+                || snapshot
                     .evidence
                     .feed
                     .is_some_and(|feed| feed != candidate.feed)
-                || candidate.incarnation != self.0.evidence.incarnation
+                || candidate.incarnation != snapshot.evidence.incarnation
             {
                 return Err(InspectionError::StaleEvidence);
             }
         }
-        let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
+        let mut stage = storage(InspectionStage::open(&snapshot.path, &snapshot.key))?;
         let mut failure = None;
         let result = bounded(&mut stage, cancel.clone(), deadline, |stage| {
             self.integrity(stage, cancel, deadline).map_err(|error| {
@@ -631,7 +624,7 @@ impl ProbeLease {
             }
             Ok(true)
         });
-        check(&self.0.services, cancel, deadline)?;
+        check(&snapshot.services, cancel, deadline)?;
         if !storage(result).map_err(|error| failure.unwrap_or(error))? {
             return Err(InspectionError::StaleEvidence);
         }
@@ -639,10 +632,11 @@ impl ProbeLease {
     }
     /// Checks the owner epoch and expiry without opening the staged database.
     pub fn check(&self) -> InspectionResult<()> {
-        if !self.0.services.is_current() {
+        let snapshot = self.snapshot();
+        if !snapshot.services.is_current() {
             return Err(InspectionError::OwnerClosed);
         }
-        if now() >= self.0.evidence.expires_at {
+        if now() >= snapshot.evidence.expires_at {
             return Err(InspectionError::StaleEvidence);
         }
         Ok(())
@@ -1106,7 +1100,7 @@ impl Runtime {
         if stage.evidence != *evidence {
             return Err(InspectionError::StaleEvidence);
         }
-        let lease = ProbeLease(stage.clone());
+        let lease = ProbeLease::new(stage.clone());
         lease.check()?;
         Ok(lease)
     }
@@ -1153,8 +1147,9 @@ impl Runtime {
         let admission = self.inspection.admit();
         let task = admitted_worker(&services, workers, admission, move || {
             let lease = lease?;
+            let leased = lease.snapshot();
             lease.current_configuration(&worker_control.cancel, deadline)?;
-            check(&lease.0.services, &worker_control.cancel, deadline)?;
+            check(&leased.services, &worker_control.cancel, deadline)?;
             if limit == 0 || limit > MAX_PAGE || text.len() > MAX_QUERY_BYTES {
                 return Err(InspectionError::InvalidRequest);
             }
@@ -1170,7 +1165,7 @@ impl Runtime {
             }) {
                 return Err(InspectionError::StaleCursor);
             }
-            let mut stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
+            let mut stage = storage(InspectionStage::open(&leased.path, &leased.key))?;
             let mut channels = storage(bounded(
                 &mut stage,
                 worker_control.cancel.clone(),
@@ -1183,7 +1178,7 @@ impl Runtime {
                     )
                 },
             ))?;
-            check(&lease.0.services, &worker_control.cancel, deadline)?;
+            check(&leased.services, &worker_control.cancel, deadline)?;
             let more = channels.len() > limit as usize;
             channels.truncate(limit as usize);
             let next = more.then(|| Cursor {
@@ -1258,18 +1253,19 @@ impl Runtime {
                 return Err(InspectionError::InvalidRequest);
             }
             let lease = lease?;
+            let leased = lease.snapshot();
             lease.current_configuration(&worker_control.cancel, deadline)?;
-            check(&lease.0.services, &worker_control.cancel, deadline)?;
+            check(&leased.services, &worker_control.cancel, deadline)?;
             lease.validate_candidates_with_control(
                 std::slice::from_ref(&candidate),
                 &worker_control.cancel,
                 deadline,
             )?;
-            let stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
+            let stage = storage(InspectionStage::open(&leased.path, &leased.key))?;
             let mut hash = Sha256::new();
             // The probe parser already applied this feed's configured shift.
             // Reparse with the same policy, captured independently of current config.
-            let mut parser = StrictXmltvParser::new(parse_options(lease.0.time));
+            let mut parser = StrictXmltvParser::new(parse_options(leased.time));
             let mut raw = BTreeMap::<i64, iptv_epg::XmltvProgram>::new();
             let mut overflow = false;
             let mut failure = None;
@@ -1330,7 +1326,7 @@ impl Runtime {
                 }
             };
             storage(stage.for_each_chunk(|bytes| {
-                if let Err(error) = check(&lease.0.services, &worker_control.cancel, deadline) {
+                if let Err(error) = check(&leased.services, &worker_control.cancel, deadline) {
                     failure = Some(error);
                     return Err(iptv_store_sqlite::StoreError::Unavailable(
                         "probe inspection stopped",
@@ -1351,7 +1347,7 @@ impl Runtime {
             if actual != evidence.digest {
                 return Err(InspectionError::StaleEvidence);
             }
-            check(&lease.0.services, &worker_control.cancel, deadline)?;
+            check(&leased.services, &worker_control.cancel, deadline)?;
             if overflow {
                 return Err(InspectionError::LimitExceeded);
             }
@@ -1376,7 +1372,7 @@ impl Runtime {
                     {
                         programs.push(CandidateProgram {
                             candidate: candidate.clone(),
-                            source_incarnation: lease.0.source_incarnation.clone(),
+                            source_incarnation: leased.source_incarnation.clone(),
                             evidence_revision: hex(&evidence.digest),
                             provider_event_id: None,
                             start: p.start,

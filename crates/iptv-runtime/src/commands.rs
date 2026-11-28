@@ -199,7 +199,15 @@ fn clear_guides_native(
     sources: Vec<SourceId>,
 ) -> impl std::future::Future<Output = Result<(bool, Vec<super::imports::Imported>), StoreError>> + use<>
 {
-    services.epg().clear_guides(sources)
+    let cleared = services.epg().clear_guides(sources);
+    async move {
+        let (deleted, rebuilt) = cleared.await?;
+        let imports = rebuilt
+            .into_iter()
+            .map(super::imports::Imported::current)
+            .collect();
+        Ok((deleted, imports))
+    }
 }
 
 fn guide_page_native(

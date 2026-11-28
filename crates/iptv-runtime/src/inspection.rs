@@ -5,12 +5,12 @@
 #![warn(missing_docs)]
 
 mod probe;
+pub use crate::model::{InspectionControl, ProbeLease, ProbeRequest, ProbeTarget, QUERY_DEADLINE};
 use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
 use iptv_import::CancelToken;
 pub use iptv_library::inspection::*;
 pub(crate) use probe::Vault;
-pub use probe::{ProbeLease, ProbeRequest, ProbeTarget};
 use std::{
     future::{Future, poll_fn},
     pin::pin,
@@ -18,27 +18,8 @@ use std::{
     time::Duration,
 };
 
-/// Default and maximum end-to-end budget for an inspection query.
-pub const QUERY_DEADLINE: Duration = Duration::from_secs(3);
 #[cfg(feature = "test-support")]
 pub(crate) type ScanHook = Box<dyn FnMut() + Send>;
-
-/// Cancellation and deadline for one inspection call.
-#[derive(Clone, Debug)]
-pub struct InspectionControl {
-    /// Caller-controlled cancellation, independent of sibling operations.
-    pub cancel: CancelToken,
-    /// Requested end-to-end budget, capped by the operation's public maximum.
-    pub timeout: Duration,
-}
-impl Default for InspectionControl {
-    fn default() -> Self {
-        Self {
-            cancel: CancelToken::new(),
-            timeout: QUERY_DEADLINE,
-        }
-    }
-}
 pub(crate) async fn guarded<T>(
     services: &Services,
     control: &InspectionControl,

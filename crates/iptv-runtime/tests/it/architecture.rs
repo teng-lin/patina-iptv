@@ -574,6 +574,326 @@ fn only_native_modules_name_the_native_adapter_or_start_threads() {
     }
 }
 
+/// Shipped `store_service/**` modules may name only infrastructure modules,
+/// dependency-free data modules, and the leaf `parental::gate` submodule.
+/// Exact, shrink-only list.
+const STORE_SERVICE_MAY_NAME: &[&str] = &[
+    // Crate root re-exports of infrastructure ports and test gates.
+    "MaybeSend",
+    "Ports",
+    "TestGate",
+    // Infrastructure modules.
+    "credential_store",
+    "error",
+    "execution",
+    "file_writer",
+    "guide_checks",
+    "network",
+    "settings",
+    "testing",
+    "time",
+    "workers",
+    // Dependency-free data and leaf gate modules.
+    "model",
+    "paging",
+    "parental::gate",
+    "ports",
+    "state",
+];
+
+fn expand_group(group: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut depth = 0usize;
+    let mut item = String::new();
+    for ch in group.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' if depth == 0 => break,
+            '}' => depth -= 1,
+            ',' if depth == 0 => {
+                items.push(std::mem::take(&mut item));
+                continue;
+            }
+            _ => {}
+        }
+        item.push(ch);
+    }
+    items.push(item);
+    items
+}
+
+fn first_segment(text: &str) -> (&str, &str) {
+    let text = text.trim_start();
+    let end = text
+        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .unwrap_or(text.len());
+    (&text[..end], &text[end..])
+}
+
+fn module_path(file: &str) -> Vec<String> {
+    if file == "lib.rs" {
+        return Vec::new();
+    }
+    let trimmed = file
+        .strip_suffix("/mod.rs")
+        .or_else(|| file.strip_suffix(".rs"))
+        .unwrap_or(file);
+    trimmed.split('/').map(str::to_owned).collect()
+}
+
+fn inline_mod_name(line: &str) -> Option<&str> {
+    let mut rest = line.trim_start();
+    if let Some(after) = rest.strip_prefix("pub") {
+        let after = after.trim_start();
+        if let Some(in_parens) = after.strip_prefix('(') {
+            let (_, after_parens) = in_parens.split_once(')')?;
+            rest = after_parens.trim_start();
+        } else if after.starts_with("mod ") {
+            rest = after;
+        } else {
+            return None;
+        }
+    }
+    let after = rest.strip_prefix("mod ")?;
+    let (name, tail) = first_segment(after);
+    if !name.is_empty() && tail.trim_start().starts_with('{') {
+        Some(name)
+    } else {
+        None
+    }
+}
+
+fn push_resolved_segments(prefix: &[String], tail: &str, found: &mut BTreeSet<String>) {
+    let mut base: Vec<String> = prefix.to_vec();
+    let mut rest = tail.trim_start();
+    while let Some(after) = rest.strip_prefix("super::") {
+        base.pop();
+        rest = after.trim_start();
+    }
+    let items: Vec<String> = if let Some(group) = rest.strip_prefix('{') {
+        expand_group(group)
+    } else {
+        vec![rest.to_owned()]
+    };
+    for item in items {
+        let (first, after_first) = first_segment(&item);
+        if first.is_empty() {
+            continue;
+        }
+        let mut segments = base.clone();
+        segments.push(first.to_owned());
+        if segments.len() == 1
+            && matches!(segments[0].as_str(), "parental" | "cast" | "native")
+            && let Some(after) = after_first.trim_start().strip_prefix("::")
+        {
+            let after = after.trim_start();
+            if let Some(group) = after.strip_prefix('{') {
+                for sub in expand_group(group) {
+                    let (second, _) = first_segment(&sub);
+                    if !second.is_empty() {
+                        found.insert(format!("{}::{second}", segments[0]));
+                    }
+                }
+            } else {
+                let (second, _) = first_segment(after);
+                if !second.is_empty() {
+                    found.insert(format!("{}::{second}", segments[0]));
+                } else {
+                    found.insert(segments[0].clone());
+                }
+            }
+            continue;
+        }
+        if matches!(segments[0].as_str(), "parental" | "cast" | "native") && segments.len() >= 2 {
+            found.insert(format!("{}::{}", segments[0], segments[1]));
+        } else {
+            found.insert(segments[0].clone());
+        }
+    }
+}
+
+/// Crate-rooted module targets named in `code` via `crate::` or `super::`
+/// (resolved against `file`'s module path and any enclosing inline `mod { }`
+/// blocks). Expands `{a, b::c}` groups and matches `parental::*`, `cast::*`,
+/// and `native::*` at two segments.
+fn crate_named(code: &str, file: &str) -> BTreeSet<String> {
+    let word = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
+    let mut current = module_path(file);
+    let mut mod_depths: Vec<i32> = Vec::new();
+    let mut depth = 0_i32;
+    let mut found = BTreeSet::new();
+    let mut offset = 0usize;
+    for raw_line in code.split_inclusive('\n') {
+        let line = raw_line.trim_end_matches(['\r', '\n']);
+        if let Some(name) = inline_mod_name(line) {
+            current.push(name.to_owned());
+            mod_depths.push(depth);
+        }
+        for prefix in ["crate::", "super::"] {
+            for (at, _) in line.match_indices(prefix) {
+                let before = &line[..at];
+                if before.chars().next_back().is_some_and(word) || before.ends_with("::") {
+                    continue;
+                }
+                let rest = &code[offset + at + prefix.len()..];
+                if prefix == "crate::" {
+                    push_resolved_segments(&[], rest, &mut found);
+                } else {
+                    let parent = if current.is_empty() {
+                        &[][..]
+                    } else {
+                        &current[..current.len() - 1]
+                    };
+                    push_resolved_segments(parent, rest, &mut found);
+                }
+            }
+        }
+        depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
+        while mod_depths.last().is_some_and(|&d| depth <= d) {
+            mod_depths.pop();
+            current.pop();
+        }
+        offset += raw_line.len();
+    }
+    found
+}
+
+#[test]
+fn store_service_names_only_infrastructure() {
+    let sources = runtime_sources();
+    let tests = test_modules(&sources);
+    let mut found = BTreeSet::new();
+    for (name, code) in &sources {
+        if !name.starts_with("store_service/") || tests.contains(name) {
+            continue;
+        }
+        let code = shipped(code);
+        for item in crate_named(&code, name) {
+            if item == "store_service" {
+                continue;
+            }
+            assert!(
+                STORE_SERVICE_MAY_NAME.contains(&item.as_str()),
+                "{name} names crate::{item}; store_service may name only listed infrastructure \
+                 and leaf data modules"
+            );
+            found.insert(item);
+        }
+    }
+    exact(&found, STORE_SERVICE_MAY_NAME, "store_service dependency");
+}
+
+/// Bottom-layer modules: they may name each other and external crates, never
+/// an orchestration module. Exact, shrink-only list.
+const FOUNDATION: &[&str] = &[
+    "error",
+    "model",
+    "state",
+    "paging",
+    "time",
+    "network",
+    "execution",
+    "workers",
+    "ports",
+    "events",
+    "file_writer",
+    "storage",
+    "build_config",
+];
+
+/// Non-FOUNDATION items that foundation modules and leaf submodules may name:
+/// crate-root re-exports, leaf host/threading/test traits, native adapter
+/// bridges behind `cfg(feature = "native")`, and leaf submodules. Exact list.
+const FOUNDATION_EXTRA_MAY_NAME: &[&str] = &[
+    "Error",
+    "MaybeSend",
+    "TestGate",
+    "cast::pairing",
+    "cast::port",
+    "file_host",
+    "native::execution",
+    "native::network",
+    "parental::gate",
+    "store_host",
+    "testing",
+    "threading",
+];
+
+fn foundation_member(name: &str) -> bool {
+    if matches!(
+        name,
+        "parental/gate.rs" | "cast/port.rs" | "cast/pairing.rs"
+    ) {
+        return true;
+    }
+    FOUNDATION
+        .iter()
+        .any(|module| name == format!("{module}.rs") || name.starts_with(&format!("{module}/")))
+}
+
+#[test]
+fn foundation_modules_depend_only_on_foundation() {
+    let sources = runtime_sources();
+    let tests = test_modules(&sources);
+    let mut extra_used = BTreeSet::new();
+    for (name, code) in &sources {
+        if !foundation_member(name) || tests.contains(name) {
+            continue;
+        }
+        let code = shipped(code);
+        for item in crate_named(&code, name) {
+            if FOUNDATION.contains(&item.as_str()) {
+                continue;
+            }
+            assert!(
+                FOUNDATION_EXTRA_MAY_NAME.contains(&item.as_str()),
+                "{name} names crate::{item}; foundation modules may name only FOUNDATION \
+                 modules or listed leaf dependencies"
+            );
+            extra_used.insert(item);
+        }
+    }
+    exact(
+        &extra_used,
+        FOUNDATION_EXTRA_MAY_NAME,
+        "foundation extra dependency",
+    );
+}
+
+#[test]
+fn crate_named_resolves_super_inline_mods_and_two_segment_paths() {
+    assert_eq!(
+        crate_named(
+            "use super::{Services, StoreError};\nuse super::super::imports::Imported;\n\
+             use crate::parental::{gate::Snapshot, State};\nuse crate::native::app_updates;",
+            "store_service/epg_repo.rs"
+        ),
+        [
+            "imports",
+            "native::app_updates",
+            "parental::State",
+            "parental::gate",
+            "store_service",
+        ]
+        .map(str::to_owned)
+        .into()
+    );
+    assert_eq!(
+        crate_named(
+            "mod host {\n    fn clock() -> super::Clock {}\n}\nuse super::Error;",
+            "time.rs"
+        ),
+        ["Error", "time"].map(str::to_owned).into()
+    );
+    assert_eq!(
+        crate_named(
+            "use super::{\n    pairing::PairingPrompt,\n};",
+            "cast/port.rs"
+        ),
+        ["cast::pairing"].map(str::to_owned).into()
+    );
+}
+
 #[test]
 fn declarations_include_local_statics_but_not_lifetimes() {
     assert_eq!(statics("fn f() { static mut local: u32 = 0; }"), ["local"]);

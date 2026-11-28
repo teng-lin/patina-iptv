@@ -263,7 +263,7 @@ fn next_due(last: i64, frequency: Frequency) -> i64 {
 
 fn path(directory: &Path) -> std::path::PathBuf {
     // Profile restores swap the catalog directory; update preferences survive it.
-    crate::backup::sibling(directory, "app-update").join("schedule.json")
+    crate::storage::sibling(directory, "app-update").join("schedule.json")
 }
 
 fn persist_document(
