@@ -28,7 +28,7 @@ use std::time::Duration;
 use iptv_core::playback::{ErrorKind, PlaySource};
 use iptv_core::tracks::Tracks;
 use iptv_guide::EpgSchedule;
-use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
+use iptv_guide::playback::{Clock, Resolution, Unavailable};
 use iptv_presentation::menu::Origin;
 use iptv_presentation::playback::ChannelHistory;
 use iptv_presentation::playback_health::Health;
@@ -40,6 +40,7 @@ use nsh_core::prelude::*;
 
 use crate::guide::{ProgramSelection, Schedule};
 use crate::runtime::Runtime;
+use crate::runtime::model::{ImportErrorKind, ResolveFailure, StreamPurpose};
 use crate::wiring::runtime_owner::runtime;
 use crate::{
     Playback, Ui, ViewMode, guide::lists, playback::browse_playback, playback::external_player,
@@ -873,91 +874,96 @@ fn open(ui: Ui, surface: usize, session: u64) {
         open_allowed(ui, surface, session);
     }
 }
-fn open_allowed(ui: Ui, surface: usize, session: u64) {
-    if surface == 0
-        && let Some((job, source)) = ui.playback.player.recorded.get_untracked()
-    {
-        let position = if ui.playback.player.main().finished.get_untracked() {
-            0
+fn open_recorded(ui: Ui, surface: usize, session: u64) -> bool {
+    let Some((job, source)) = ui
+        .playback
+        .player
+        .recorded
+        .get_untracked()
+        .filter(|_| surface == 0)
+    else {
+        return false;
+    };
+    let main = ui.playback.player.main();
+    let position = if main.finished.get_untracked() {
+        0
+    } else {
+        main.resume_ms
+            .get_untracked()
+            .unwrap_or_else(|| main.timeline.get_untracked().position_ms)
+    };
+    let owner = crate::wiring::runtime_owner::runtime();
+    crate::wiring::tasks::spawn_in_app(async move {
+        let target = iptv_core::parental::Target::live(job.request.source, job.request.channel);
+        let allowed = owner.parental_check(&target).await.is_ok();
+        if ui
+            .playback
+            .player
+            .main()
+            .health
+            .with_untracked(|h| h.session())
+            != session
+        {
+            return;
+        }
+        if allowed {
+            load(ui, surface, session, source);
+            ui.playback.player.main().resume_ms.set(Some(position));
         } else {
-            ui.playback
-                .player
-                .main()
-                .resume_ms
-                .get_untracked()
-                .unwrap_or_else(|| {
-                    ui.playback
-                        .player
-                        .main()
-                        .timeline
-                        .get_untracked()
-                        .position_ms
-                })
-        };
+            stop(ui);
+        }
+    });
+    true
+}
+
+fn open_early_resume(ui: Ui, surface: usize, session: u64) {
+    let Some(early) = resume::source(ui).filter(|_| surface == 0) else {
+        close(ui, surface);
+        return;
+    };
+    crate::wiring::tasks::spawn_in_app(async move {
         let owner = crate::wiring::runtime_owner::runtime();
-        crate::wiring::tasks::spawn_in_app(async move {
-            let target = iptv_core::parental::Target::live(job.request.source, job.request.channel);
-            let allowed = owner.parental_check(&target).await.is_ok();
-            if ui
-                .playback
-                .player
-                .main()
-                .health
-                .with_untracked(|h| h.session())
-                != session
-            {
-                return;
-            }
-            if allowed {
-                load(ui, surface, session, source);
-                ui.playback.player.main().resume_ms.set(Some(position));
-            } else {
-                stop(ui);
-            }
-        });
+        let source = iptv_library::SourceId(early.source_id);
+        let channel = iptv_providers::ContentId::from_stored(early.key.clone());
+        let allowed = crate::runtime::commands::channel(&owner, source, channel)
+            .await
+            .is_ok_and(|row| row.is_some_and(|r| !r.blocked));
+        if ui
+            .playback
+            .player
+            .main()
+            .health
+            .with_untracked(|h| h.session())
+            != session
+        {
+            return;
+        }
+        if !allowed {
+            stop(ui);
+            return;
+        }
+        if owner.reserve_live_viewing(0, source, &early.key) {
+            load_authorized(ui, 0, session, early.source, Some(early.authority));
+        } else {
+            fail(
+                ui,
+                0,
+                session,
+                ErrorKind::Http(429),
+                crate::chrome::i18n::tr("Provider connection reserved for recording").into(),
+            );
+        }
+    });
+}
+
+fn open_allowed(ui: Ui, surface: usize, session: u64) {
+    if open_recorded(ui, surface, session) {
         return;
     }
     // What the surface asked for before is no longer wanted.
     cancel_resolve(surface);
     let Some((channel, playback)) = target(ui, surface) else {
-        // A retry of the last channel started before the guide arrived.
-        match resume::source(ui).filter(|_| surface == 0) {
-            Some(early) => crate::wiring::tasks::spawn_in_app(async move {
-                let owner = crate::wiring::runtime_owner::runtime();
-                let source = iptv_library::SourceId(early.source_id);
-                let channel = iptv_providers::ContentId::from_stored(early.key.clone());
-                let allowed = crate::runtime::commands::channel(&owner, source, channel)
-                    .await
-                    .is_ok_and(|row| row.is_some_and(|r| !r.blocked));
-                if ui
-                    .playback
-                    .player
-                    .main()
-                    .health
-                    .with_untracked(|h| h.session())
-                    != session
-                {
-                    return;
-                }
-                if !allowed {
-                    stop(ui);
-                    return;
-                }
-                if owner.reserve_live_viewing(0, source, &early.key) {
-                    load_authorized(ui, 0, session, early.source, Some(early.authority));
-                } else {
-                    fail(
-                        ui,
-                        0,
-                        session,
-                        ErrorKind::Http(429),
-                        crate::chrome::i18n::tr("Provider connection reserved for recording")
-                            .into(),
-                    );
-                }
-            }),
-            None => close(ui, surface),
-        }
+        open_early_resume(ui, surface, session);
         return;
     };
     if !crate::screens::recordings_view::try_reserve_viewing(
@@ -1064,8 +1070,8 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
     let authority = resolution_authority(&*schedule, channel);
     match resolution {
         Resolution::Play(source) => load_authorized(ui, surface, session, source, authority),
-        Resolution::StalkerLink(link) => {
-            resolve_link(ui, surface, session, link, schedule.clone(), authority)
+        resolution @ Resolution::StalkerLink(_) => {
+            resolve_link(ui, surface, session, resolution, schedule.clone(), authority)
         }
         Resolution::Unavailable(why) => {
             let detail = match why {
@@ -1131,8 +1137,7 @@ fn resolution_authority(
     schedule: &dyn Schedule,
     channel: usize,
 ) -> Option<iptv_guide::playback::ResolutionAuthority> {
-    let (schedule, channel) = iptv_guide::combined::epg_channel(schedule, channel)?;
-    schedule.resolution_authority(channel)
+    Runtime::playback_authority(schedule, channel)
 }
 
 fn load(ui: Ui, surface: usize, session: u64, source: PlaySource) {
@@ -1327,47 +1332,52 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
 /// Cancels `surface`'s link request in flight, if any: the viewer zapped,
 /// the surface reopens or plays nothing.
 fn cancel_resolve(surface: usize) {
-    crate::wiring::runtime_owner::runtime().cancel_link_resolution(surface);
+    crate::wiring::runtime_owner::runtime()
+        .cancel_stream_resolution(StreamPurpose::Surface(surface));
 }
 
-/// A Stalker `create_link` on the shared network runtime (`executor.rs`);
-/// the result comes back to the UI thread. Opening anything else on the
-/// surface, or closing it, cancels the request (`cancel_resolve`).
+fn resolve_failure(failure: ResolveFailure) -> (ErrorKind, String) {
+    match failure {
+        ResolveFailure::Network => (ErrorKind::Network, crate::chrome::i18n::tr("Network").into()),
+        ResolveFailure::TimedOut => (
+            ErrorKind::Network,
+            crate::chrome::i18n::tr("The request timed out").into(),
+        ),
+        ResolveFailure::Portal(ImportErrorKind::AuthFailed) => (
+            ErrorKind::Account,
+            crate::chrome::i18n::tr("Portal authentication unavailable").into(),
+        ),
+        ResolveFailure::Portal(_) => (ErrorKind::Resolve, crate::chrome::i18n::tr("Portal").into()),
+        ResolveFailure::Unavailable | ResolveFailure::Cancelled => (
+            ErrorKind::Unavailable,
+            crate::chrome::i18n::tr("Channel unavailable").into(),
+        ),
+    }
+}
+
+/// Resolves a Stalker stream on the runtime's network executor; the result
+/// comes back to the UI thread. Opening anything else on the surface, or
+/// closing it, cancels the request (`cancel_resolve`).
 fn resolve_link(
     ui: Ui,
     surface: usize,
     session: u64,
-    link: Box<StalkerLink>,
+    resolution: Resolution,
     schedule: Rc<dyn Schedule>,
     authority: Option<iptv_guide::playback::ResolutionAuthority>,
 ) {
-    let context = target(ui, surface)
-        .and_then(|(channel, _)| iptv_guide::combined::epg_channel(&*schedule, channel))
-        .and_then(|(epg, _)| epg.shared_playback());
-    let StalkerLink {
-        session: mut portal,
-        cmd,
-        channel_headers,
-    } = *link;
-    let cancel = crate::wiring::runtime_owner::runtime().begin_link_resolution(surface, session);
-    let client = crate::wiring::runtime_owner::runtime()
-        .link_client(crate::wiring::settings::network_config());
-    let request = crate::wiring::runtime_owner::runtime().spawn_network(async move {
-        let result = match client.await {
-            Ok(net) => iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)
-                .await
-                .map_err(|e| format!("{:?}", e.kind())),
-            Err(_) => Err("network".to_owned()),
-        };
-        (result, portal)
-    });
+    let context =
+        target(ui, surface).and_then(|(channel, _)| Runtime::playback_context(&*schedule, channel));
+    let owner = crate::wiring::runtime_owner::runtime();
+    let request = owner.resolve_stream(
+        StreamPurpose::Surface(surface),
+        session,
+        resolution,
+        context,
+    );
     let _task = ui.playback.player.owner.run(|| {
         spawn(crate::wiring::runtime_owner::in_runtime(async move {
-            let answered = request.await;
-            crate::wiring::runtime_owner::runtime().finish_link_resolution(surface, session);
-            let Ok((result, portal)) = answered else {
-                return;
-            };
+            let resolved = request.await;
             if ui
                 .playback
                 .player
@@ -1378,20 +1388,13 @@ fn resolve_link(
             {
                 return;
             }
-            // This resolve still owns the player's session. Organization copies
-            // share its playback context even though their schedule pointers differ.
-            if let Some(ctx) = context {
-                ctx.update_stalker_session(portal.clone());
-            }
-            match result {
-                Ok(url) => load_authorized(
-                    ui,
-                    surface,
-                    session,
-                    StalkerLink::source(&portal, url, &channel_headers),
-                    authority,
-                ),
-                Err(kind) => fail(ui, surface, session, ErrorKind::from_resolve(&kind), kind),
+            match resolved {
+                Ok(source) => load_authorized(ui, surface, session, source, authority),
+                Err(ResolveFailure::Cancelled) => {}
+                Err(failure) => {
+                    let (kind, detail) = resolve_failure(failure);
+                    fail(ui, surface, session, kind, detail);
+                }
             }
         }))
     });

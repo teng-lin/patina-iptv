@@ -18,6 +18,7 @@ type ShowWaiter = futures_channel::oneshot::Receiver<()>;
 pub(super) struct State {
     account_streams: Cell<Option<u32>>,
     resolving: Resolves,
+    resolve_ticket: Cell<u64>,
     link_client: LinkClientCache,
     library: Slot<RefCell<Option<LibrarySnapshot>>>,
     parts: RefCell<ScheduleParts>,
@@ -36,6 +37,7 @@ impl State {
         Self {
             account_streams: Cell::default(),
             resolving: Resolves::default(),
+            resolve_ticket: Cell::new(0),
             link_client: Arc::new(Mutex::new(None)),
             library: Slot::default(),
             parts: RefCell::default(),
@@ -60,6 +62,12 @@ impl State {
 
     pub(super) fn pending_resolutions(&self) -> &Resolves {
         &self.resolving
+    }
+
+    pub(super) fn next_resolve_ticket(&self) -> u64 {
+        let next = self.resolve_ticket.get().wrapping_add(1).max(1);
+        self.resolve_ticket.set(next);
+        next
     }
 
     pub(super) fn link_client_cache(&self) -> LinkClientCache {

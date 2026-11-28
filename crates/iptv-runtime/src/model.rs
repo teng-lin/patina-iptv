@@ -1,6 +1,7 @@
 //! Value types exposed by application commands. No connection or SQL API.
 pub use crate::Error as StoreError;
 pub use crate::inspection::{InspectionControl, ProbeLease, ProbeRequest, ProbeTarget};
+pub use crate::playback::{ResolveFailure, StreamPurpose};
 pub use crate::settings::SaveError;
 use iptv_core::add_playlist::{ImportCounts, ImportFailure, ImportProgress};
 use iptv_epg::UnixTime;

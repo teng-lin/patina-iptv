@@ -1,4 +1,7 @@
 //! Playback metadata and per-source resume persistence.
+mod resolve;
+pub use resolve::{ResolveFailure, STALKER_LINK_TIMEOUT, StreamPurpose};
+
 /// Attach the exact stored source snapshot without another store job.
 pub fn source_authority(
     stored: &iptv_library::StoredSource,

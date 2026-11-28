@@ -159,7 +159,7 @@ impl TaskBinding {
 type EventSink = Rc<dyn Fn(RuntimeEvent)>;
 type BrowserObserver = Rc<dyn Fn() -> BrowserState>;
 type PageWaiters = RefCell<Vec<data::pages::Waiter>>;
-type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
+type Resolves = RefCell<std::collections::HashMap<playback::StreamPurpose, (u64, CancelToken)>>;
 pub struct Runtime {
     cast: cast::State,
     parental: RefCell<parental::State>,
@@ -272,6 +272,7 @@ impl Runtime {
         self.parental_lock();
         self.recordings.detach_ui();
         self.cancel_guide_checks();
+        self.cancel_all_stream_resolutions();
         // A Recently added sort still running must not hold the analysis
         // lane's teardown barrier.
         self.vod.cancel_discovery();
@@ -364,9 +365,7 @@ impl Drop for Runtime {
         if let Some((_, cancel)) = self.imports.wizard_import.borrow().as_ref() {
             cancel.cancel();
         }
-        for (_, cancel) in self.catalog.pending_resolutions().borrow().iter().flatten() {
-            cancel.cancel();
-        }
+        self.cancel_all_stream_resolutions();
         for (_, cancel) in self.imports.imports.borrow().values() {
             cancel.cancel();
         }

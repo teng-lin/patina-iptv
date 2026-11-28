@@ -128,41 +128,6 @@ impl Runtime {
             }
         }
     }
-    pub fn cancel_link_resolution(&self, surface: usize) {
-        let running = self
-            .catalog
-            .pending_resolutions()
-            .borrow_mut()
-            .get_mut(surface)
-            .and_then(Option::take);
-        if let Some((_, cancel)) = running {
-            cancel.cancel();
-        }
-    }
-    pub fn begin_link_resolution(&self, surface: usize, session: u64) -> CancelToken {
-        self.cancel_link_resolution(surface);
-        let cancel = CancelToken::new();
-        if let Some(slot) = self
-            .catalog
-            .pending_resolutions()
-            .borrow_mut()
-            .get_mut(surface)
-        {
-            *slot = Some((session, cancel.clone()));
-        }
-        cancel
-    }
-    pub fn finish_link_resolution(&self, surface: usize, session: u64) {
-        if let Some(slot) = self
-            .catalog
-            .pending_resolutions()
-            .borrow_mut()
-            .get_mut(surface)
-            && slot.as_ref().is_some_and(|(at, _)| *at == session)
-        {
-            *slot = None;
-        }
-    }
     /// Cancels the import. A wizard with a required guide still needs the
     /// matching terminal reply to distinguish cancellation from a durable add.
     pub fn cancel_wizard_import(&self, id: ImportId, wait_for_commit: bool) {
@@ -234,17 +199,6 @@ impl Runtime {
             }
             crate::recordings::host::activate_storage(&ports)
         }
-    }
-
-    /// Reuses connections across Stalker zaps; a settings change replaces
-    /// the client.
-    pub fn link_client(
-        &self,
-        config: crate::network::NetworkConfig,
-    ) -> impl Future<Output = Result<crate::network::Client, iptv_import::FetchError>>
-    + crate::MaybeSend
-    + use<> {
-        crate::playback::link_client(self, config)
     }
 
     /// Tells the user, once per owner, that settings last for the session:
