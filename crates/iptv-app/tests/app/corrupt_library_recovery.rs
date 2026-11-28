@@ -365,6 +365,8 @@ fn corrupt_library_restore_backup_rejects_bad_archive_then_restores_valid_librar
     step(app.press("id:store-recovery-restore"));
     step(app.wait_for_within("text:Recovered Channel One", WAIT));
     step(app.wait_for_gone("id:store-startup-failure", WAIT));
+    // The log was closed for the directory swap and reopened in the new one.
+    assert!(root.join("diagnostics/patina.log").is_file());
 
     let recovered_entries: Vec<PathBuf> = fs::read_dir(root.join("recovered"))
         .unwrap()
