@@ -32,9 +32,9 @@ pub(crate) struct RestoreReview {
     response: Rc<Cell<Option<oneshot::Sender<Choice>>>>,
 }
 
-pub(super) async fn confirm(ui: Ui, filename: Option<String>) -> bool {
+pub(super) async fn confirm(screens: crate::ScreensUi, filename: Option<String>) -> bool {
     let (response, answer) = oneshot::channel();
-    ui.screens.restore_review.set(Some(RestoreReview {
+    screens.restore_review.set(Some(RestoreReview {
         filename,
         focus: Choice::Cancel,
         reveal: false,
@@ -44,23 +44,22 @@ pub(super) async fn confirm(ui: Ui, filename: Option<String>) -> bool {
     answer.await.is_ok_and(|choice| choice == Choice::Schedule)
 }
 
-pub(crate) fn is_open(ui: Ui) -> bool {
-    ui.screens.restore_review.with(Option::is_some)
+pub(crate) fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.restore_review.with(Option::is_some)
 }
 
-fn focus(ui: Ui) -> Option<Choice> {
-    ui.screens
+fn focus(screens: crate::ScreensUi) -> Option<Choice> {
+    screens
         .restore_review
         .with(|review| review.as_ref().map(|review| review.focus))
 }
 
-fn finish(ui: Ui, choice: Choice) -> bool {
-    let response = ui
-        .screens
+fn finish(screens: crate::ScreensUi, choice: Choice) -> bool {
+    let response = screens
         .restore_review
         .with_untracked(|review| review.as_ref().and_then(|review| review.response.take()));
     if let Some(response) = response {
-        ui.screens.restore_review.set(None);
+        screens.restore_review.set(None);
         let _ = response.send(choice);
         true
     } else {
@@ -68,30 +67,30 @@ fn finish(ui: Ui, choice: Choice) -> bool {
     }
 }
 
-pub(crate) fn back(ui: Ui) -> bool {
-    finish(ui, Choice::Cancel)
+pub(crate) fn back(screens: crate::ScreensUi) -> bool {
+    finish(screens, Choice::Cancel)
 }
 
 pub(crate) fn key(ui: Ui, action: Action) {
     let choice = match action {
-        Action::MoveUp if focus(ui) == Some(Choice::Schedule) => {
-            scroll(ui, -1.0);
+        Action::MoveUp if focus(ui.screens) == Some(Choice::Schedule) => {
+            scroll(ui.screens, -1.0);
             return;
         }
-        Action::MoveDown if focus(ui) == Some(Choice::Cancel) => {
-            scroll(ui, 1.0);
+        Action::MoveDown if focus(ui.screens) == Some(Choice::Cancel) => {
+            scroll(ui.screens, 1.0);
             return;
         }
         Action::MoveLeft | Action::MoveUp => Choice::Schedule,
         Action::MoveRight | Action::MoveDown => Choice::Cancel,
         Action::Select => {
-            if let Some(choice) = focus(ui) {
-                finish(ui, choice);
+            if let Some(choice) = focus(ui.screens) {
+                finish(ui.screens, choice);
             }
             return;
         }
         Action::Back => {
-            back(ui);
+            back(ui.screens);
             return;
         }
         _ => return,
@@ -104,9 +103,9 @@ pub(crate) fn key(ui: Ui, action: Action) {
     });
 }
 
-fn scroll(ui: Ui, direction: f32) {
+fn scroll(screens: crate::ScreensUi, direction: f32) {
     let mut scrolling = None;
-    ui.screens.restore_review.update(|review| {
+    screens.restore_review.update(|review| {
         if let Some(review) = review {
             review.reveal = false;
             scrolling = Some(review.scrolling);
@@ -118,7 +117,7 @@ fn scroll(ui: Ui, direction: f32) {
 }
 
 pub(crate) fn layer(ui: Ui) -> impl IntoElement {
-    when(move || is_open(ui), move || screen(ui))
+    when(move || is_open(ui.screens), move || screen(ui))
 }
 
 fn screen(ui: Ui) -> View {
@@ -127,8 +126,8 @@ fn screen(ui: Ui) -> View {
         .screens
         .restore_review
         .with_untracked(|review| review.as_ref().expect("an open restore review").scrolling);
-    let schedule = move || focus(ui) == Some(Choice::Schedule);
-    let cancel = move || focus(ui) == Some(Choice::Cancel);
+    let schedule = move || focus(ui.screens) == Some(Choice::Schedule);
+    let cancel = move || focus(ui.screens) == Some(Choice::Cancel);
     let reveal = move || {
         ui.keys_shown()
             && ui
@@ -163,14 +162,14 @@ fn screen(ui: Ui) -> View {
                         move || tr("Schedule restore"),
                         schedule,
                         move || {
-                            finish(ui, Choice::Schedule);
+                            finish(ui.screens, Choice::Schedule);
                         },
                     ),
                     move || reveal() && schedule(),
                 ))
                 .child(scrolling.control(
                     ui_kit::button(ui, size, move || tr("Cancel"), cancel, move || {
-                        back(ui);
+                        back(ui.screens);
                     }),
                     move || reveal() && cancel(),
                 )),

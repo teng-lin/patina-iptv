@@ -1,26 +1,25 @@
 //! Native on-demand transport; seeking keeps the same player and stream open.
 use crate::Ui;
 
-pub fn active(ui: Ui) -> bool {
-    ui.playback.player.recorded.with(Option::is_some)
-        || ui.playback.player.vod.with(Option::is_some)
+pub fn active(playback: crate::PlaybackUi) -> bool {
+    playback.player.recorded.with(Option::is_some) || playback.player.vod.with(Option::is_some)
 }
-pub fn seekable(ui: Ui) -> bool {
-    let stream = ui.playback.player.main();
+pub fn seekable(playback: crate::PlaybackUi) -> bool {
+    let stream = playback.player.main();
     let published = stream.native_published();
     let seekable = stream.timeline.with(|timeline| timeline.seekable);
-    active(ui) && published && seekable
+    active(playback) && published && seekable
 }
 
 pub fn seek_to(ui: Ui, ms: u64) -> bool {
-    if !active(ui) || !ui.playback.player.main().accepts_native(None) {
+    if !active(ui.playback) || !ui.playback.player.main().accepts_native(None) {
         return false;
     }
     let stream = ui.playback.player.main();
     let mut command = None;
     stream.timeline.update(|t| command = t.seek_to(ms));
     if let Some(command) = command {
-        crate::playback::interruption::viewer_acted(ui);
+        crate::playback::interruption::viewer_acted(ui.playback);
         if stream.finished.get_untracked() {
             stream.finished.set(false);
             ui.playback.player.vod.update(|playing| {
@@ -63,7 +62,7 @@ pub fn observe(
     seekable: bool,
 ) {
     let stream = ui.playback.player.stream(surface);
-    if surface != 0 || !stream.accepts_native(Some(token)) || !active(ui) {
+    if surface != 0 || !stream.accepts_native(Some(token)) || !active(ui.playback) {
         return;
     }
     let mut accepted = false;
@@ -108,10 +107,10 @@ pub fn flush(ui: Ui, ended: bool) {
     }
 }
 
-pub fn title(ui: Ui) -> Option<String> {
-    ui.playback
+pub fn title(playback: crate::PlaybackUi) -> Option<String> {
+    playback
         .player
         .recorded
         .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
-        .or_else(|| crate::screens::vod_view::title(ui))
+        .or_else(|| crate::screens::vod_view::title(playback))
 }

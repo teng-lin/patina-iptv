@@ -68,7 +68,7 @@ fn program(ui: Ui) -> (usize, Program) {
 /// How far the program on screen is, 0–1: where the archive plays (or
 /// the seek being chosen), else now in the live program.
 fn progress(ui: Ui) -> f32 {
-    if let Some((at, length)) = crate::playback::seek::elapsed(ui) {
+    if let Some((at, length)) = crate::playback::seek::elapsed(ui.playback) {
         return if length > 0 {
             at as f32 / length as f32
         } else {
@@ -87,7 +87,7 @@ fn progress(ui: Ui) -> f32 {
 /// The one time line's kind now.
 fn line_kind(ui: Ui) -> Line {
     let replay = matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
-        || crate::playback::on_demand::active(ui);
+        || crate::playback::on_demand::active(ui.playback);
     ui.playback
         .panels
         .with(|p| p.line(replay))
@@ -97,7 +97,7 @@ fn line_kind(ui: Ui) -> Line {
 /// Its ends: live, the program's times and the minutes left; in a
 /// replay, the position (⇢ while a seek is chosen) and the length.
 fn ends(ui: Ui) -> (String, String) {
-    match (line_kind(ui), crate::playback::seek::elapsed(ui)) {
+    match (line_kind(ui), crate::playback::seek::elapsed(ui.playback)) {
         (Line::Seek, Some((at, length))) => {
             let seeking = if ui.playback.seek_target.get().is_some() {
                 "⇢ "
@@ -216,7 +216,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                 .bg(tint(WHITE, RESTING_ALPHA))
                 .child(
                     image(crate::chrome::content_image::source(move || {
-                        if crate::playback::on_demand::active(ui) {
+                        if crate::playback::on_demand::active(ui.playback) {
                             crate::guide::grid::no_logo()
                         } else {
                             logo(channel()).unwrap_or_else(crate::guide::grid::no_logo)
@@ -266,7 +266,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                 .child(time_line(ui))
                 .child(
                     text(move || {
-                        if crate::playback::on_demand::active(ui) {
+                        if crate::playback::on_demand::active(ui.playback) {
                             return String::new();
                         }
                         let p = next();

@@ -44,7 +44,9 @@ pub struct Open {
 }
 
 fn open_with(ui: Ui, wizard: Wizard) {
-    if let Some(Step::Processing { id, .. } | Step::Canceling { id }) = read(ui, Wizard::step) {
+    if let Some(Step::Processing { id, .. } | Step::Canceling { id }) =
+        read(ui.screens, Wizard::step)
+    {
         crate::runtime_owner::runtime().cancel_wizard_import(id, false);
     }
     ui.screens.wizard.set(Some(Open {
@@ -87,36 +89,36 @@ pub fn open_add(ui: Ui) {
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::wiring::navigation::request(
-            ui,
+            ui.screens,
             iptv_core::parental::Target::settings(),
             move || open_add(ui),
         );
         return;
     }
-    if !is_open(ui) {
+    if !is_open(ui.screens) {
         open_with(ui, Wizard::add_playlist());
     }
 }
 
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.wizard.with(Option::is_some)
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.wizard.with(Option::is_some)
 }
 
-fn read<R>(ui: Ui, f: impl FnOnce(&Wizard) -> R) -> Option<R> {
-    ui.screens.wizard.with(|w| w.as_ref().map(|o| f(&o.wizard)))
+fn read<R>(screens: crate::ScreensUi, f: impl FnOnce(&Wizard) -> R) -> Option<R> {
+    screens.wizard.with(|w| w.as_ref().map(|o| f(&o.wizard)))
 }
 
 /// Feeds `event` to the wizard and performs what it asks for.
 pub fn send(ui: Ui, event: WizardEvent) {
     let submit = matches!(&event, WizardEvent::Tap(Target::Submit))
         || (matches!(&event, WizardEvent::Ok)
-            && read(ui, |w| w.focus() == Some(Target::Submit)).unwrap_or(false));
+            && read(ui.screens, |w| w.focus() == Some(Target::Submit)).unwrap_or(false));
     if submit
         && crate::wiring::runtime_owner::runtime().parental_has_pin()
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::wiring::navigation::request(
-            ui,
+            ui.screens,
             iptv_core::parental::Target::settings(),
             move || send(ui, event),
         );
@@ -140,7 +142,7 @@ fn prefill(ui: Ui) {
     let Some(url) = crate::runtime::build_config::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
         return;
     };
-    let due = read(ui, |w| {
+    let due = read(ui.screens, |w| {
         w.step() == Step::Form
             && w.kind() == PlaylistKind::M3uUrl
             && w.value(Field::PlaylistUrl).is_empty()
@@ -166,7 +168,7 @@ fn prefill(ui: Ui) {
 fn perform(ui: Ui, effect: WizardEffect) {
     match effect {
         WizardEffect::RestoreBackup => crate::library_ui::backup::request_restore(ui),
-        WizardEffect::EditField { field } => entry::begin(ui, field),
+        WizardEffect::EditField { field } => entry::begin(ui.screens, field),
         WizardEffect::ReadClipboard { field } => crate::wiring::tasks::spawn_in_app(async move {
             let text = clipboard_string().await;
             send(
@@ -226,7 +228,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
             log::info!("iptv wizard: import {id:?} of {source_kind:?}");
         }
         WizardEffect::CancelImport { id } => {
-            let wait_for_commit = read(ui, Wizard::step) == Some(Step::Canceling { id });
+            let wait_for_commit = read(ui.screens, Wizard::step) == Some(Step::Canceling { id });
             crate::wiring::runtime_owner::runtime().cancel_wizard_import(id, wait_for_commit);
         }
         WizardEffect::Close(exit) => {
@@ -236,8 +238,8 @@ fn perform(ui: Ui, effect: WizardEffect) {
             if let WizardExit::Added { .. } = exit {
                 // Added from the playlists or settings screen: "Watch"
                 // goes to the guide.
-                crate::library_ui::playlists_view::close(ui);
-                crate::screens::settings_view::close(ui);
+                crate::library_ui::playlists_view::close(ui.screens);
+                crate::screens::settings_view::close(ui.screens);
             }
             ui.screens.wizard.set(None);
         }
@@ -246,7 +248,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
 
 /// A remote action while the wizard is open.
 pub fn key(ui: Ui, action: Action) {
-    if entry::is_editing(ui) {
+    if entry::is_editing(ui.screens) {
         // The input has the keys while focused; these come once it lost it.
         if matches!(action, Action::Select | Action::Back) {
             entry::commit(ui);
@@ -272,11 +274,11 @@ pub fn key(ui: Ui, action: Action) {
 /// Back: ends text entry, else goes back a step. On the first-run empty
 /// state it is not handled, so the app is left (there is nothing behind).
 pub fn back(ui: Ui) -> bool {
-    if entry::is_editing(ui) {
+    if entry::is_editing(ui.screens) {
         entry::commit(ui);
         return true;
     }
-    if back_leaves(ui) {
+    if back_leaves(ui.screens) {
         return false;
     }
     send(ui, WizardEvent::Back);
@@ -285,9 +287,9 @@ pub fn back(ui: Ui) -> bool {
 
 /// The welcome screen has no previous step. Keep the platform's Back
 /// gesture available there, unless text entry still needs to close.
-pub(crate) fn back_leaves(ui: Ui) -> bool {
-    !entry::is_editing(ui)
-        && read(ui, |w| {
+pub(crate) fn back_leaves(screens: crate::ScreensUi) -> bool {
+    !entry::is_editing(screens)
+        && read(screens, |w| {
             w.origin() == Origin::FirstRun && w.step() == Step::Empty
         }) == Some(true)
 }
@@ -321,7 +323,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .wizard
             .with(|w| w.as_ref().and_then(|o| screen_of(&o.wizard)))
     });
-    let editing = computed(move || entry::is_editing(ui));
+    let editing = computed(move || entry::is_editing(ui.screens));
     when(
         move || screen.get().is_some(),
         move || {
@@ -351,7 +353,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 }
 
 fn focused(ui: Ui, target: Target) -> bool {
-    ui.keys_shown() && read(ui, |w| w.focus() == Some(target)) == Some(true)
+    ui.keys_shown() && read(ui.screens, |w| w.focus() == Some(target)) == Some(true)
 }
 
 /// A button for `target`, revealed when the keys focus it.
@@ -440,7 +442,7 @@ fn empty(ui: Ui) -> View {
     let size = Scale::new();
     let scrolling = ui_kit::FocusScroll::new();
     // Live: Android reports its document pickers after this is built.
-    let can_restore = move || read(ui, Wizard::can_restore).unwrap_or(false);
+    let can_restore = move || read(ui.screens, Wizard::can_restore).unwrap_or(false);
     let content = view()
         .gap(move || size.px(10.0))
         .child(
@@ -507,7 +509,7 @@ fn choose_type(ui: Ui) -> View {
                 None,
             )
             .accessibility_state(move || AccessibilityState {
-                selected: read(ui, Wizard::kind) == Some(kind),
+                selected: read(ui.screens, Wizard::kind) == Some(kind),
                 ..AccessibilityState::default()
             })
         }))
@@ -599,8 +601,8 @@ fn source_type(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll, kind: Playli
 
 fn field_row(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll, field: Field) -> View {
     let target = Target::Field(field);
-    let value = move || read(ui, |w| w.value(field).to_owned()).unwrap_or_default();
-    let error = move || read(ui, |w| w.error(field)).flatten();
+    let value = move || read(ui.screens, |w| w.value(field).to_owned()).unwrap_or_default();
+    let error = move || read(ui.screens, |w| w.error(field)).flatten();
     let field_control = form_control(ui, size, target)
         .test_id(match field {
             Field::PlaylistUrl => "wizard-field-PlaylistUrl",
@@ -672,14 +674,14 @@ fn field_row(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll, field: Field) 
 
 fn form(ui: Ui, kind: PlaylistKind) -> View {
     let banner = move || {
-        read(ui, |w| match (w.notice(), w.failure()) {
+        read(ui.screens, |w| match (w.notice(), w.failure()) {
             (Some(Notice::ClipboardEmpty), _) => Some(tr("There is no text to paste.")),
             (None, Some(f)) => Some(words::failure(kind, f)),
             (None, None) => None,
         })
         .flatten()
     };
-    let expanded = move || read(ui, Wizard::optional_expanded).unwrap_or_default();
+    let expanded = move || read(ui.screens, Wizard::optional_expanded).unwrap_or_default();
     let size = Scale::new();
     let scrolling = ui_kit::FocusScroll::new();
     let options = Target::OptionalDetails;
@@ -733,7 +735,7 @@ fn form(ui: Ui, kind: PlaylistKind) -> View {
         ))
         .child(when(
             move || {
-                read(ui, |w| {
+                read(ui.screens, |w| {
                     kind.fields().iter().any(|field| {
                         field.is_url()
                             && w.value(*field)
@@ -790,22 +792,22 @@ fn form(ui: Ui, kind: PlaylistKind) -> View {
             ),
             content,
         )
-        .accessibility_elements_hidden(move || entry::is_editing(ui))
+        .accessibility_elements_hidden(move || entry::is_editing(ui.screens))
         .test_id("wizard-form"),
     )
 }
 
 fn processing(ui: Ui) -> View {
-    let canceling = move || matches!(read(ui, Wizard::step), Some(Step::Canceling { .. }));
+    let canceling = move || matches!(read(ui.screens, Wizard::step), Some(Step::Canceling { .. }));
     let progress = move || {
-        read(ui, |w| match w.step() {
+        read(ui.screens, |w| match w.step() {
             Step::Processing { progress, .. } => progress,
             _ => None,
         })
         .flatten()
     };
     let percent = move || progress().and_then(|p| p.percent());
-    let kind = read(ui, Wizard::kind).unwrap_or(PlaylistKind::M3uUrl);
+    let kind = read(ui.screens, Wizard::kind).unwrap_or(PlaylistKind::M3uUrl);
     let size = Scale::new();
     let scrolling = ui_kit::FocusScroll::new();
     let content = view()
@@ -860,7 +862,7 @@ fn processing(ui: Ui) -> View {
 
 fn succeeded(ui: Ui) -> View {
     let counts = move || {
-        read(ui, |w| match w.step() {
+        read(ui.screens, |w| match w.step() {
             Step::Succeeded { counts, .. } => words::counts(counts),
             _ => String::new(),
         })
@@ -903,7 +905,7 @@ fn succeeded(ui: Ui) -> View {
 
 fn failed(ui: Ui) -> View {
     let message = move || {
-        read(ui, |w| match w.step() {
+        read(ui.screens, |w| match w.step() {
             Step::Failed { failure } => words::failure(w.kind(), failure),
             _ => "",
         })

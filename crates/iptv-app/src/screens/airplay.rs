@@ -30,7 +30,7 @@ pub(crate) fn button(ui: Ui, size: f32, id: &'static str) -> View {
 
 pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View {
     if ui.playback.player_surface != 0
-        || crate::playback::pip::in_window(ui)
+        || crate::playback::pip::in_window(ui.playback)
         || runtime().native_cast_view().is_none()
     {
         return view();

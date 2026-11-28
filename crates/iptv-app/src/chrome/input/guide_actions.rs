@@ -40,7 +40,7 @@ pub(super) fn apply(ui: Ui, key: RemoteKey, action: Action) {
             }
         }
         Action::ShowGuide => ui.chrome.mode.apply(crate::chrome::mode::Action::ShowGuide),
-        Action::ShowGroups => crate::guide::lists::open_groups(ui),
+        Action::ShowGroups => crate::guide::lists::open_groups(ui.guide),
         Action::OpenSearch => crate::screens::search_view::open(ui),
         a @ (Action::JumpToNow
         | Action::HourBack

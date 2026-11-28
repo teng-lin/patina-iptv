@@ -23,7 +23,7 @@ pub(super) fn apply(ui: Ui, action: Action) -> bool {
         Some(Overlay::CustomGroups) => crate::library_ui::custom_groups::key(ui, action),
         Some(Overlay::Playlists) => crate::library_ui::playlists_view::key(ui, action),
         Some(Overlay::AppUpdateNotice) => {
-            crate::screens::settings_view::updates::notice_key(ui, action)
+            crate::screens::settings_view::updates::notice_key(ui.screens, action)
         }
         Some(Overlay::AppUpdate) => crate::screens::settings_view::updates::key(ui, action),
         Some(Overlay::Settings) => crate::screens::settings_view::key(ui, action),
@@ -42,10 +42,10 @@ pub(super) fn apply(ui: Ui, action: Action) -> bool {
 
 fn chooser(ui: Ui, action: Action, leave: bool) {
     match action {
-        Action::MoveUp => crate::chrome::chooser::move_focus(ui, -1),
-        Action::MoveDown => crate::chrome::chooser::move_focus(ui, 1),
-        Action::MoveLeft if leave => crate::chrome::chooser::focus_leave(ui, false),
-        Action::MoveRight if leave => crate::chrome::chooser::focus_leave(ui, true),
+        Action::MoveUp => crate::chrome::chooser::move_focus(ui.screens, -1),
+        Action::MoveDown => crate::chrome::chooser::move_focus(ui.screens, 1),
+        Action::MoveLeft if leave => crate::chrome::chooser::focus_leave(ui.screens, false),
+        Action::MoveRight if leave => crate::chrome::chooser::focus_leave(ui.screens, true),
         Action::Select => {
             if let Some(i) = ui
                 .screens
@@ -71,8 +71,8 @@ fn description(ui: Ui, action: Action) {
     }
     // Back (or Menu) closes program details.
     match action {
-        Action::MoveUp => crate::chrome::menu_view::scroll_description(ui, -1.0),
-        Action::MoveDown => crate::chrome::menu_view::scroll_description(ui, 1.0),
+        Action::MoveUp => crate::chrome::menu_view::scroll_description(ui.screens, -1.0),
+        Action::MoveDown => crate::chrome::menu_view::scroll_description(ui.screens, 1.0),
         Action::Back => crate::chrome::menu_view::back(ui),
         Action::ShowMenu => crate::chrome::menu_view::close(ui),
         _ => {}

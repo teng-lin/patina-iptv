@@ -28,7 +28,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     };
     if let Some(value) = playlist_order {
         ui.screens.menu.set(None);
-        crate::wiring::navigation::settings_guarded(ui, move || {
+        crate::wiring::navigation::settings_guarded(ui.screens, move || {
             if let Err(error) = crate::screens::settings_view::save_setting(
                 iptv_settings::keys::PLAYLIST_SORT.as_str(),
                 iptv_settings::Value::Enum(value.to_owned()),
@@ -39,7 +39,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         return;
     }
     if let MenuItem::TogglePlaylist(id) = item {
-        focus_item(ui, item);
+        focus_item(ui.screens, item);
         if playlist_by_id(id).is_some_and(|p| p.policy.enabled) {
             crate::screens::settings_view::set_playlist_visibility(ui, id, false);
         }
@@ -73,7 +73,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     ui.screens.menu.set(None);
     let scope = list
         .resolve(&*crate::wiring::runtime_owner::schedule())
-        .and_then(|_| channel_scope(ui, &list));
+        .and_then(|_| channel_scope(ui.app, &list));
     if target == Target::Group && scope.is_none() && item != MenuItem::ReorderPlaylists {
         return;
     }
@@ -176,11 +176,11 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
                 crate::screens::parental_view::block(ui, target, true);
             }
         }
-        MenuItem::ManageParentalBlocks => crate::screens::parental_view::manage(ui),
+        MenuItem::ManageParentalBlocks => crate::screens::parental_view::manage(ui.screens),
         MenuItem::ReorderChannels => {
             if let Some((source, kind)) = scope {
                 let focus = channel
-                    .and_then(|ch| crate::screens::parental_view::live_target(ui, ch))
+                    .and_then(|ch| crate::screens::parental_view::live_target(ui.app, ch))
                     .filter(|target| target.source == source.0)
                     .map(|target| target.id);
                 organization_view::open_context_reorder(ui, source, kind, focus, list);
@@ -220,14 +220,14 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
                 crate::guide::favorites::toggle(ui, channel);
             }
         }
-        MenuItem::HideChannel => hide_channel(ui, channel),
+        MenuItem::HideChannel => hide_channel(ui.app, channel),
         MenuItem::CreateGroup => {
-            if let Some(source) = management_source(ui, &list, scope.as_ref()) {
+            if let Some(source) = management_source(ui.app, &list, scope.as_ref()) {
                 crate::library_ui::custom_groups::open(ui, source);
             }
         }
         MenuItem::CopyChannels => {
-            if let Some((source, channels)) = copy_scope(ui, &list, scope.as_ref()) {
+            if let Some((source, channels)) = copy_scope(ui.app, &list, scope.as_ref()) {
                 crate::library_ui::custom_groups::open_copy(ui, source, channels);
             }
         }
@@ -267,8 +267,8 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
     }
 }
 
-fn focus_item(ui: Ui, item: MenuItem) {
-    ui.screens.menu.update(|menu| {
+fn focus_item(screens: crate::ScreensUi, item: MenuItem) {
+    screens.menu.update(|menu| {
         if let Some(menu) = menu {
             menu.focus_on(item);
         }
@@ -350,8 +350,8 @@ fn open_child_program(
     });
 }
 
-fn hide_channel(ui: Ui, channel: Option<usize>) {
-    if let Some(target) = channel.and_then(|ch| crate::screens::parental_view::live_target(ui, ch))
+fn hide_channel(app: crate::SharedUi, channel: Option<usize>) {
+    if let Some(target) = channel.and_then(|ch| crate::screens::parental_view::live_target(app, ch))
     {
         let source = SourceId(target.source);
         let saved = crate::runtime::commands::hide_channel(
@@ -385,7 +385,7 @@ fn group(
         MenuItem::GroupOptions => {
             show_group_options(ui, list, GroupMenuEntry::Program);
         }
-        MenuItem::GroupSettings => open_group_settings(ui, list, parent),
+        MenuItem::GroupSettings => open_group_settings(ui.screens, list, parent),
         MenuItem::ShowFavoritesOnly
         | MenuItem::GroupExternalPlayer
         | MenuItem::StopExternalPlayer
@@ -416,7 +416,7 @@ fn group(
         }
         MenuItem::ReorderPlaylists => {
             let preferred = heading_playlist(&list);
-            crate::wiring::navigation::settings_guarded(ui, move || {
+            crate::wiring::navigation::settings_guarded(ui.screens, move || {
                 organization_view::open_playlist_reorder(ui, preferred);
             });
         }

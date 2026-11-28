@@ -108,14 +108,14 @@ pub(crate) struct Preview {
 pub(crate) fn live(ui: Ui) -> bool {
     ui.chrome.mode.get() == ViewMode::Fullscreen
         && ui.playback.playing.get().is_some()
-        && changes_channel(ui)
-        && !crate::playback::multiview::is_open(ui)
+        && changes_channel(ui.playback)
+        && !crate::playback::multiview::is_open(ui.playback)
 }
 
 /// Whether what plays is a live channel, which Ch± changes (not a replay
 /// or an on-demand title): the video then has the channel actions.
-pub(crate) fn changes_channel(ui: Ui) -> bool {
-    ui.playback.playback.get() == Playback::Live && !crate::playback::on_demand::active(ui)
+pub(crate) fn changes_channel(ui: crate::PlaybackUi) -> bool {
+    ui.playback.get() == Playback::Live && !crate::playback::on_demand::active(ui)
 }
 
 /// Whether a swipe on the video may change channel now: live video with
@@ -123,7 +123,7 @@ pub(crate) fn changes_channel(ui: Ui) -> bool {
 fn takes_swipes(ui: Ui) -> bool {
     live(ui)
         && !ui.any_overlay_open()
-        && crate::playback::pip::ui_shown(ui)
+        && crate::playback::pip::ui_shown(ui.playback)
         && crate::wiring::settings::flag(keys::SWIPE_TO_ZAP)
 }
 

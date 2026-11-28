@@ -132,7 +132,7 @@ pub(super) fn cell(
     let colors = computed(move || {
         let overlay = match ui.chrome.mode.get() {
             ViewMode::Overlay => Some(crate::theme::overlay_alpha(
-                &crate::wiring::settings_wiring::read(ui),
+                &crate::wiring::settings_wiring::read(ui.app),
             )),
             ViewMode::Guide | ViewMode::Fullscreen => None,
         };

@@ -28,15 +28,15 @@ pub(crate) fn no_logo() -> String {
         .to_owned()
 }
 
-pub(crate) fn show_channel_logos(ui: Ui) -> bool {
-    crate::wiring::settings_wiring::read(ui).bool(
+pub(crate) fn show_channel_logos(app: crate::SharedUi) -> bool {
+    crate::wiring::settings_wiring::read(app).bool(
         iptv_settings::keys::GUIDE_SHOW_LOGOS,
         &iptv_settings::Target::Global,
     )
 }
 
-pub(crate) fn channel_logo(ui: Ui, channel: Option<usize>) -> String {
-    ui.guide_data();
+pub(crate) fn channel_logo(app: crate::SharedUi, channel: Option<usize>) -> String {
+    app.guide_data();
     channel
         .and_then(|ch| crate::wiring::runtime_owner::schedule().channel_logo(ch))
         .unwrap_or_else(no_logo)
@@ -68,17 +68,18 @@ pub(super) fn cell(
             rgb(BRIGHT_TEXT)
         }
     };
-    let show_logo = move || show_channel_logos(ui);
-    let logo = move || channel_logo(ui, channel.get());
+    let show_logo = move || show_channel_logos(ui.app);
+    let logo = move || channel_logo(ui.app, channel.get());
     let is_selected = move || {
-        if crate::library_ui::organization_view::guide_order_open(ui) {
+        if crate::library_ui::organization_view::guide_order_open(ui.screens) {
             editing.get() == Some(true)
         } else {
             ui.guide.focus.with(|f| f.channel == at.index())
         }
     };
-    let grips =
-        move || crate::library_ui::organization_view::guide_order_open(ui) && ui.drag_editing();
+    let grips = move || {
+        crate::library_ui::organization_view::guide_order_open(ui.screens) && ui.drag_editing()
+    };
     view()
         .accessible(true)
         .label(move || {
@@ -86,7 +87,7 @@ pub(super) fn cell(
             channel.get().map(channel_name).unwrap_or_default()
         })
         .on_long_press(move || {
-            if crate::library_ui::organization_view::guide_order_open(ui) {
+            if crate::library_ui::organization_view::guide_order_open(ui.screens) {
                 return;
             }
             if let Some(ch) = channel.get() {
@@ -96,14 +97,14 @@ pub(super) fn cell(
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
             // Every desktop: the menu itself leaves out what a platform
             // lacks (Open in new window is Linux and macOS only).
-            if !crate::library_ui::organization_view::guide_order_open(ui)
+            if !crate::library_ui::organization_view::guide_order_open(ui.screens)
                 && let Some(ch) = channel.get()
             {
                 crate::chrome::menu_view::open_at(ui, ch);
             }
         })
         .role(move || {
-            if crate::library_ui::organization_view::guide_order_open(ui) {
+            if crate::library_ui::organization_view::guide_order_open(ui.screens) {
                 AccessibilityRole::Row
             } else {
                 AccessibilityRole::Button
@@ -128,7 +129,7 @@ pub(super) fn cell(
         .gap(move || size.px(GAP))
         .on_press(move || {
             ui.touched();
-            if crate::library_ui::organization_view::guide_order_open(ui)
+            if crate::library_ui::organization_view::guide_order_open(ui.screens)
                 || crate::guide::grid::closed_columns(ui)
             {
                 return;
@@ -143,7 +144,7 @@ pub(super) fn cell(
         .child(
             // The place in the list on screen.
             text(move || {
-                crate::wiring::settings_wiring::read(ui);
+                crate::wiring::settings_wiring::read(ui.app);
                 if crate::wiring::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
                     (at.index() + 1).to_string()
                 } else {

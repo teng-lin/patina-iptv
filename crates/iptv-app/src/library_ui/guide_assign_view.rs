@@ -57,7 +57,7 @@ pub fn open(ui: Ui, channel: usize) {
             return;
         }
         if channels.is_empty() {
-            close(ui);
+            close(ui.screens);
             crate::chrome::toast::notify(tr("No guide data is stored yet: update the guide first"));
             return;
         }
@@ -95,29 +95,29 @@ pub fn open(ui: Ui, channel: usize) {
     });
 }
 
-pub fn close(ui: Ui) {
-    if ui.screens.guide_assign.close() {
+pub fn close(screens: crate::ScreensUi) {
+    if screens.guide_assign.close() {
         dismiss_keyboard();
     }
 }
 
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.guide_assign.is_open()
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.guide_assign.is_open()
 }
 
-fn state<R>(ui: Ui, f: impl FnOnce(&Picker) -> R) -> Option<R> {
-    ui.screens.guide_assign.read(f)
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Picker) -> R) -> Option<R> {
+    screens.guide_assign.read(f)
 }
 
-fn update(ui: Ui, f: impl FnOnce(&mut Picker) -> Option<Effect>) {
+fn update(screens: crate::ScreensUi, f: impl FnOnce(&mut Picker) -> Option<Effect>) {
     let mut effect = None;
-    ui.screens.guide_assign.update(|s| {
+    screens.guide_assign.update(|s| {
         let subject = s.subject();
         let (playlist, key) = (subject.playlist, subject.key.clone());
         effect = f(s).map(|e| (playlist, key, e));
     });
     if let Some((playlist, key, effect)) = effect {
-        perform(ui, playlist, key, effect);
+        perform(screens, playlist, key, effect);
     }
 }
 
@@ -132,7 +132,7 @@ pub fn key(ui: Ui, action: Action) {
         Action::Back | Action::ShowMenu => Key::Back,
         _ => return,
     };
-    update(ui, |s| s.key(key));
+    update(ui.screens, |s| s.key(key));
 }
 
 /// The platform's Back: ends typing, then closes.
@@ -142,22 +142,22 @@ pub fn back(ui: Ui) -> bool {
 }
 
 /// Carries out `effect` of the chooser of channel `key` of `playlist`.
-fn perform(ui: Ui, playlist: SourceId, key: String, effect: Effect) {
+fn perform(screens: crate::ScreensUi, playlist: SourceId, key: String, effect: Effect) {
     match effect {
         Effect::Type => {}
-        Effect::Close => close(ui),
+        Effect::Close => close(screens),
         Effect::Choose(choice) => {
             log::info!("iptv guide choice: {}", choice_name(&choice));
-            let request = ui.screens.guide_assign.next_request();
+            let request = screens.guide_assign.next_request();
             assign::choose(
                 &crate::wiring::runtime_owner::runtime(),
                 playlist,
                 key,
                 choice,
                 move |applied| {
-                    if ui.screens.guide_assign.is_current(request) {
+                    if screens.guide_assign.is_current(request) {
                         crate::chrome::toast::notify(applied_words(applied));
-                        close(ui);
+                        close(screens);
                     }
                 },
             );
@@ -186,7 +186,7 @@ fn applied_words(applied: Applied) -> &'static str {
 // --- View ----------------------------------------------------------------------
 
 pub fn layer(ui: Ui) -> impl IntoElement {
-    when(move || is_open(ui), move || panel(ui))
+    when(move || is_open(ui.screens), move || panel(ui))
 }
 
 fn panel(ui: Ui) -> impl IntoElement {
@@ -201,7 +201,7 @@ fn panel(ui: Ui) -> impl IntoElement {
         // The guide stays visible, dimmed; a tap there closes.
         .child(view().flex_1().bg(tint(0x000000, 0x90)).on_press(move || {
             ui.touched();
-            close(ui);
+            close(ui.screens);
         }))
         .child(
             view()
@@ -248,7 +248,7 @@ fn now_line(p: &Picker) -> String {
 
 fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let title = move || {
-        state(ui, |p| {
+        state(ui.screens, |p| {
             trf(
                 "Guide data for {channel}",
                 &[("channel", (&p.subject().name).into())],
@@ -260,11 +260,13 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         .gap(move || size.px(4.0))
         .child(ui_kit::title(size, title).label(title))
         .child(
-            ui_kit::caption(size, move || state(ui, now_line).unwrap_or_default())
-                .number_of_lines(1),
+            ui_kit::caption(size, move || {
+                state(ui.screens, now_line).unwrap_or_default()
+            })
+            .number_of_lines(1),
         )
         .child(ui_kit::caption(size, move || {
-            let busy = state(ui, Picker::busy).unwrap_or(false);
+            let busy = state(ui.screens, Picker::busy).unwrap_or(false);
             match (busy, ui.keys_shown()) {
                 (true, _) => tr("Applying…"),
                 (false, true) => tr("▲▼ move   OK choose   Back close"),
@@ -275,8 +277,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
 
 fn list(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
-    let count = move || state(ui, Picker::len).unwrap_or(0);
-    let focused = computed(move || state(ui, Picker::focus_index));
+    let count = move || state(ui.screens, Picker::len).unwrap_or(0);
+    let focused = computed(move || state(ui.screens, Picker::focus_index));
     effect(move || {
         if let Some(i) = focused.get()
             && ui.keys_shown()
@@ -294,12 +296,13 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
     if index == 0 {
         return search_field(ui, size, focused).into_element();
     }
-    let item = move || state(ui, |p| p.row(index)).flatten();
-    let channel = move || state(ui, |p| p.channel(index).cloned()).flatten();
-    let current = move || state(ui, |p| item().is_some_and(|r| p.is_current(&r))).unwrap_or(false);
+    let item = move || state(ui.screens, |p| p.row(index)).flatten();
+    let channel = move || state(ui.screens, |p| p.channel(index).cloned()).flatten();
+    let current =
+        move || state(ui.screens, |p| item().is_some_and(|r| p.is_current(&r))).unwrap_or(false);
     let title = move || match item() {
         Some(Row::Filter) => {
-            if state(ui, Picker::all).unwrap_or(true) {
+            if state(ui.screens, Picker::all).unwrap_or(true) {
                 tr("Showing every guide channel").to_owned()
             } else {
                 tr("Showing only guide channels no channel uses").to_owned()
@@ -313,7 +316,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
         _ => String::new(),
     };
     let detail = move || match item() {
-        Some(Row::Filter) => state(ui, |p| {
+        Some(Row::Filter) => state(ui.screens, |p| {
             trf(
                 "{count} shown · OK to switch",
                 &[("count", p.matches().into())],
@@ -323,7 +326,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
         Some(Row::Automatic) => tr("Matched by its guide id and name").to_owned(),
         Some(Row::NoGuide) => tr("The guide shows no programs for it").to_owned(),
         Some(Row::Channel(..)) => channel()
-            .map(|c| channel_detail(ui, &c))
+            .map(|c| channel_detail(ui.screens, &c))
             .unwrap_or_default(),
         _ => String::new(),
     };
@@ -340,7 +343,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
         .gap(move || size.px(12.0))
         .on_press(move || {
             ui.touched();
-            update(ui, |p| p.tap(index));
+            update(ui.screens, |p| p.tap(index));
         })
         .child(
             view()
@@ -359,8 +362,8 @@ fn row(ui: Ui, size: Scale, index: usize, focused: Memo<Option<usize>>) -> AnyEl
         .into_element()
 }
 
-fn channel_detail(ui: Ui, c: &GuideChannel) -> String {
-    let feed = state(ui, |p| p.feed_name(c.feed).to_owned()).unwrap_or_default();
+fn channel_detail(screens: crate::ScreensUi, c: &GuideChannel) -> String {
+    let feed = state(screens, |p| p.feed_name(c.feed).to_owned()).unwrap_or_default();
     let args = [("id", (&c.epg_channel).into()), ("source", (&feed).into())];
     if c.assigned {
         trf("{id} · {source} · in use", &args)
@@ -373,12 +376,12 @@ fn channel_detail(ui: Ui, c: &GuideChannel) -> String {
 /// goes to the first match.
 fn search_field(ui: Ui, size: Scale, focused: Memo<Option<usize>>) -> impl IntoElement {
     let field = element_ref();
-    let typing = computed(move || state(ui, Picker::typing).unwrap_or(false));
+    let typing = computed(move || state(ui.screens, Picker::typing).unwrap_or(false));
     crate::chrome::input::bind_field_focus(field, move || typing.get());
     view().h(move || size.px(ROW_TWO)).justify_center().child(
         ui_kit::field(size, input())
             .element_ref(&field)
-            .value(move || state(ui, |p| p.query().to_owned()).unwrap_or_default())
+            .value(move || state(ui.screens, |p| p.query().to_owned()).unwrap_or_default())
             .placeholder(tr("Search guide channels by name or id"))
             .auto_capitalize(AutoCapitalize::None)
             .auto_correct(false)
@@ -389,31 +392,31 @@ fn search_field(ui: Ui, size: Scale, focused: Memo<Option<usize>>) -> impl IntoE
             .py(move || size.px(ui_kit::FIELD_PAD_Y - 2.0))
             .border_color(move || ui_kit::field_border(ui, focused.get() == Some(0)))
             .on_change(move |text: &str| {
-                if state(ui, |p| p.query() != text).unwrap_or(false) {
-                    update(ui, |p| {
+                if state(ui.screens, |p| p.query() != text).unwrap_or(false) {
+                    update(ui.screens, |p| {
                         p.set_query(text);
                         None
                     });
                 }
             })
             .on_submit(move |_: &str| {
-                update(ui, |p| {
+                update(ui.screens, |p| {
                     p.submit();
                     None
                 });
                 dismiss_keyboard();
             })
             .on_focus(move || {
-                if !state(ui, Picker::typing).unwrap_or(true) {
-                    update(ui, |p| {
+                if !state(ui.screens, Picker::typing).unwrap_or(true) {
+                    update(ui.screens, |p| {
                         p.set_typing(true);
                         None
                     });
                 }
             })
             .on_blur(move || {
-                if state(ui, Picker::typing).unwrap_or(false) {
-                    update(ui, |p| {
+                if state(ui.screens, Picker::typing).unwrap_or(false) {
+                    update(ui.screens, |p| {
                         p.set_typing(false);
                         None
                     });

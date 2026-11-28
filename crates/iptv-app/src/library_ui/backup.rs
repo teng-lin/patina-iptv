@@ -162,7 +162,7 @@ pub(crate) fn available() -> bool {
 pub(crate) fn request_restore(ui: crate::Ui) {
     if available() {
         crate::wiring::navigation::request(
-            ui,
+            ui.screens,
             iptv_core::parental::Target::settings(),
             move || restore_ui(ui),
         );
@@ -192,7 +192,7 @@ fn restore_ui(ui: crate::Ui) {
             match answer.ok().and_then(|a| a.action) {
                 Some(action) if action.as_str() == "cancel" => {
                     let result = busy.worker(|archive| archive.cancel()).await;
-                    crate::wiring::settings_wiring::refresh(ui);
+                    crate::wiring::settings_wiring::refresh(ui.app);
                     crate::chrome::toast::notify(tr(match result {
                         Ok(()) => "Scheduled restore canceled",
                         Err(error) => report("canceling the scheduled restore", error),
@@ -214,7 +214,7 @@ fn restore_ui(ui: crate::Ui) {
                 return;
             }
         };
-        if !review::confirm(ui, file.name.take()).await {
+        if !review::confirm(ui.screens, file.name.take()).await {
             return;
         }
         crate::chrome::toast::notify(tr("Checking backup…"));
@@ -225,7 +225,7 @@ fn restore_ui(ui: crate::Ui) {
                 archive.stage(&mut input)
             })
             .await;
-        crate::wiring::settings_wiring::refresh(ui);
+        crate::wiring::settings_wiring::refresh(ui.app);
         // Release operation ownership before presenting a dismissible failure.
         drop(busy);
         match result {

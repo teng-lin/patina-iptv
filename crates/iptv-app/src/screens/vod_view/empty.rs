@@ -22,13 +22,13 @@ fn problem(kind: ImportErrorKind) -> ImportProblem {
 
 /// Every enabled playlist, the ones the catalog reads whichever is on
 /// screen, as the core reads them for `kind`. Tracks what they depend on.
-fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
-    ui.app.library.version.get();
-    let settings = crate::wiring::settings_wiring::read(ui);
+fn sources(app: crate::SharedUi, kind: Kind) -> Vec<SourceVod> {
+    app.library.version.get();
+    let settings = crate::wiring::settings_wiring::read(app);
     let playlists = crate::wiring::runtime_owner::runtime()
         .playlists()
         .unwrap_or_default();
-    ui.app.library.activity.with(|activity| {
+    app.library.activity.with(|activity| {
         playlists
             .iter()
             .filter(|p| p.policy.enabled)
@@ -89,7 +89,7 @@ fn source_vod(
 /// state only joins the read [`open`] started.
 pub(super) fn bind(ui: Ui) {
     let kind = computed(move || ui.screens.vod.with(|s| s.query.kind));
-    let state = computed(move || VodState::of(&sources(ui, kind.get())));
+    let state = computed(move || VodState::of(&sources(ui.app, kind.get())));
     let first = std::cell::Cell::new(true);
     effect(move || {
         let state = state.get();

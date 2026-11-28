@@ -11,23 +11,23 @@ use std::time::Duration;
 mod rows;
 mod style;
 
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.recordings_open.get()
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.recordings_open.get()
 }
 pub fn open(ui: Ui) {
     // Not on a device that does not show the library (yet): its entries
     // are gone, and a key bound to it does nothing.
-    if !crate::wiring::capabilities::recordings_library_untracked(ui) {
+    if !crate::wiring::capabilities::recordings_library_untracked(ui.screens) {
         return;
     }
     ui.screens.recordings.update(Screen::open);
     reload(ui);
 }
-pub fn close(ui: Ui) {
-    ui.screens.recordings.update(Screen::close);
+pub fn close(screens: crate::ScreensUi) {
+    screens.recordings.update(Screen::close);
 }
-pub fn back(ui: Ui) -> bool {
-    ui.screens.recordings.update(Screen::back);
+pub fn back(screens: crate::ScreensUi) -> bool {
+    screens.recordings.update(Screen::back);
     true
 }
 fn reload(ui: Ui) {
@@ -194,7 +194,7 @@ pub fn current(ui: Ui) {
         crate::chrome::toast::notify(tr("Only a program on now can be recorded"));
         return;
     }
-    remember(ui, origin);
+    remember(ui.screens, origin);
     record_origin(ui, origin);
 }
 
@@ -344,7 +344,7 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
         request.end = now + 3600;
     }
     let target = iptv_core::parental::Target::live(request.source, request.channel.clone());
-    crate::wiring::navigation::request(ui, target, move || start(ui, request));
+    crate::wiring::navigation::request(ui.screens, target, move || start(ui, request));
 }
 fn request(origin: Origin) -> Option<Request> {
     let schedule = crate::wiring::runtime_owner::schedule();
@@ -380,8 +380,8 @@ fn occurrence_job(request: &Request, jobs: Vec<Job>) -> Option<Job> {
         .max_by_key(|job| job.status == Status::Recording)
 }
 
-fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
-    if ui.playback.player_surface != 0 || !available(origin.channel) {
+fn channel_action(playback: crate::PlaybackUi, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
+    if playback.player_surface != 0 || !available(origin.channel) {
         return None;
     }
     let schedule = crate::wiring::runtime_owner::schedule();
@@ -407,12 +407,12 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
     .then_some((MenuItem::RecordNow, None))
 }
 
-pub fn channel_menu_action(ui: Ui, origin: Origin) -> Option<MenuItem> {
-    channel_action(ui, origin).map(|(item, _)| item)
+pub fn channel_menu_action(playback: crate::PlaybackUi, origin: Origin) -> Option<MenuItem> {
+    channel_action(playback, origin).map(|(item, _)| item)
 }
 
 pub fn perform_channel_action(ui: Ui, origin: Origin, item: MenuItem) -> bool {
-    let Some((current, job)) = channel_action(ui, origin) else {
+    let Some((current, job)) = channel_action(ui.playback, origin) else {
         return false;
     };
     if current != item {
@@ -427,9 +427,9 @@ pub fn perform_channel_action(ui: Ui, origin: Origin, item: MenuItem) -> bool {
     true
 }
 
-pub fn remember(ui: Ui, origin: Origin) {
+pub fn remember(screens: crate::ScreensUi, origin: Origin) {
     let request = request(origin);
-    ui.screens
+    screens
         .recordings
         .update(|s| s.remember_context(origin, request));
 }
@@ -504,7 +504,7 @@ pub(crate) fn return_to_player(ui: Ui) {
     if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    close(ui);
+    close(ui.screens);
     ui.chrome
         .mode
         .apply(crate::chrome::mode::Action::EnterFullscreen);
@@ -616,7 +616,9 @@ fn perform(ui: Ui, index: usize) {
     ) {
         let target =
             iptv_core::parental::Target::live(job.request.source, job.request.channel.clone());
-        crate::wiring::navigation::request(ui, target, move || execute(ui, job, confirm, action));
+        crate::wiring::navigation::request(ui.screens, target, move || {
+            execute(ui, job, confirm, action)
+        });
     } else {
         execute(ui, job, confirm, action);
     }
@@ -698,7 +700,7 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
 }
 pub fn key(ui: Ui, action: Action) {
     if action == Action::Back {
-        back(ui);
+        back(ui.screens);
         return;
     }
     if ui.screens.recordings.with_untracked(|s| s.busy) {
@@ -713,7 +715,7 @@ pub fn key(ui: Ui, action: Action) {
                 if ui.screens.recordings.with_untracked(|s| s.delete_selected) {
                     confirm_delete(ui);
                 } else {
-                    back(ui);
+                    back(ui.screens);
                 }
             }
             _ => {}
@@ -806,7 +808,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
                 },
                 move || {
                     style::action(
-                        ui,
+                        ui.chrome,
                         size,
                         move || {
                             ui.screens.recordings.with(|s| {
@@ -834,8 +836,8 @@ fn requirements() -> &'static str {
     }
 }
 
-fn message(ui: Ui) -> String {
-    ui.screens.recordings.with(|s| {
+fn message(screens: crate::ScreensUi) -> String {
+    screens.recordings.with(|s| {
         s.error
             .as_ref()
             .map(|message| tr(message).to_owned())
@@ -858,7 +860,15 @@ fn library_content(ui: Ui, size: Scale) -> View {
                 .min_h(move || size.px(72.0))
                 .child(when(
                     move || ui.screens.recordings.with(|s| !s.actions),
-                    move || style::action(ui, size, tr("Close"), || false, move || close(ui)),
+                    move || {
+                        style::action(
+                            ui.chrome,
+                            size,
+                            tr("Close"),
+                            || false,
+                            move || close(ui.screens),
+                        )
+                    },
                 ))
                 .child(view().flex_1())
                 .child(ui_kit::title(size, tr("Recordings"))),
@@ -869,7 +879,7 @@ fn library_content(ui: Ui, size: Scale) -> View {
             move || retired_schedules(ui, size),
         ))
         .child(
-            ui_kit::body(size, move || message(ui))
+            ui_kit::body(size, move || message(ui.screens))
                 .text_color(rgb(ui_kit::ERROR))
                 .px(move || size.px(24.0)),
         )
@@ -968,7 +978,7 @@ fn library(ui: Ui, size: Scale) -> View {
                             .pt_safe_area()
                             .pb_safe_area()
                             .bg(rgb(style::PANEL))
-                            .child(style::header(ui, size, tr("Recordings")))
+                            .child(style::header(ui.screens, size, tr("Recordings")))
                             .child(scroll().flex_1().child(action_view(ui, size))),
                     )
             },
@@ -978,7 +988,7 @@ fn library(ui: Ui, size: Scale) -> View {
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     when(
-        move || is_open(ui),
+        move || is_open(ui.screens),
         move || {
             view()
                 .absolute()

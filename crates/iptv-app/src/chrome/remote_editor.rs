@@ -103,14 +103,14 @@ fn fields() -> impl Iterator<Item = Field> {
         .filter(|field| *field != Field::Press || holds())
 }
 
-pub fn open(ui: Ui) {
+pub fn open(screens: crate::ScreensUi) {
     let mut editor = Editor::default();
     // A key this keyboard does not have starts on its first one.
     let keys = keys();
     if !keys.contains(&editor.key) {
         editor.key = keys[0];
     }
-    ui.screens.remote_editor.set(Some(editor));
+    screens.remote_editor.set(Some(editor));
 }
 
 /// Moves the focus `by` fields, past one not shown.
@@ -124,41 +124,41 @@ fn step(s: &mut Editor, by: isize) {
         }
     }
 }
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.remote_editor.with(Option::is_some)
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.remote_editor.with(Option::is_some)
 }
 /// Whether the editor waits for a key to bind (tracked).
-pub(crate) fn capturing(ui: Ui) -> bool {
-    ui.screens
+pub(crate) fn capturing(screens: crate::ScreensUi) -> bool {
+    screens
         .remote_editor
         .with(|s| s.as_ref().is_some_and(|s| s.capturing))
 }
-fn state<R>(ui: Ui, f: impl FnOnce(&Editor) -> R) -> Option<R> {
-    ui.screens.remote_editor.with(|s| s.as_ref().map(f))
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Editor) -> R) -> Option<R> {
+    screens.remote_editor.with(|s| s.as_ref().map(f))
 }
-fn update(ui: Ui, f: impl FnOnce(&mut Editor)) {
-    ui.screens.remote_editor.update(|s| {
+fn update(screens: crate::ScreensUi, f: impl FnOnce(&mut Editor)) {
+    screens.remote_editor.update(|s| {
         if let Some(s) = s {
             f(s)
         }
     })
 }
-pub fn back(ui: Ui) -> bool {
+pub fn back(screens: crate::ScreensUi) -> bool {
     let mut close = false;
-    update(ui, |s| close = !s.back());
+    update(screens, |s| close = !s.back());
     if close {
-        ui.screens.remote_editor.set(None);
+        screens.remote_editor.set(None);
     }
     true
 }
-fn close(ui: Ui) {
-    ui.screens.remote_editor.set(None);
+fn close(screens: crate::ScreensUi) {
+    screens.remote_editor.set(None);
 }
-pub fn capture(ui: Ui, key: RemoteKey) {
+pub fn capture(screens: crate::ScreensUi, key: RemoteKey) {
     if key == RemoteKey::Back {
         return;
     } // Platform Back cancels capture once.
-    update(ui, |s| {
+    update(screens, |s| {
         s.capturing = false;
         if key != RemoteKey::Back {
             s.key = key;
@@ -174,11 +174,11 @@ fn cycle<T: Copy + PartialEq>(value: T, values: &[T], by: isize) -> T {
     values[(at as isize + by).rem_euclid(values.len() as isize) as usize]
 }
 fn change(ui: Ui, by: isize) {
-    if state(ui, |s| s.confirm.is_some()).unwrap_or(false) {
-        update(ui, |s| s.accept = !s.accept);
+    if state(ui.screens, |s| s.confirm.is_some()).unwrap_or(false) {
+        update(ui.screens, |s| s.accept = !s.accept);
         return;
     }
-    update(ui, |s| match s.focus {
+    update(ui.screens, |s| match s.focus {
         Field::Context => s.context = cycle(s.context, remap::CONTEXTS, by),
         Field::Key => {
             s.key = cycle(s.key, &keys(), by);
@@ -206,7 +206,7 @@ fn store(bindings: Vec<KeyBinding>) {
     }
 }
 fn save(ui: Ui) {
-    let Some(s) = state(ui, Clone::clone) else {
+    let Some(s) = state(ui.screens, Clone::clone) else {
         return;
     };
     let Some(b) = s.binding() else { return };
@@ -223,11 +223,11 @@ fn save(ui: Ui) {
         b.action.token(),
     ));
     store(bindings);
-    update(ui, |s| s.confirm = None);
+    update(ui.screens, |s| s.confirm = None);
 }
 fn activate(ui: Ui, field: Field) {
-    update(ui, |s| s.focus = field);
-    let Some(s) = state(ui, Clone::clone) else {
+    update(ui.screens, |s| s.focus = field);
+    let Some(s) = state(ui.screens, Clone::clone) else {
         return;
     };
     if let Some(confirm) = s.confirm {
@@ -237,17 +237,17 @@ fn activate(ui: Ui, field: Field) {
                 Confirm::Reset => store(Vec::new()),
             }
         }
-        update(ui, |s| s.confirm = None);
+        update(ui.screens, |s| s.confirm = None);
         return;
     }
     match field {
-        Field::Capture => update(ui, |s| s.capturing = true),
+        Field::Capture => update(ui.screens, |s| s.capturing = true),
         Field::Save => {
             if s.binding().is_none() {
                 return;
             }
             if saved().iter().any(|b| same(&s, b)) {
-                update(ui, |s| {
+                update(ui.screens, |s| {
                     s.confirm = Some(Confirm::Replace);
                     s.accept = false;
                 });
@@ -260,7 +260,7 @@ fn activate(ui: Ui, field: Field) {
             b.retain(|b| !same(&s, b));
             store(b);
         }
-        Field::Reset => update(ui, |s| {
+        Field::Reset => update(ui.screens, |s| {
             s.confirm = Some(Confirm::Reset);
             s.accept = false;
         }),
@@ -269,17 +269,17 @@ fn activate(ui: Ui, field: Field) {
 }
 pub fn key(ui: Ui, action: Action) {
     match action {
-        Action::MoveUp => update(ui, |s| step(s, -1)),
-        Action::MoveDown => update(ui, |s| step(s, 1)),
+        Action::MoveUp => update(ui.screens, |s| step(s, -1)),
+        Action::MoveDown => update(ui.screens, |s| step(s, 1)),
         Action::MoveLeft => change(ui, -1),
         Action::MoveRight => change(ui, 1),
         Action::Select => {
-            if let Some(field) = state(ui, |s| s.focus) {
+            if let Some(field) = state(ui.screens, |s| s.focus) {
                 activate(ui, field)
             }
         }
         Action::Back => {
-            back(ui);
+            back(ui.screens);
         }
         _ => {}
     }
@@ -325,7 +325,7 @@ const CAPTION: &str = crate::chrome::i18n::key(
 /// while a key is being captured, what the editor waits for.
 fn status(ui: Ui) -> String {
     ui.app.settings.get();
-    state(ui, |s| {
+    state(ui.screens, |s| {
         if s.capturing {
             return tr("Press a key now. Back cancels capture.").into();
         }
@@ -348,30 +348,30 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> impl IntoElement {
     ui_kit::action(
         ui,
         size,
-        move || state(ui, |s| field_label(s, field)).unwrap_or_default(),
-        move || state(ui, |s| s.focus) == Some(field),
+        move || state(ui.screens, |s| field_label(s, field)).unwrap_or_default(),
+        move || state(ui.screens, |s| s.focus) == Some(field),
         0xFFFFFF,
         move || activate(ui, field),
     )
     .test_id(&format!("remote-{field:?}"))
-    .accessibility_elements_hidden(move || contents_hidden(ui))
+    .accessibility_elements_hidden(move || contents_hidden(ui.screens))
 }
 
 /// The question before a binding replaces another or all are restored.
 fn confirm_sheet(ui: Ui, size: Scale) -> impl IntoElement {
     let question = move || {
-        if state(ui, |s| s.confirm) == Some(Some(Confirm::Replace)) {
+        if state(ui.screens, |s| s.confirm) == Some(Some(Confirm::Replace)) {
             tr("Replace the existing binding?")
         } else {
             tr("Restore all defaults?")
         }
     };
     let cancel = move || {
-        update(ui, |s| s.confirm = None);
+        update(ui.screens, |s| s.confirm = None);
     };
     let confirm = move || {
-        update(ui, |s| s.accept = true);
-        if let Some(f) = state(ui, |s| s.focus) {
+        update(ui.screens, |s| s.accept = true);
+        if let Some(f) = state(ui.screens, |s| s.focus) {
             activate(ui, f)
         }
     };
@@ -388,7 +388,7 @@ fn confirm_sheet(ui: Ui, size: Scale) -> impl IntoElement {
                     ui,
                     size,
                     move || tr("Cancel"),
-                    move || state(ui, |s| !s.accept).unwrap_or(false),
+                    move || state(ui.screens, |s| !s.accept).unwrap_or(false),
                     0xFFFFFF,
                     cancel,
                 ))
@@ -396,7 +396,7 @@ fn confirm_sheet(ui: Ui, size: Scale) -> impl IntoElement {
                     ui,
                     size,
                     move || tr("Confirm"),
-                    move || state(ui, |s| s.accept).unwrap_or(false),
+                    move || state(ui.screens, |s| s.accept).unwrap_or(false),
                     0xFFFFFF,
                     confirm,
                 )),
@@ -411,8 +411,8 @@ fn title() -> &'static str {
     }
 }
 
-fn contents_hidden(ui: Ui) -> bool {
-    state(ui, |screen| screen.confirm.is_some()).unwrap_or(false)
+fn contents_hidden(screens: crate::ScreensUi) -> bool {
+    state(screens, |screen| screen.confirm.is_some()).unwrap_or(false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
@@ -424,13 +424,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     effect(move || {
         keys.with(|_| ());
         untracked(|| {
-            if is_open(ui) {
-                close(ui);
+            if is_open(ui.screens) {
+                close(ui.screens);
             }
         });
     });
     when(
-        move || is_open(ui),
+        move || is_open(ui.screens),
         move || {
             ui_kit::screen(ui, size)
                 .test_id("remote-editor-screen")
@@ -438,20 +438,20 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     crate::chrome::overlays::Overlay::RemoteEditor.accessibility_covered(ui)
                 })
                 .child(
-                    ui_kit::header(ui, size, title(), close)
-                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                    ui_kit::header(ui, size, title(), |ui| close(ui.screens))
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                 )
                 .child(
                     ui_kit::caption(size, tr(CAPTION))
-                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                 )
                 .child(
                     ui_kit::body(size, move || status(ui))
-                        .accessibility_elements_hidden(move || contents_hidden(ui)),
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                 )
                 .children(fields().map(move |field| field_row(ui, size, field)))
                 .child(when(
-                    move || state(ui, |s| s.confirm.is_some()).unwrap_or(false),
+                    move || state(ui.screens, |s| s.confirm.is_some()).unwrap_or(false),
                     move || confirm_sheet(ui, size),
                 ))
         },

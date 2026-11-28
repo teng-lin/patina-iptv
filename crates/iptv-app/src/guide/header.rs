@@ -62,8 +62,9 @@ fn left(now: i32, p: Program) -> String {
 fn preview(ui: Ui, size: Scale) -> impl IntoElement {
     // Transparent while something plays: the video layer sits under this
     // rectangle in guide mode. A tap opens full screen.
-    let idle =
-        move || ui.playback.playing.get().is_none() && !crate::playback::on_demand::active(ui);
+    let idle = move || {
+        ui.playback.playing.get().is_none() && !crate::playback::on_demand::active(ui.playback)
+    };
     let focused = move || ui.keys_shown() && ui.guide.focus.with(|f| f.pane == Pane::Preview);
     view()
         .test_id("guide-preview")
@@ -125,7 +126,8 @@ fn preview_ring(ui: Ui) -> impl IntoElement {
         .border_color(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .opacity(move || {
             let shown = ui.chrome.mode.get() == ViewMode::Guide
-                && (ui.playback.playing.get().is_some() || crate::playback::on_demand::active(ui));
+                && (ui.playback.playing.get().is_some()
+                    || crate::playback::on_demand::active(ui.playback));
             if shown { 1.0_f32 } else { 0.0 }
         })
         .pointer_events(PointerEvents::None)
@@ -237,7 +239,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let menu_label = computed(|| tr("More options").to_owned());
     let open_program_menu = move || {
         if program.with(Option::is_some)
-            && !crate::library_ui::organization_view::inline_order_open(ui)
+            && !crate::library_ui::organization_view::inline_order_open(ui.screens)
         {
             ui.touched();
             crate::chrome::menu_view::open(ui);
@@ -406,7 +408,7 @@ fn key_stats(ui: Ui) -> Option<Text> {
         .right(px(PREVIEW_MARGIN))
         .pointer_events(PointerEvents::None)
         .opacity(move || {
-            if crate::library_ui::organization_view::inline_order_open(ui) {
+            if crate::library_ui::organization_view::inline_order_open(ui.screens) {
                 0.0_f32
             } else {
                 1.0_f32
@@ -453,9 +455,9 @@ pub fn header(ui: Ui) -> impl IntoElement {
         .test_id("guide-header")
         .pt_safe_area()
         .accessibility_elements_hidden(move || {
-            crate::library_ui::organization_view::guide_order_open(ui)
+            crate::library_ui::organization_view::guide_order_open(ui.screens)
         })
-        .pointer_events(move || crate::guide_chrome_pointer_events(ui))
+        .pointer_events(move || crate::guide_chrome_pointer_events(ui.screens))
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(
             view()
@@ -529,7 +531,7 @@ fn corner_back(ui: Ui) -> impl IntoElement {
             move || {
                 ui.touched();
                 if groups() {
-                    crate::guide::lists::open_groups(ui);
+                    crate::guide::lists::open_groups(ui.guide);
                 } else {
                     crate::guide::lists::open_rail(ui);
                 }

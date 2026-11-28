@@ -30,14 +30,14 @@ enum Status {
 
 fn status_of(ui: Ui) -> Status {
     let channel = ui.playback.playing.get();
-    let demand = crate::playback::on_demand::active(ui);
+    let demand = crate::playback::on_demand::active(ui.playback);
     if channel.is_none() && !demand {
         return Status::Hidden;
     }
     if ui.chrome.mode.get() == ViewMode::Overlay {
         return Status::Hidden; // the guide covers the video
     }
-    if crate::playback::multiview::is_open(ui) {
+    if crate::playback::multiview::is_open(ui.playback) {
         return Status::Hidden; // each tile shows its own
     }
     let detail_text = |detail: &str| match detail {
@@ -60,7 +60,7 @@ fn status_of(ui: Ui) -> Status {
                     "Can't play {name}",
                     &[(
                         "name",
-                        crate::playback::on_demand::title(ui)
+                        crate::playback::on_demand::title(ui.playback)
                             .unwrap_or_else(|| channel_name(channel.unwrap_or(0)))
                             .as_str()
                             .into(),
@@ -131,7 +131,8 @@ pub fn status(ui: Ui) -> impl IntoElement {
         }))
         .child(when(card, move || {
             let failed = move || matches!(status.get(), Status::Failed { .. });
-            let full = move || (failed() || crate::playback::on_demand::active(ui)) && !compact();
+            let full =
+                move || (failed() || crate::playback::on_demand::active(ui.playback)) && !compact();
             view()
                 .items_center()
                 .gap(size(10.0))
@@ -143,7 +144,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                 .child(
                     text(move || match status.get() {
                         Status::Failed { title, .. } => title,
-                        _ if crate::playback::on_demand::active(ui) => {
+                        _ if crate::playback::on_demand::active(ui.playback) => {
                             tr("Playback finished").into()
                         }
                         _ => tr("The program has ended").to_owned(),
@@ -155,7 +156,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                 .child(
                     text(move || match status.get() {
                         Status::Failed { message, .. } => message,
-                        _ if crate::playback::on_demand::active(ui) => String::new(),
+                        _ if crate::playback::on_demand::active(ui.playback) => String::new(),
                         _ => tr("Next (⏭) returns to live.").to_owned(),
                     })
                     .text_size(move || size(OSD_TEXT))
@@ -171,7 +172,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                 }))
                 .child(when(full, move || {
                     text(move || {
-                        if crate::playback::on_demand::active(ui) && !failed() {
+                        if crate::playback::on_demand::active(ui.playback) && !failed() {
                             tr("Play again").to_owned()
                         } else if retry_keys() {
                             tr("OK  Try again").to_owned()
@@ -210,7 +211,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
                     })
                     .on_press(move || {
                         ui.touched();
-                        if crate::playback::on_demand::active(ui) && !failed() {
+                        if crate::playback::on_demand::active(ui.playback) && !failed() {
                             crate::playback::player::toggle_pause(ui);
                         } else {
                             crate::playback::player::retry(ui);

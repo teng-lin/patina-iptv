@@ -105,13 +105,13 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
 }
 
 /// Whether surface 0 plays an early stream (no catalog channel yet).
-pub fn playing(ui: Ui) -> bool {
-    ui.playback.player.early.with(Option::is_some)
+pub fn playing(playback: crate::PlaybackUi) -> bool {
+    playback.player.early.with(Option::is_some)
 }
 
 /// The early stream to open again (a retry before the guide arrived).
-pub fn source(ui: Ui) -> Option<Early> {
-    ui.playback.player.early.get_untracked()
+pub fn source(playback: crate::PlaybackUi) -> Option<Early> {
+    playback.player.early.get_untracked()
 }
 
 /// The guide is on screen: the early stream's channel becomes the playing

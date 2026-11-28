@@ -51,7 +51,7 @@ const MARGIN: f32 = 24.0;
 /// The window, open while the player shows in it.
 pub fn window(ui: Ui) -> impl IntoElement {
     when(
-        move || crate::playback::pip::in_window(ui),
+        move || crate::playback::pip::in_window(ui.playback),
         move || open(ui),
     )
 }
@@ -339,7 +339,7 @@ fn button(
 /// placeholder with a way back.
 pub fn placeholder(ui: Ui) -> impl IntoElement {
     when(
-        move || crate::playback::pip::in_window(ui),
+        move || crate::playback::pip::in_window(ui.playback),
         move || {
             let rect = move || crate::playback::video::layout_rect(ui, 0);
             let size = crate::chrome::scale::Scale::new();

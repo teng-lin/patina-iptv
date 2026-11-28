@@ -15,7 +15,7 @@ use crate::guide::list_rows::{self, Mark, ROW};
 pub const GROUPS_W: f32 = 260.0;
 
 /// The groups column's width now (0 while the guide has the focus).
-pub fn groups_width(ui: Ui) -> f32 {
+pub fn groups_width(ui: crate::GuideUi) -> f32 {
     if crate::guide::lists::columns_shown(ui) {
         (GROUPS_W * crate::chrome::scale::now()).round()
     } else {
@@ -97,7 +97,7 @@ pub fn backdrop(ui: Ui) -> impl IntoElement {
         }));
     }
     let rail_width = move || {
-        let width = crate::chrome::rail::width(ui);
+        let width = crate::chrome::rail::width(ui.guide);
         if video_under_page && clear() {
             let w = window();
             let top = safe_area().top.0 + header_now().0;
@@ -162,9 +162,9 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
     let size = Scale::new();
     virtual_list(
-        move || lists::visible_entries(ui).len(),
+        move || lists::visible_entries(ui.app).len(),
         move |at| {
-            let entry = move || lists::visible_entries(ui).entry(at.index());
+            let entry = move || lists::visible_entries(ui.app).entry(at.index());
             let current = move || entry() == Some(ui.guide.focus.with(|f| f.group));
             let focused = move || {
                 current() && ui.guide.focus.with(|f| f.pane) == Pane::Groups && ui.keys_shown()
@@ -233,11 +233,11 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
         },
     )
     .test_id("guide-groups")
-    .pointer_events(move || crate::guide_chrome_pointer_events(ui))
-    .accessibility_elements_hidden(move || !crate::guide::lists::columns_shown(ui))
+    .pointer_events(move || crate::guide_chrome_pointer_events(ui.screens))
+    .accessibility_elements_hidden(move || !crate::guide::lists::columns_shown(ui.guide))
     .estimated_item_size(list_rows::pitch(size, ROW))
     .element_ref(&groups)
-    .w(move || px(groups_width(ui)))
+    .w(move || px(groups_width(ui.guide)))
     .py(px(6.0))
     .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
 }

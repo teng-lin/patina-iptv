@@ -5,14 +5,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     bind_live_rows(ui);
     bind_playlist_rows(ui);
     when(
-        move || !playlist_popup_open(ui),
+        move || !playlist_popup_open(ui.screens),
         move || menu_layer(ui, crate::chrome::overlays::Overlay::Menu),
     )
 }
 
 pub(crate) fn playlist_layer(ui: Ui) -> impl IntoElement {
     when(
-        move || playlist_popup_open(ui),
+        move || playlist_popup_open(ui.screens),
         move || menu_layer(ui, crate::chrome::overlays::Overlay::PlaylistMenu),
     )
 }

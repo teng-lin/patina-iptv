@@ -31,8 +31,8 @@ const LIST_W: f32 = 460.0;
 /// Page Up/Down moves this many rows.
 const PAGE: isize = 8;
 
-pub fn is_open(ui: Ui) -> bool {
-    ui.playback.channels.with(Option::is_some)
+pub fn is_open(playback: crate::PlaybackUi) -> bool {
+    playback.channels.with(Option::is_some)
 }
 
 /// Opens the list over (or beside) full-screen video.
@@ -50,37 +50,38 @@ pub fn open(ui: Ui, mode: ListMode) {
     ui.playback.panels.update(|p| p.hide());
     let list = ui.guide.list.get_untracked();
     // Picking for multiview: from the active tile's channel.
-    let from = crate::playback::multiview::pick_from(ui).or(ui.playback.playing.get_untracked());
+    let from =
+        crate::playback::multiview::pick_from(ui.playback).or(ui.playback.playing.get_untracked());
     let state = ChannelList::open(mode, from, &list);
     ui.playback.channels.set(Some(state));
 }
 
-pub fn close(ui: Ui) {
-    ui.playback.channels.set(None);
+pub fn close(ui: crate::PlaybackUi) {
+    ui.channels.set(None);
     crate::playback::multiview::list_closed(ui);
 }
 
 /// What OK on a channel compares with: nothing while picking for
 /// multiview (every channel is a choice), else the playing channel.
-fn playing(ui: Ui) -> Option<usize> {
+fn playing(ui: crate::PlaybackUi) -> Option<usize> {
     if crate::playback::multiview::picking(ui) {
         None
     } else {
-        ui.playback.playing.get_untracked()
+        ui.playing.get_untracked()
     }
 }
 
-fn groups_shown(ui: Ui) -> bool {
-    ui.playback
+fn groups_shown(playback: crate::PlaybackUi) -> bool {
+    playback
         .channels
         .with(|c| c.is_some_and(|c| c.pane == ListPane::Groups))
 }
 
 /// The columns at the left in a window `width` points wide, kept inside
 /// it (`crate::chrome::layout::ListPanel`).
-fn panel(ui: Ui, width: f32) -> ListPanel {
+fn panel(playback: crate::PlaybackUi, width: f32) -> ListPanel {
     let scale = crate::chrome::scale::now();
-    let groups = if groups_shown(ui) {
+    let groups = if groups_shown(playback) {
         (GROUPS_W * scale).round()
     } else {
         0.0
@@ -89,8 +90,8 @@ fn panel(ui: Ui, width: f32) -> ListPanel {
 }
 
 /// The columns in the window now (reactive).
-fn panel_now(ui: Ui) -> ListPanel {
-    panel(ui, window().width.0)
+fn panel_now(playback: crate::PlaybackUi) -> ListPanel {
+    panel(playback, window().width.0)
 }
 
 /// The video's rectangle while the list shows beside it: right of the
@@ -99,8 +100,12 @@ fn panel_now(ui: Ui) -> ListPanel {
 /// stays full screen under the list. In a compact window the layout
 /// decides, whatever `guide.list_browse_mode` says (#281): the video goes
 /// beside the list wherever it has room.
-pub fn preview_rect(ui: Ui, width: f32, _height: f32) -> Option<(f32, f32, f32, f32)> {
-    let preview = ui.playback.channels.with(|c| {
+pub fn preview_rect(
+    playback: crate::PlaybackUi,
+    width: f32,
+    _height: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    let preview = playback.channels.with(|c| {
         c.is_some_and(|c| {
             c.mode == ListMode::Preview
                 || crate::wiring::device::window_class() == crate::chrome::layout::Class::Compact
@@ -109,20 +114,20 @@ pub fn preview_rect(ui: Ui, width: f32, _height: f32) -> Option<(f32, f32, f32, 
     if !preview {
         return None;
     }
-    panel(ui, width).preview(width)
+    panel(playback, width).preview(width)
 }
 
 /// Whether the list shows over the video rather than beside it (reactive).
-fn over_video(ui: Ui) -> bool {
+fn over_video(playback: crate::PlaybackUi) -> bool {
     let w = window();
-    is_open(ui) && preview_rect(ui, w.width.0, w.height.0).is_none()
+    is_open(playback) && preview_rect(playback, w.width.0, w.height.0).is_none()
 }
 
 /// Runs a step on the list's state with the guide's list and the groups
 /// column's length, then does what it asks.
 fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, VisibleEntries) -> Outcome) {
     let list = ui.guide.list.get_untracked();
-    let entries = visible_entries(ui);
+    let entries = visible_entries(ui.app);
     let mut outcome = Outcome::Stay;
     ui.playback.channels.update(|c| {
         if let Some(c) = c.as_mut() {
@@ -131,10 +136,10 @@ fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, VisibleEntries) -> Out
     });
     match outcome {
         Outcome::Stay => {}
-        Outcome::Close => close(ui),
-        Outcome::Play(channel) if crate::playback::multiview::picking(ui) => {
+        Outcome::Close => close(ui.playback),
+        Outcome::Play(channel) if crate::playback::multiview::picking(ui.playback) => {
             if crate::playback::multiview::picked(ui, channel) {
-                close(ui);
+                close(ui.playback);
             }
         }
         Outcome::Play(channel) => {
@@ -154,7 +159,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, VisibleEntries) -> Out
 
 /// The remote while the list shows.
 pub fn key(ui: Ui, action: Action) {
-    let playing = playing(ui);
+    let playing = playing(ui.playback);
     let step = |by: isize| update(ui, move |c, l, n| c.move_focus(by, l, n));
     match action {
         Action::MoveUp => step(-1),
@@ -172,7 +177,7 @@ pub fn key(ui: Ui, action: Action) {
             Outcome::Stay
         }),
         Action::Select => update(ui, |c, l, _| c.select(playing, l)),
-        Action::ShowMenu if !crate::playback::multiview::picking(ui) => {
+        Action::ShowMenu if !crate::playback::multiview::picking(ui.playback) => {
             if let Some(list) = ui.playback.channels.get_untracked() {
                 match list.pane {
                     ListPane::Groups => {
@@ -185,7 +190,7 @@ pub fn key(ui: Ui, action: Action) {
         Action::Back => back(ui),
         // Picking for multiview: nothing plays here.
         Action::ChannelUp | Action::ChannelDown | Action::PlayPause
-            if crate::playback::multiview::picking(ui) => {}
+            if crate::playback::multiview::picking(ui.playback) => {}
         Action::ChannelUp | Action::ChannelDown => {
             crate::playback::player_keys::zap(ui, if action == Action::ChannelUp { -1 } else { 1 });
             if let Some(ch) = ui.playback.playing.get_untracked() {
@@ -205,7 +210,7 @@ pub fn back(ui: Ui) {
 }
 
 fn open_channel_menu(ui: Ui, row: usize) {
-    if !crate::playback::multiview::picking(ui)
+    if !crate::playback::multiview::picking(ui.playback)
         && let Some(channel) = ui.guide.list.with_untracked(|list| list.channel(row))
     {
         batch(|| {
@@ -222,8 +227,8 @@ fn open_channel_menu(ui: Ui, row: usize) {
 }
 
 /// What an empty list says.
-fn empty_text(ui: Ui) -> String {
-    match ui.guide.list.with(|l| (l.is_empty(), l.entry())) {
+fn empty_text(guide: crate::GuideUi) -> String {
+    match guide.list.with(|l| (l.is_empty(), l.entry())) {
         (false, _) => String::new(),
         (true, FAVORITES) => tr("No favorites yet").to_owned(),
         (true, _) => tr("No channels here").to_owned(),
@@ -233,23 +238,23 @@ fn empty_text(ui: Ui) -> String {
 pub fn layer(ui: Ui) -> impl IntoElement {
     // The list belongs to full-screen playback and to the data it indexes.
     effect(move || {
-        if ui.chrome.mode.get() != ViewMode::Fullscreen && untracked(|| is_open(ui)) {
-            untracked(|| close(ui));
+        if ui.chrome.mode.get() != ViewMode::Fullscreen && untracked(|| is_open(ui.playback)) {
+            untracked(|| close(ui.playback));
         }
     });
     effect(move || {
         // Settings or a catalog refresh can remove the last group while
         // its column is open. Keep the channel list and its current row.
-        if groups_shown(ui) && visible_entries(ui).is_empty() {
+        if groups_shown(ui.playback) && visible_entries(ui.app).is_empty() {
             untracked(|| back(ui));
         }
     });
-    let open = move || is_open(ui);
+    let open = move || is_open(ui.playback);
     let state = move || ui.playback.channels.get();
     // Over the video in the overlay layout, and in the preview layout of a
     // window with no room for the video beside the list.
-    let overlay = move || over_video(ui);
-    let groups = move || groups_shown(ui);
+    let overlay = move || over_video(ui.playback);
+    let groups = move || groups_shown(ui.playback);
     let row_focus = computed(move || state().map(|c| (c.row, c.pane == ListPane::Channels)));
     let entry_focus = computed(move || state().map(|c| (c.entry, c.pane == ListPane::Groups)));
     let rows = element_ref();
@@ -261,7 +266,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     effect(move || {
         if let Some((entry, _)) = entry_focus.get()
-            && let Some(position) = visible_entries(ui).position(entry)
+            && let Some(position) = visible_entries(ui.app).position(entry)
         {
             entries.scroll_to_index(position as u32, percentage(0.5), px(0.0), false);
         }
@@ -280,7 +285,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     let groups_column = view()
         .test_id("channel-list-groups")
         .accessibility_elements_hidden(move || !groups())
-        .w(move || px(if groups() { panel_now(ui).groups } else { 0.0 }))
+        .w(move || {
+            px(if groups() {
+                panel_now(ui.playback).groups
+            } else {
+                0.0
+            })
+        })
         .opacity(move || if groups() { 1.0_f32 } else { 0.0 })
         .overflow_hidden()
         .pt_safe_area()
@@ -289,7 +300,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(heading(Box::new(|| tr("Groups").to_owned())).px(move || size.px(INSET + 8.0)))
         .child(
             virtual_list(
-                move || visible_entries(ui).len(),
+                move || visible_entries(ui.app).len(),
                 move |at| entry_row(ui, at, entry_focus, size),
             )
             .estimated_item_size(list_rows::pitch(size, ROW))
@@ -298,14 +309,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         );
     let channels_column = crate::playback::browse_playback::watch_drags(view(), ui)
         .test_id("channel-list")
-        .w(move || px(panel_now(ui).list))
+        .w(move || px(panel_now(ui.playback).list))
         .pt_safe_area()
         .px(px(12.0))
         .py(px(16.0))
         .bg(panel)
         .child(
             heading(Box::new(move || {
-                if groups() || visible_entries(ui).is_empty() {
+                if groups() || visible_entries(ui.app).is_empty() {
                     crate::guide::lists::list_name(ui)
                 } else {
                     format!("◂  {}", crate::guide::lists::list_name(ui))
@@ -323,7 +334,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         )
         .child(when(
             move || ui.guide.list.with(|l| l.is_empty()),
-            move || heading(Box::new(move || empty_text(ui))),
+            move || heading(Box::new(move || empty_text(ui.guide))),
         ))
         .child(
             virtual_list(
@@ -369,7 +380,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .flex_1()
                 .on_press(move || {
                     ui.touched();
-                    close(ui);
+                    close(ui.playback);
                 })
                 .child(when(move || !overlay(), move || preview_info(ui, size))),
         )
@@ -383,7 +394,7 @@ fn entry_row(
     focus: Memo<Option<(usize, bool)>>,
     size: Scale,
 ) -> impl IntoElement {
-    let visible = move || visible_entries(ui).entry(at.index());
+    let visible = move || visible_entries(ui.app).entry(at.index());
     let entry = move || visible().unwrap_or(ALL);
     let current = move || visible() == Some(ui.guide.list.with(|l| l.entry()));
     let focused = move || {
@@ -411,7 +422,7 @@ fn entry_row(
         })
         .on_long_press(move || {
             ui.touched();
-            if !crate::playback::multiview::picking(ui)
+            if !crate::playback::multiview::picking(ui.playback)
                 && let Some(entry) = visible()
             {
                 crate::chrome::menu_view::open_group_options(ui, entry);
@@ -419,7 +430,7 @@ fn entry_row(
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
             ui.touched();
-            if !crate::playback::multiview::picking(ui)
+            if !crate::playback::multiview::picking(ui.playback)
                 && let Some(entry) = visible()
             {
                 crate::chrome::menu_view::open_group_options(ui, entry);
@@ -431,7 +442,7 @@ fn entry_row(
                 .mr(move || {
                     px(group_more_room(
                         ui,
-                        current() && !crate::playback::multiview::picking(ui),
+                        current() && !crate::playback::multiview::picking(ui.playback),
                         entry(),
                     ))
                 }),
@@ -441,7 +452,7 @@ fn entry_row(
             size,
             entry,
             current,
-            move || !crate::playback::multiview::picking(ui),
+            move || !crate::playback::multiview::picking(ui.playback),
             move || name().trim_start().to_owned(),
         ))
 }
@@ -465,7 +476,7 @@ pub(crate) fn group_more(
             current()
                 && allowed()
                 && !ui.keys_shown()
-                && crate::chrome::menu_view::has_group_options(ui, entry())
+                && crate::chrome::menu_view::has_group_options(ui.app, entry())
         },
         move || {
             view()
@@ -504,7 +515,7 @@ const GROUP_MORE: f32 = 28.0;
 /// The room a group's name leaves at its end for the ⋯ on its row:
 /// `shown` when [`group_more`]'s row and `allowed` conditions hold.
 pub(crate) fn group_more_room(ui: Ui, shown: bool, entry: usize) -> f32 {
-    if shown && !ui.keys_shown() && crate::chrome::menu_view::has_group_options(ui, entry) {
+    if shown && !ui.keys_shown() && crate::chrome::menu_view::has_group_options(ui.app, entry) {
         GROUP_MORE + 4.0
     } else {
         0.0
@@ -558,7 +569,7 @@ fn channel_row(
         })
         .on_press(move || {
             ui.touched();
-            let playing = playing(ui);
+            let playing = playing(ui.playback);
             update(ui, |c, l, _| c.tap_row(at.index(), playing, l));
         })
         .on_long_press(move || {
@@ -572,10 +583,10 @@ fn channel_row(
         .flex_row()
         .items_center()
         .child(when(
-            move || is_open(ui) && crate::guide::grid::show_channel_logos(ui),
+            move || is_open(ui.playback) && crate::guide::grid::show_channel_logos(ui.app),
             move || {
                 image(crate::chrome::content_image::source(move || {
-                    crate::guide::grid::channel_logo(ui, channel())
+                    crate::guide::grid::channel_logo(ui.app, channel())
                 }))
                 .test_id("player-channel-logo")
                 .accessibility_elements_hidden(true)
@@ -651,7 +662,7 @@ const MORE: f32 = 32.0;
 /// pointer (keys have Menu), and not while multiview picks a channel,
 /// where rows have no menu.
 fn more_shown(ui: Ui) -> bool {
-    is_open(ui) && !ui.keys_shown() && !crate::playback::multiview::picking(ui)
+    is_open(ui.playback) && !ui.keys_shown() && !crate::playback::multiview::picking(ui.playback)
 }
 
 /// The room the row's text leaves at its end for the ⋯.
@@ -677,7 +688,7 @@ fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
     };
     let top = move || {
         let w = window();
-        preview_rect(ui, w.width.0, w.height.0).map_or(0.0, |r| r.1 + r.3 + 20.0)
+        preview_rect(ui.playback, w.width.0, w.height.0).map_or(0.0, |r| r.1 + r.3 + 20.0)
     };
     view()
         .pt(move || px(top()))

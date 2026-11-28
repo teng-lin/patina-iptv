@@ -49,15 +49,15 @@ pub(crate) fn available(ui: Ui) -> bool {
     runtime().cast_available()
         && crate::wiring::device::host().form_factor != FormFactor::Tv
         && ui.playback.player_surface == 0
-        && !crate::playback::multiview::is_open(ui)
-        && !crate::playback::pip::in_window(ui)
+        && !crate::playback::multiview::is_open(ui.playback)
+        && !crate::playback::pip::in_window(ui.playback)
         && (ui.cast.remote.get()
             || (ui.playback.playing.get().is_some()
                 && ui.playback.playback.get() == Playback::Live))
 }
 
-pub(crate) fn local_blocked(ui: Ui) -> bool {
-    if ui.cast.remote.get_untracked() || ui.cast.busy.get_untracked() {
+pub(crate) fn local_blocked(cast: crate::screens::casting::CastUi) -> bool {
+    if cast.remote.get_untracked() || cast.busy.get_untracked() {
         notify(tr("Stop casting before starting local playback."));
         true
     } else {
@@ -174,7 +174,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
     let context = crate::runtime::Runtime::playback_context(&*guide, channel);
-    let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
+    let Some(target) = crate::screens::parental_view::live_target(ui.app, channel) else {
         return;
     };
     let owner = runtime();
@@ -206,7 +206,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 Ok(grant)
             };
             check().await?;
-            if !current() || pending_stop_current(ui) || pending_local_current(ui) {
+            if !current() || pending_stop_current(ui.cast) || pending_local_current(ui.cast) {
                 return Err(Error::Cancelled);
             }
             let mut source = owner
@@ -225,11 +225,11 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             // its relay. Preparing this connection does not bind the new relay.
             let prepared = if let Target::Network(network) = &receiver {
                 let grant = check().await?;
-                let pairing = crate::screens::cast_pairing::prompt(ui, ticket);
+                let pairing = crate::screens::cast_pairing::prompt(ui.cast, ticket);
                 let prepared = owner
                     .prepare_cast(ticket, network.clone(), source.clone(), grant, pairing)
                     .await;
-                crate::screens::cast_pairing::close_for(ui, ticket);
+                crate::screens::cast_pairing::close_for(ui.cast, ticket);
                 let prepared = prepared?;
                 check().await?;
                 Some(prepared)
@@ -305,17 +305,17 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         }
         ui.cast.state.update(|state| state.busy = false);
         if let Err(e) = result {
-            let returning_local = pending_local_current(ui);
+            let returning_local = pending_local_current(ui.cast);
             if matches!(e, Error::PairingIdentityChanged | Error::PairingInvalid)
                 && current()
                 && let Target::Network(receiver) = receiver
             {
-                crate::screens::cast_pairing::offer_forget(ui, ticket, receiver, e);
+                crate::screens::cast_pairing::offer_forget(ui.cast, ticket, receiver, e);
             } else if !returning_local {
                 report(e);
             }
 
-            if retired && pending_stop_current(ui) {
+            if retired && pending_stop_current(ui.cast) {
                 // The old receiver is already stopped. Preserve the viewer's Stop
                 // even when the switch failed after releasing its local surface.
                 ui.playback.playing.set(None);
@@ -333,7 +333,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                     }
                     if transferred
                         && ui.playback.playing.get_untracked() == Some(ch)
-                        && crate::screens::parental_view::live_target(ui, ch).as_ref()
+                        && crate::screens::parental_view::live_target(ui.app, ch).as_ref()
                             == Some(&target)
                     {
                         transferred = false;
@@ -435,7 +435,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
                 ui.cast.state.update(|state| state.remote = false);
                 ui.playback.playing.set(None);
                 if resume_local
-                    && !pending_stop_current(ui)
+                    && !pending_stop_current(ui.cast)
                     && let Some(ch) = schedule().find_channel(&key)
                 {
                     ui.play(ch, Playback::Live);
@@ -448,22 +448,20 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
         finish_pending_stop(ui);
     });
 }
-fn pending_stop_current(ui: Ui) -> bool {
-    ui.cast
-        .state
+fn pending_stop_current(cast: crate::screens::casting::CastUi) -> bool {
+    cast.state
         .with_untracked(|state| state.stop_pending)
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
-fn pending_local_current(ui: Ui) -> bool {
-    ui.cast
-        .state
+fn pending_local_current(cast: crate::screens::casting::CastUi) -> bool {
+    cast.state
         .with_untracked(|state| state.local_pending)
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
 pub(crate) fn finish_pending_stop(ui: Ui) {
-    let stop_requested = pending_stop_current(ui);
+    let stop_requested = pending_stop_current(ui.cast);
     ui.cast.state.update(|state| state.stop_pending = None);
-    let local = pending_local_current(ui);
+    let local = pending_local_current(ui.cast);
     ui.cast.state.update(|state| state.local_pending = None);
     if ui.cast.remote.get_untracked() {
         if stop_requested {

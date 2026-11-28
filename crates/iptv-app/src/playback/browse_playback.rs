@@ -22,7 +22,7 @@ fn current(ui: Ui) -> Option<Target> {
         return Some(target);
     }
     let (ch, surface) = match context {
-        Context::ChannelList if !crate::playback::multiview::picking(ui) => {
+        Context::ChannelList if !crate::playback::multiview::picking(ui.playback) => {
             let c = ui.playback.channels.get()?;
             if c.pane != ListPane::Channels {
                 return None;
@@ -98,8 +98,8 @@ fn fullscreen_timeout_ms(s: &Settings, form_factor: FormFactor) -> u64 {
     }
 }
 
-fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
-    let s = crate::wiring::settings_wiring::read(ui);
+fn policy(app: crate::SharedUi, surface: Option<Surface>) -> Policy {
+    let s = crate::wiring::settings_wiring::read(app);
     let at = &iptv_settings::Target::Global;
     // The form factor only: a resized window changes nothing here.
     let host = crate::wiring::device::host();
@@ -139,7 +139,7 @@ pub fn hold(ui: Ui) {
 /// `policy`, with autoplay off while it is held on `target`; moving to
 /// another target releases the hold.
 fn policy_for(ui: Ui, target: Option<&Target>) -> Policy {
-    let mut p = policy(ui, target.map(|t| t.surface));
+    let mut p = policy(ui.app, target.map(|t| t.surface));
     let key = target.map(|t| t.key.clone());
     match ui.guide.autoplay_held.get() {
         Some(held) if held == key || key.is_none() => p.autoplay = false,
@@ -224,7 +224,7 @@ fn run(ui: Ui) {
                     ui.playback.pending_zap.set(None);
                     return;
                 }
-                if !playing_live(ui, channel) {
+                if !playing_live(ui.playback, channel) {
                     let state = ui.guide.browse_playback.get_untracked();
                     ui.play(channel, Playback::Live);
                     ui.guide.browse_playback.set(state);
@@ -249,7 +249,7 @@ fn run(ui: Ui) {
                     }
                 } else if fullscreen {
                     full(ui);
-                } else if playing_live(ui, channel) {
+                } else if playing_live(ui.playback, channel) {
                     ui.guide
                         .browse_playback
                         .update(|state| state.playing(&target.key, ui.now_ms()));
@@ -261,7 +261,7 @@ fn run(ui: Ui) {
         Some(Effect::Fullscreen) => {
             if let Some(channel) =
                 current(ui).and_then(|t| crate::guide::favorites::channel_of(&t.key))
-                && playing_live(ui, channel)
+                && playing_live(ui.playback, channel)
                 && crate::wiring::runtime_owner::schedule().channel_block(channel)
                     == iptv_core::organization::Block::None
             {
@@ -272,14 +272,13 @@ fn run(ui: Ui) {
     }
     arm(ui);
 }
-fn playing_live(ui: Ui, channel: usize) -> bool {
-    ui.playback.playing.get_untracked() == Some(channel)
-        && ui.playback.playback.get_untracked() == Playback::Live
+fn playing_live(ui: crate::PlaybackUi, channel: usize) -> bool {
+    ui.playing.get_untracked() == Some(channel) && ui.playback.get_untracked() == Playback::Live
 }
 
 fn full(ui: Ui) {
-    if crate::screens::channels_view::is_open(ui) {
-        crate::screens::channels_view::close(ui);
+    if crate::screens::channels_view::is_open(ui.playback) {
+        crate::screens::channels_view::close(ui.playback);
     }
     ui.chrome
         .mode

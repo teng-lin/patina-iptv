@@ -66,7 +66,7 @@ pub fn bind(ui: Ui) {
         // window (#275); macOS keeps recording with its Dock icon and asks
         // on Quit.
         if recording && !close_keeps_recording() {
-            quit_confirm::open(ui);
+            quit_confirm::open(ui.chrome);
         } else if recording {
             // One contract with or without recordings (`docs/desktop.md`,
             // "Closing"): closing the main window ends every viewing
@@ -81,7 +81,7 @@ pub fn bind(ui: Ui) {
             crate::playback::browse_playback::hold(ui);
             close_window.hide();
         } else {
-            quit(ui);
+            quit(ui.playback);
         }
     });
     keep_reachable(window.clone());
@@ -91,9 +91,9 @@ pub fn bind(ui: Ui) {
             return;
         }
         if crate::wiring::runtime_owner::runtime().recording_background_needed() {
-            quit_confirm::open(ui);
+            quit_confirm::open(ui.chrome);
         } else {
-            quit(ui);
+            quit(ui.playback);
         }
     });
 }
@@ -136,7 +136,7 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
             }
             timer(std::time::Duration::from_millis(200)).await;
         }
-        quit(ui);
+        quit(ui.playback);
         // Still here (the recorder had not closed): the viewer may try again.
         QUITTING.with(|quitting| quitting.set(false));
     });
@@ -388,9 +388,9 @@ thread_local! {
 }
 
 /// Explicit quit preserves future recording intent but stops the native host.
-pub(crate) fn quit(ui: Ui) {
+pub(crate) fn quit(playback: crate::PlaybackUi) {
     if crate::wiring::runtime_owner::runtime().shutdown_recording_host() {
-        close_after_shutdown(ui);
+        close_after_shutdown(playback);
     } else {
         crate::chrome::toast::notify(tr(
             "The recording host is still closing; try quitting again",
@@ -398,7 +398,7 @@ pub(crate) fn quit(ui: Ui) {
     }
 }
 
-pub(crate) fn close_after_shutdown(ui: Ui) {
+pub(crate) fn close_after_shutdown(ui: crate::PlaybackUi) {
     crate::playback::player::watch_time::flush(ui);
     with_window(WindowRef::close);
     // The window may be hidden (macOS), and closing it alone would

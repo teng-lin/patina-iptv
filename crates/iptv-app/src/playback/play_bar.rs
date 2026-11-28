@@ -71,9 +71,8 @@ fn target() -> f32 {
 /// Whether the bar shows the full interactive timeline row: catch-up and
 /// on-demand playback (including while a title is still preparing). Live TV
 /// uses a slim hairline progress bar at the top of the panel instead.
-fn show_timeline(ui: Ui) -> bool {
-    matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
-        || crate::playback::on_demand::active(ui)
+fn show_timeline(ui: crate::PlaybackUi) -> bool {
+    matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::playback::on_demand::active(ui)
 }
 
 /// Whether the bar has the desktop's own controls (the volume slider, the
@@ -99,7 +98,7 @@ pub fn shows(ui: Ui) -> bool {
     ui.chrome.mode.get() == ViewMode::Fullscreen
         && (idiom() == Idiom::Tv || !ui.keys_shown())
         && ui.playback.play_bar.with(|b| b.shown)
-        && !crate::playback::multiview::is_open(ui)
+        && !crate::playback::multiview::is_open(ui.playback)
         && available()
         // A chooser needs usable list rows on a short landscape screen.
         // The held bar returns with its original focus when the popup closes.
@@ -152,12 +151,12 @@ pub fn bind(ui: Ui) {
 /// The bar's height above the window's bottom (with its margin and the
 /// safe area): popups over the video keep clear of it. Until the first
 /// layout use an estimate.
-pub fn height(ui: Ui) -> f32 {
-    if let Some(size) = ui.playback.play_bar_size.get() {
+pub fn height(playback: crate::PlaybackUi) -> f32 {
+    if let Some(size) = playback.play_bar_size.get() {
         return size.height.0;
     }
     let row = target();
-    let extra = if show_timeline(ui) {
+    let extra = if show_timeline(playback) {
         PANEL_GAP + progress::TIMELINE_HEIGHT
     } else {
         0.0
@@ -295,7 +294,7 @@ fn back(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
                 0.0,
                 back_bg(ui),
                 move || {
-                    if crate::playback::multiview::detour(ui) {
+                    if crate::playback::multiview::detour(ui.playback) {
                         tr("Multiview")
                     } else if ui.playback.player.recorded.with(Option::is_some) {
                         tr("Recordings")
@@ -427,7 +426,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
     // in the row, under More only, or nowhere.
     let record = crate::wiring::capabilities::record_now();
     let eligible = |c: &Control| match c {
-        Pip => crate::playback::pip::supported(ui) && enabled(ui, Pip),
+        Pip => crate::playback::pip::supported(ui.playback) && enabled(ui, Pip),
         Record => enabled(ui, Record),
         More => false,
         _ => shown(ui, *c),
@@ -545,7 +544,7 @@ fn bar_now(ui: Ui) -> impl IntoElement {
         let focus = ui.playback.play_bar.with(|b| b.focus);
         let invalid = focus.is_some_and(|c| {
             if c == Control::Timeline {
-                !show_timeline(ui) || !enabled(ui, Control::Timeline)
+                !show_timeline(ui.playback) || !enabled(ui, Control::Timeline)
             } else {
                 !controls.with(|l| l.row.contains(&c))
             }
@@ -598,7 +597,10 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                         .child(group(ui, controls, CENTER))
                         .child(group(ui, controls, RIGHT)),
                 )
-                .child(when(move || show_timeline(ui), move || progress::line(ui))),
+                .child(when(
+                    move || show_timeline(ui.playback),
+                    move || progress::line(ui),
+                )),
         )
 }
 
@@ -791,7 +793,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
         }
         Control::Rewind | Control::Forward | Control::Timeline => {
             matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
-                || crate::playback::on_demand::seekable(ui)
+                || crate::playback::on_demand::seekable(ui.playback)
         }
         Control::Record => {
             crate::playback::player_panels::enabled(ui, iptv_presentation::panels::Control::Record)
@@ -877,7 +879,7 @@ pub(crate) fn activate(
     match control {
         Control::Mute => crate::playback::media::toggle_mute(ui),
         Control::More => chooser::open_more(
-            ui,
+            ui.screens,
             layout(ui)
                 .more
                 .into_iter()
@@ -947,7 +949,7 @@ pub(crate) fn activate(
             });
         }
         Control::Timeline => {
-            if crate::playback::seek::pending(ui) {
+            if crate::playback::seek::pending(ui.playback) {
                 crate::playback::seek::commit_now(ui);
             }
             ui.playback
@@ -1072,10 +1074,10 @@ fn group(ui: Ui, controls: Memo<Layout>, candidates: &'static [Control]) -> View
 }
 
 /// The center action reopens a completed on-demand title from the beginning.
-fn play_again(ui: Ui) -> bool {
+fn play_again(ui: crate::PlaybackUi) -> bool {
     crate::playback::on_demand::active(ui)
-        && ui.playback.player.main().finished.get()
-        && ui.playback.player.main().native_published()
+        && ui.player.main().finished.get()
+        && ui.player.main().native_published()
 }
 
 fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRef>) -> Icon {
@@ -1092,7 +1094,7 @@ fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRe
         Control::Guide => Icon::Guide,
         Control::PreviousChannel => Icon::ChannelPrevious,
         Control::Rewind => Icon::Rewind,
-        Control::PlayPause if ui.playback.paused.get() || play_again(ui) => Icon::Play,
+        Control::PlayPause if ui.playback.paused.get() || play_again(ui.playback) => Icon::Play,
         Control::PlayPause => Icon::Pause,
         Control::Forward => Icon::Forward,
         Control::NextChannel => Icon::ChannelNext,
@@ -1131,8 +1133,10 @@ pub(crate) fn label(ui: Ui, c: Control) -> &'static str {
         Control::Record if crate::screens::recordings_view::recording_active(ui) => {
             tr("Stop recording")
         }
-        Control::Multiview if crate::playback::multiview::detour(ui) => tr("Back to multiview"),
-        Control::PlayPause if play_again(ui) => tr("Play again"),
+        Control::Multiview if crate::playback::multiview::detour(ui.playback) => {
+            tr("Back to multiview")
+        }
+        Control::PlayPause if play_again(ui.playback) => tr("Play again"),
         _ => tr(control_label(c)),
     }
 }
@@ -1174,7 +1178,7 @@ fn volume(ui: Ui) -> View {
 fn details(ui: Ui) {
     let (channel, p) = untracked(|| progress::program(ui));
     crate::screens::recordings_view::remember(
-        ui,
+        ui.screens,
         Origin {
             channel,
             program_start: p.start,

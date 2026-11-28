@@ -7,13 +7,13 @@ use iptv_presentation::parental::Phase;
 use crate::Ui;
 
 /// Always re-resolve durable ancestry before executing a content action.
-pub(crate) fn request(ui: Ui, target: Target, done: impl FnOnce() + 'static) {
-    request_if(ui, target, || true, done);
+pub(crate) fn request(screens: crate::ScreensUi, target: Target, done: impl FnOnce() + 'static) {
+    request_if(screens, target, || true, done);
 }
 
 /// A superseded content choice must not open a late PIN prompt or resume it.
 pub(crate) fn request_if(
-    ui: Ui,
+    ui: crate::ScreensUi,
     target: Target,
     current: impl Fn() -> bool + 'static,
     done: impl FnOnce() + 'static,
@@ -47,7 +47,7 @@ pub(crate) fn request_if(
 }
 /// Runs `then` now, or after the PIN while the settings are protected
 /// and locked.
-pub(crate) fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
+pub(crate) fn settings_guarded(ui: crate::ScreensUi, then: impl FnOnce() + 'static) {
     if crate::wiring::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
         && !crate::runtime().parental_settings_allowed()
@@ -62,7 +62,7 @@ pub(crate) fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
 // picker when no source is currently selected.
 pub(crate) fn guide_sources(ui: Ui, playlist: Option<SourceId>) {
     if let Some(playlist) = playlist {
-        crate::library_ui::epg_sources_view::open(ui, playlist);
+        crate::library_ui::epg_sources_view::open(ui.screens, playlist);
     } else {
         crate::library_ui::playlists_view::open(ui);
     }
@@ -70,7 +70,7 @@ pub(crate) fn guide_sources(ui: Ui, playlist: Option<SourceId>) {
 
 pub(crate) fn add_playlist(ui: Ui) {
     if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed() {
-        request(ui, Target::settings(), move || {
+        request(ui.screens, Target::settings(), move || {
             crate::library_ui::wizard_view::open_add(ui)
         });
     } else {
@@ -79,8 +79,8 @@ pub(crate) fn add_playlist(ui: Ui) {
 }
 
 /// Opens the playlist manager above the Settings screen.
-pub(crate) fn manage_playlists(ui: Ui) {
-    crate::library_ui::playlists_view::choose_for_management(ui);
+pub(crate) fn manage_playlists(screens: crate::ScreensUi) {
+    crate::library_ui::playlists_view::choose_for_management(screens);
 }
 
 pub(crate) fn reorder_playlists(ui: Ui) {

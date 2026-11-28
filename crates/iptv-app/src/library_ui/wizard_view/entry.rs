@@ -19,8 +19,8 @@ pub struct Editing {
     pub text: String,
 }
 
-pub fn begin(ui: Ui, field: Field) {
-    ui.screens.wizard.update(|w| {
+pub fn begin(screens: crate::ScreensUi, field: Field) {
+    screens.wizard.update(|w| {
         if let Some(open) = w {
             let text = open.wizard.value(field).to_owned();
             open.editing = Some(Editing { field, text });
@@ -28,8 +28,8 @@ pub fn begin(ui: Ui, field: Field) {
     });
 }
 
-pub fn is_editing(ui: Ui) -> bool {
-    ui.screens
+pub fn is_editing(screens: crate::ScreensUi) -> bool {
+    screens
         .wizard
         .with(|w| w.as_ref().is_some_and(|o| o.editing.is_some()))
 }
@@ -46,15 +46,15 @@ pub fn commit(ui: Ui) {
     }
 }
 
-pub fn cancel(ui: Ui) {
-    ui.screens
+pub fn cancel(screens: crate::ScreensUi) {
+    screens
         .wizard
         .update(|w| w.iter_mut().for_each(|o| o.editing = None));
     dismiss_keyboard();
 }
 
-fn set_text(ui: Ui, text: &str) {
-    ui.screens.wizard.update(|w| {
+fn set_text(screens: crate::ScreensUi, text: &str) {
+    screens.wizard.update(|w| {
         if let Some(e) = w.as_mut().and_then(|o| o.editing.as_mut()) {
             e.text = text.to_owned();
         }
@@ -91,9 +91,9 @@ pub fn sheet(ui: Ui) -> impl IntoElement {
             masked: field == Field::Password,
             current: Rc::new(current),
             note: Rc::new(String::new),
-            set: Rc::new(move |t: &str| set_text(ui, t)),
+            set: Rc::new(move |t: &str| set_text(ui.screens, t)),
             done: commit,
-            cancel,
+            cancel: |ui| cancel(ui.screens),
         },
     )
 }

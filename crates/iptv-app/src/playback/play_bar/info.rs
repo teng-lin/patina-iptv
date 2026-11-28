@@ -30,7 +30,7 @@ struct ProgramInfo {
 }
 
 fn program_info(ui: Ui) -> Option<ProgramInfo> {
-    if crate::playback::on_demand::active(ui) || ui.playback.playing.get().is_none() {
+    if crate::playback::on_demand::active(ui.playback) || ui.playback.playing.get().is_none() {
         return None;
     }
     let (channel, program) = progress::program(ui);
@@ -76,7 +76,7 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
         move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::chrome::scale::phone();
     let show_next = move || next.with(Option::is_some) && window().width.0 >= NEXT_MIN_WIDTH;
     let has_title = move || {
-        crate::playback::on_demand::title(ui)
+        crate::playback::on_demand::title(ui.playback)
             .or_else(|| program.with(|p| p.as_ref().map(|p| p.title.clone())))
             .is_some_and(|title| !title.trim().is_empty())
     };
@@ -131,11 +131,11 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                 ))
                 .child(
                     text(move || {
-                        crate::playback::on_demand::title(ui)
+                        crate::playback::on_demand::title(ui.playback)
                             .or_else(|| program.with(|p| p.as_ref().map(|p| p.title.clone())))
                             .filter(|title| !title.trim().is_empty())
                             .or_else(|| {
-                                (!crate::playback::on_demand::active(ui)
+                                (!crate::playback::on_demand::active(ui.playback)
                                     && program.with(Option::is_none))
                                 .then(|| ui.playback.playing.get().map(channel_name))
                                 .flatten()

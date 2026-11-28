@@ -112,7 +112,7 @@ pub fn availability(ui: Ui) -> Availability {
     }
     let mut offer = offer(ui);
     if let MultiviewOffer::Disabled(_) = offer
-        && session(ui)
+        && session(ui.playback)
     {
         offer = MultiviewOffer::Tiles(crate::wiring::device::host().decoder_slots());
     }
@@ -157,34 +157,34 @@ pub fn set_account_streams(allowed: Option<u32>) {
 }
 
 /// A multiview session exists (its grid shows, or it waits for a detour).
-pub fn session(ui: Ui) -> bool {
-    ui.playback.multiview.with(Option::is_some)
+pub fn session(playback: crate::PlaybackUi) -> bool {
+    playback.multiview.with(Option::is_some)
 }
 
 /// The grid shows (a session, not on a detour): it owns the keys and taps.
-pub fn is_open(ui: Ui) -> bool {
-    ui.playback
+pub fn is_open(playback: crate::PlaybackUi) -> bool {
+    playback
         .multiview
         .with(|m| m.as_ref().is_some_and(|m| m.detour().is_none()))
 }
 
 /// A tile plays full screen while the grid waits.
-pub fn detour(ui: Ui) -> bool {
-    ui.playback
+pub fn detour(playback: crate::PlaybackUi) -> bool {
+    playback
         .multiview
         .with(|m| m.as_ref().is_some_and(|m| m.detour().is_some()))
 }
 
 /// The channel list picks for multiview.
-pub fn picking(ui: Ui) -> bool {
-    ui.playback
+pub fn picking(playback: crate::PlaybackUi) -> bool {
+    playback
         .multiview
         .with_untracked(|m| m.as_ref().is_some_and(|m| m.pick().is_some()))
 }
 
 /// Where the channel list starts while picking: the active tile's channel.
-pub fn pick_from(ui: Ui) -> Option<usize> {
-    ui.playback.multiview.with_untracked(|m| {
+pub fn pick_from(playback: crate::PlaybackUi) -> Option<usize> {
+    playback.multiview.with_untracked(|m| {
         m.as_ref()
             .filter(|m| m.pick().is_some())
             .and_then(|m| m.tiles().get(m.active_index()))
@@ -209,17 +209,16 @@ pub fn audible(ui: Ui, surface: usize) -> bool {
 }
 
 /// Surfaces 1–3 exist while a tile plays on them (on a detour too: hidden).
-pub fn mounted(ui: Ui, surface: usize) -> bool {
+pub fn mounted(playback: crate::PlaybackUi, surface: usize) -> bool {
     surface > 0
-        && ui
-            .playback
+        && playback
             .multiview
             .with(|m| m.as_ref().is_some_and(|m| m.tile_on(surface).is_some()))
 }
 
 /// Tile `index`'s rectangle (px) in the window.
-pub fn tile_rect(ui: Ui, index: usize) -> Option<(f32, f32, f32, f32)> {
-    let layout = ui.playback.multiview.with(|m| {
+pub fn tile_rect(playback: crate::PlaybackUi, index: usize) -> Option<(f32, f32, f32, f32)> {
+    let layout = playback.multiview.with(|m| {
         m.as_ref()
             .filter(|m| index < m.tiles().len())
             .map(State::layout)
@@ -236,12 +235,11 @@ pub fn tile_rect(ui: Ui, index: usize) -> Option<(f32, f32, f32, f32)> {
 }
 
 /// Where `surface` shows while the grid is open; `None` without a tile.
-pub fn surface_rect(ui: Ui, surface: usize) -> Option<(f32, f32, f32, f32)> {
-    let tile = ui
-        .playback
+pub fn surface_rect(playback: crate::PlaybackUi, surface: usize) -> Option<(f32, f32, f32, f32)> {
+    let tile = playback
         .multiview
         .with(|m| m.as_ref().and_then(|m| m.tile_on(surface)))?;
-    tile_rect(ui, tile)
+    tile_rect(playback, tile)
 }
 
 /// The play bar's or the control row's Multiview: the playing channel
@@ -252,14 +250,14 @@ pub fn open(ui: Ui) {
         crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
         return;
     }
-    if untracked(|| detour(ui)) {
+    if untracked(|| detour(ui.playback)) {
         resume(ui);
         return;
     }
     let Some(channel) = ui.playback.playing.get_untracked() else {
         return;
     };
-    if untracked(|| session(ui)) {
+    if untracked(|| session(ui.playback)) {
         return;
     }
     if ui.playback.playback.get_untracked() != Playback::Live {
@@ -267,7 +265,7 @@ pub fn open(ui: Ui) {
     }
     ui.playback.paused.set(false);
     ui.playback.panels.update(|p| p.hide());
-    crate::screens::channels_view::close(ui);
+    crate::screens::channels_view::close(ui.playback);
     let limits = Limits {
         decoders: untracked(|| tiles(ui)),
         connections: crate::wiring::runtime_owner::runtime().account_limit(),
@@ -286,7 +284,7 @@ pub fn open(ui: Ui) {
 /// Ends the session at once (another playlist, stop, sleep): the other
 /// surfaces stop. Surface 0 is the caller's.
 pub fn close(ui: Ui) {
-    if !untracked(|| session(ui)) {
+    if !untracked(|| session(ui.playback)) {
         return;
     }
     log::info!("iptv multiview: closed");
@@ -376,7 +374,7 @@ fn can_confirm_pick(state: &State, index: usize) -> bool {
 
 /// Whether the picker can close after choosing this channel for multiview.
 pub fn picked(ui: Ui, channel: usize) -> bool {
-    if !picking(ui) || !crate::playback::player::allow_guide_channel(channel) {
+    if !picking(ui.playback) || !crate::playback::player::allow_guide_channel(channel) {
         return false;
     }
     log::info!("iptv multiview: picked {channel}");
@@ -415,9 +413,9 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
 
 /// The channel list (or the search screen picking for multiview) closed,
 /// with or without a choice.
-pub fn list_closed(ui: Ui) {
-    if picking(ui) {
-        ui.playback
+pub fn list_closed(playback: crate::PlaybackUi) {
+    if picking(playback) {
+        playback
             .multiview
             .update(|m| m.iter_mut().for_each(State::cancel_pick));
     }
@@ -426,7 +424,7 @@ pub fn list_closed(ui: Ui) {
 /// Runs a step, starts and stops the surfaces whose channel changed, and
 /// does what the step asks.
 fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<usize>) {
-    let failed = move |surface| crate::playback::player::surface_failed(ui, surface);
+    let failed = move |surface| crate::playback::player::surface_failed(ui.playback, surface);
     // Read at each step, so a change in the settings applies at the next
     // focus move, also in a session already open.
     // Not offered on a phone: there a stored value is kept, unused.

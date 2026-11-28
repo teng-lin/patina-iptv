@@ -45,8 +45,8 @@ const CARD_W: f32 = 660.0;
 // --- Actions -------------------------------------------------------------------
 
 /// Opens the screen for `playlist`.
-pub fn open(ui: Ui, playlist: SourceId) {
-    ui.screens.guide_sources.set(Some(screen(playlist)));
+pub fn open(screens: crate::ScreensUi, playlist: SourceId) {
+    screens.guide_sources.set(Some(screen(playlist)));
     // Timer failures can occur without publishing a new visible guide.
     // Opening the controls always reads the latest persisted refresh result.
     crate::runtime::data::refresh_guide_status(&crate::wiring::runtime_owner::runtime());
@@ -66,9 +66,9 @@ fn screen(playlist: SourceId) -> Screen {
     }
 }
 
-pub fn close(ui: Ui) {
-    if ui.screens.guide_sources.with_untracked(Option::is_some) {
-        ui.screens.guide_sources.set(None);
+pub fn close(ui: crate::ScreensUi) {
+    if ui.guide_sources.with_untracked(Option::is_some) {
+        ui.guide_sources.set(None);
         if !crate::screens::settings_view::is_open(ui) {
             crate::wiring::runtime_owner::runtime().parental_content_closed();
         }
@@ -76,12 +76,12 @@ pub fn close(ui: Ui) {
     }
 }
 
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.guide_sources.with(Option::is_some)
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.guide_sources.with(Option::is_some)
 }
 
-fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.screens.guide_sources.with(|s| s.as_ref().map(f))
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Screen) -> R) -> Option<R> {
+    screens.guide_sources.with(|s| s.as_ref().map(f))
 }
 
 fn update(ui: Ui, f: impl FnOnce(&mut Screen) -> Option<Effect>) {
@@ -96,8 +96,8 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen) -> Option<Effect>) {
     }
 }
 
-fn editing(ui: Ui) -> bool {
-    state(ui, |s| s.editing().is_some()).unwrap_or(false)
+fn editing(screens: crate::ScreensUi) -> bool {
+    state(screens, |s| s.editing().is_some()).unwrap_or(false)
 }
 
 /// A remote action while the screen is open.
@@ -112,9 +112,9 @@ pub fn key(ui: Ui, action: Action) {
         Action::ShowMenu => Key::Menu,
         _ => return,
     };
-    let typing = editing(ui);
+    let typing = editing(ui.screens);
     update(ui, |s| s.key(key));
-    if typing && !editing(ui) {
+    if typing && !editing(ui.screens) {
         dismiss_keyboard();
     }
 }
@@ -127,7 +127,7 @@ pub fn back(ui: Ui) -> bool {
 
 fn commit(ui: Ui) {
     update(ui, |s| s.key(Key::Ok));
-    if !editing(ui) {
+    if !editing(ui.screens) {
         dismiss_keyboard();
     }
 }
@@ -147,7 +147,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
             == "blocked_content_and_settings"
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::screens::parental_view::protected_settings(ui, move || {
+        crate::screens::parental_view::protected_settings(ui.screens, move || {
             perform(ui, playlist, effect)
         });
         return;
@@ -199,7 +199,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
                 },
             );
         }
-        Effect::Close => close(ui),
+        Effect::Close => close(ui.screens),
     }
 }
 
@@ -225,8 +225,8 @@ pub fn source_title(s: &crate::runtime::model::GuideSource) -> String {
 // --- View ----------------------------------------------------------------------
 
 /// A row's or action's mark: the pill while focused with the keys shown.
-fn mark(ui: Ui, focused: bool) -> Mark {
-    Mark::of(focused && ui.keys_shown(), false)
+fn mark(chrome: crate::ChromeUi, focused: bool) -> Mark {
+    Mark::of(focused && chrome.keys_shown(), false)
 }
 
 fn time_label(at: i64) -> String {
@@ -234,7 +234,8 @@ fn time_label(at: i64) -> String {
 }
 
 fn contents_hidden(ui: Ui) -> bool {
-    editing(ui) || state(ui, |screen| screen.layer() != Layer::List).unwrap_or(false)
+    editing(ui.screens)
+        || state(ui.screens, |screen| screen.layer() != Layer::List).unwrap_or(false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
@@ -256,10 +257,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             });
         }
     });
-    let editing = computed(move || editing(ui));
+    let editing = computed(move || editing(ui.screens));
     let size = Scale::new();
     when(
-        move || is_open(ui),
+        move || is_open(ui.screens),
         move || {
             ui_kit::screen(ui, size)
                 .test_id("guide-sources-screen")
@@ -272,10 +273,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         .accessibility_elements_hidden(move || contents_hidden(ui)),
                 )
                 .child(when(
-                    move || state(ui, |s| s.notice().is_some()).unwrap_or(false),
+                    move || state(ui.screens, |s| s.notice().is_some()).unwrap_or(false),
                     move || {
                         ui_kit::body(size, move || {
-                            state(ui, |s| s.notice().map(words::notice))
+                            state(ui.screens, |s| s.notice().map(words::notice))
                                 .flatten()
                                 .unwrap_or_default()
                         })
@@ -291,7 +292,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 }
 
 fn hint(ui: Ui) -> &'static str {
-    let layer = state(ui, Screen::layer).unwrap_or(Layer::List);
+    let layer = state(ui.screens, Screen::layer).unwrap_or(Layer::List);
     match (ui.keys_shown(), layer) {
         (true, Layer::List) => {
             tr("▲▼ choose   OK actions   Back close   The first source with a channel wins")
@@ -310,7 +311,7 @@ fn hint(ui: Ui) -> &'static str {
 
 fn header(ui: Ui, size: Scale) -> View {
     let name = move || {
-        let playlist = state(ui, Screen::playlist);
+        let playlist = state(ui.screens, Screen::playlist);
         ui.app.library.version.get();
         let name = playlist.and_then(|id| {
             crate::wiring::runtime_owner::runtime()
@@ -325,14 +326,18 @@ fn header(ui: Ui, size: Scale) -> View {
             |n| trf("Guide data · {playlist}", &[("playlist", (&n).into())]),
         )
     };
-    ui_kit::header(ui, size, name, close)
+    ui_kit::header(ui, size, name, |ui| close(ui.screens))
 }
 
 fn list(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
-    let count = move || state(ui, |s| s.items().len()).unwrap_or(0);
-    let focused_index =
-        computed(move || state(ui, |s| s.items().iter().position(|i| *i == s.focus())).flatten());
+    let count = move || state(ui.screens, |s| s.items().len()).unwrap_or(0);
+    let focused_index = computed(move || {
+        state(ui.screens, |s| {
+            s.items().iter().position(|i| *i == s.focus())
+        })
+        .flatten()
+    });
     effect(move || {
         if let Some(i) = focused_index.get()
             && ui.keys_shown()
@@ -383,15 +388,15 @@ fn update_status(playlist: SourceId) -> (String, bool) {
 }
 
 fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) -> impl IntoElement {
-    let item = move || state(ui, |s| s.items().get(index).copied()).flatten();
+    let item = move || state(ui.screens, |s| s.items().get(index).copied()).flatten();
     let line = move || {
-        state(ui, |s| match s.items().get(index) {
+        state(ui.screens, |s| match s.items().get(index) {
             Some(Item::Source(feed)) => s.line(*feed).cloned(),
             _ => None,
         })
         .flatten()
     };
-    let playlist = move || state(ui, Screen::playlist);
+    let playlist = move || state(ui.screens, Screen::playlist);
     let title = move || match (line(), item()) {
         (Some(l), _) => format!("{}.  {}", index + 1, words::title(&l.source)),
         (None, Some(Item::Add)) => tr("+ Add a guide source").to_owned(),
@@ -428,7 +433,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
         None => String::new(),
     };
     let enabled = move || line().is_none_or(|l| l.source.enabled);
-    let mark = move || mark(ui, focused_index.get() == Some(index));
+    let mark = move || mark(ui.chrome, focused_index.get() == Some(index));
     let is_source = move || line().is_some();
     let is_on = move || line().is_some_and(|l| l.source.enabled);
     list_rows::row(size, ROW_THREE, mark)
@@ -503,7 +508,7 @@ enum Sheet2 {
 
 /// The open sheet over the list; rebuilt only when another one opens.
 fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
-    let open = computed(move || match state(ui, Screen::layer) {
+    let open = computed(move || match state(ui.screens, Screen::layer) {
         Some(Layer::Actions { feed, .. }) => Some((Sheet2::Actions, feed)),
         Some(Layer::Confirm { feed, .. }) => Some((Sheet2::Confirm, feed)),
         Some(Layer::Clear { .. }) => Some((Sheet2::Clear, iptv_epg::FeedId(0))),
@@ -526,7 +531,7 @@ fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
 
 fn backdrop(ui: Ui, card: AnyElement) -> View {
     view()
-        .accessibility_elements_hidden(move || editing(ui))
+        .accessibility_elements_hidden(move || editing(ui.screens))
         .absolute()
         .inset_0()
         .items_center()
@@ -574,12 +579,15 @@ fn step(
 }
 
 fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement {
-    let line = move || state(ui, |s| s.line(feed).cloned()).flatten();
-    let acts = computed(move || state(ui, |s| s.acts(feed)).unwrap_or_default());
+    let line = move || state(ui.screens, |s| s.line(feed).cloned()).flatten();
+    let acts = computed(move || state(ui.screens, |s| s.acts(feed)).unwrap_or_default());
     let scrolling = ui_kit::FocusScroll::new();
     let act_row = move |act: Act| {
         let focused = move || {
-            state(ui, |s| s.layer() == Layer::Actions { feed, focus: act }).unwrap_or(false)
+            state(ui.screens, |s| {
+                s.layer() == Layer::Actions { feed, focus: act }
+            })
+            .unwrap_or(false)
         };
         let label = move || {
             line()
@@ -640,7 +648,7 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
 }
 
 fn clear_card(ui: Ui, size: Scale) -> impl IntoElement {
-    let name = state(ui, Screen::playlist)
+    let name = state(ui.screens, Screen::playlist)
         .and_then(|id| {
             crate::wiring::runtime_owner::runtime()
                 .playlists()
@@ -651,7 +659,7 @@ fn clear_card(ui: Ui, size: Scale) -> impl IntoElement {
         })
         .unwrap_or_default();
     let focused = move |confirm| {
-        move || state(ui, |s| s.layer() == Layer::Clear { confirm }).unwrap_or(false)
+        move || state(ui.screens, |s| s.layer() == Layer::Clear { confirm }).unwrap_or(false)
     };
     card(ui, size)
         .child(ui_kit::title(
@@ -673,7 +681,7 @@ fn clear_card(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn confirm_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement {
-    let (title, body) = state(ui, |s| {
+    let (title, body) = state(ui.screens, |s| {
         s.line(feed).map(|l| {
             (
                 trf(
@@ -687,7 +695,7 @@ fn confirm_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
     .flatten()
     .unwrap_or_default();
     let focused = move |remove: bool| {
-        move || state(ui, |s| s.layer() == Layer::Confirm { feed, remove }).unwrap_or(false)
+        move || state(ui.screens, |s| s.layer() == Layer::Confirm { feed, remove }).unwrap_or(false)
     };
     card(ui, size)
         .child(ui_kit::title(size, title))
@@ -720,7 +728,8 @@ fn confirm_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
 /// the step changes (Return lets them go).
 fn edit_sheet(ui: Ui, size: Scale) -> impl IntoElement {
     let field = element_ref();
-    let kind = computed(move || state(ui, |s| s.editing().map(|e| e.kind.clone())).flatten());
+    let kind =
+        computed(move || state(ui.screens, |s| s.editing().map(|e| e.kind.clone())).flatten());
     effect(move || {
         if kind.get().is_some() {
             field.focus();
@@ -734,7 +743,7 @@ fn edit_sheet(ui: Ui, size: Scale) -> impl IntoElement {
         )
     };
     let current = move || {
-        state(ui, |s| s.editing().map(|e| e.text.clone()))
+        state(ui.screens, |s| s.editing().map(|e| e.text.clone()))
             .flatten()
             .unwrap_or_default()
     };

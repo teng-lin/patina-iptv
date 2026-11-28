@@ -1,9 +1,8 @@
-use crate::Ui;
 use nsh_core::prelude::*;
-pub fn bind(ui: Ui) {
+pub fn bind(app: crate::SharedUi) {
     effect(move || {
-        ui.app.library.version.get();
-        ui.app.data_version.get();
+        app.library.version.get();
+        app.data_version.get();
         crate::runtime::data::refresh_guide_status(&crate::wiring::runtime_owner::runtime());
     });
 }

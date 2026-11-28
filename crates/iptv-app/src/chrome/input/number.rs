@@ -8,7 +8,7 @@ pub(super) fn bind(ui: Ui) {
     effect(move || {
         // A modal may open and close before the digit timer fires. Cancel on
         // opening so its keys can never resume an abandoned channel number.
-        if ui.top_overlay().is_some() || crate::playback::multiview::is_open(ui) {
+        if ui.top_overlay().is_some() || crate::playback::multiview::is_open(ui.playback) {
             ui.playback.channel_number.update(|entry| {
                 entry.take();
             });
@@ -24,14 +24,13 @@ fn timeout() -> u64 {
         )
         .max(0) as u64
 }
-fn resolve(ui: Ui, number: u32) -> Option<iptv_search::ChannelId> {
+fn resolve(ui: crate::GuideUi, number: u32) -> Option<iptv_search::ChannelId> {
     let schedule = crate::wiring::runtime_owner::schedule();
-    let list = ui.guide.list.get_untracked();
+    let list = ui.list.get_untracked();
     let mut matching = (0..list.len())
         .filter_map(|row| list.channel(row))
         .filter(|&channel| {
-            !schedule.channel_hidden(channel)
-                && crate::guide::lists::number(ui.guide, channel) == number
+            !schedule.channel_hidden(channel) && crate::guide::lists::number(ui, channel) == number
         });
     let channel = matching.next()?;
     if matching.next().is_some() {
@@ -73,7 +72,7 @@ fn arm(ui: Ui) {
         crate::chrome::toast::notify(&digits);
     }
     let _task = set_timeout(Duration::from_millis(timeout()), move || {
-        if ui.top_overlay().is_some() || crate::playback::multiview::is_open(ui) {
+        if ui.top_overlay().is_some() || crate::playback::multiview::is_open(ui.playback) {
             ui.playback.channel_number.update(|entry| {
                 entry.take();
             });
@@ -93,7 +92,9 @@ pub(super) fn apply(ui: Ui, action: Action) -> bool {
     match action {
         Action::Digit(digit) => {
             ui.playback.channel_number.update(|entry| {
-                entry.push(digit, ui.now_ms(), timeout(), |number| resolve(ui, number))
+                entry.push(digit, ui.now_ms(), timeout(), |number| {
+                    resolve(ui.guide, number)
+                })
             });
             arm(ui);
             true
@@ -118,9 +119,9 @@ pub(super) fn backspace(ui: Ui) -> bool {
     if !ui.playback.channel_number.with(|entry| entry.active()) {
         return false;
     }
-    ui.playback
-        .channel_number
-        .update(|entry| entry.backspace(ui.now_ms(), timeout(), |number| resolve(ui, number)));
+    ui.playback.channel_number.update(|entry| {
+        entry.backspace(ui.now_ms(), timeout(), |number| resolve(ui.guide, number))
+    });
     arm(ui);
     true
 }

@@ -39,9 +39,9 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
     let width = signal(0.0_f32);
     let catch_up = move || {
         matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
-            || crate::playback::on_demand::seekable(ui)
+            || crate::playback::on_demand::seekable(ui.playback)
     };
-    let fraction = move || match crate::playback::seek::elapsed(ui) {
+    let fraction = move || match crate::playback::seek::elapsed(ui.playback) {
         Some((at, length)) => {
             if length > 0 {
                 at as f32 / length as f32
@@ -54,7 +54,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
             p.progress(ui.guide.focus.with(|f| f.now))
         }
     };
-    let ends = move || match crate::playback::seek::elapsed(ui) {
+    let ends = move || match crate::playback::seek::elapsed(ui.playback) {
         Some((at, length)) => (
             crate::playback::seek::hms(at),
             if length > 0 {
@@ -72,7 +72,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
         let Some(p) = e.points.iter().find(|p| p.changed) else {
             return;
         };
-        let Some((length, limit)) = crate::playback::seek::span(ui) else {
+        let Some((length, limit)) = crate::playback::seek::span(ui.playback) else {
             return;
         };
         let target = seek_target(p.location.x.0, width.get_untracked(), length, limit);

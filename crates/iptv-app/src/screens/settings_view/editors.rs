@@ -36,22 +36,22 @@ enum Kind {
     Confirm,
 }
 
-fn editor<R>(ui: Ui, f: impl FnOnce(&Editor) -> R) -> Option<R> {
-    state(ui, |s| s.editor().map(f)).flatten()
+fn editor<R>(screens: crate::ScreensUi, f: impl FnOnce(&Editor) -> R) -> Option<R> {
+    state(screens, |s| s.editor().map(f)).flatten()
 }
 
-fn setting(ui: Ui) -> Option<&'static Setting> {
-    editor(ui, Editor::setting).flatten()
+fn setting(screens: crate::ScreensUi) -> Option<&'static Setting> {
+    editor(screens, Editor::setting).flatten()
 }
 
 /// What the open editor is about: its setting's or command's name.
-fn subject(ui: Ui) -> &'static str {
-    editor(ui, |e| words::label(e.key())).unwrap_or("")
+fn subject(screens: crate::ScreensUi) -> &'static str {
+    editor(screens, |e| words::label(e.key())).unwrap_or("")
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     let kind = computed(move || {
-        editor(ui, |e| match e {
+        editor(ui.screens, |e| match e {
             Editor::Choice { .. } => Kind::Choice,
             Editor::Number { .. } => Kind::Number,
             Editor::Text { .. } => Kind::Text,
@@ -98,7 +98,7 @@ fn backdrop(ui: Ui) -> View {
 }
 
 fn title(ui: Ui, size: Scale) -> impl IntoElement {
-    ui_kit::title(size, move || subject(ui))
+    ui_kit::title(size, move || subject(ui.screens))
         .px(move || size.px(14.0))
         .py(move || size.px(8.0))
 }
@@ -108,8 +108,8 @@ fn button(ui: Ui, size: Scale, label: &'static str, act: fn(Ui)) -> impl IntoEle
 }
 
 /// A focused entry's mark (the keys shown).
-fn entry_mark(ui: Ui, focused: bool) -> Mark {
-    Mark::of(focused && ui.keys_shown(), false)
+fn entry_mark(chrome: crate::ChromeUi, focused: bool) -> Mark {
+    Mark::of(focused && chrome.keys_shown(), false)
 }
 
 /// A side panel at the right (a choice, the key list) over a backdrop.
@@ -133,14 +133,14 @@ fn dialog(ui: Ui, size: Scale) -> View {
 /// settings panel itself.
 fn choice(ui: Ui) -> impl IntoElement {
     let variants = move || {
-        setting(ui)
+        setting(ui.screens)
             .and_then(|s| s.ty.editor_choices())
             .map_or(&[][..], |c| c.variants)
     };
     let size = Scale::new();
     let list = element_ref();
     let focus = computed(move || {
-        editor(ui, |e| match e {
+        editor(ui.screens, |e| match e {
             Editor::Choice { focus, .. } => Some(*focus),
             _ => None,
         })
@@ -154,17 +154,17 @@ fn choice(ui: Ui) -> impl IntoElement {
     let entry = move |at: Position| {
         let variant = move || variants().get(at.index()).copied();
         let selected = move || {
-            editor(ui, |e| match e {
+            editor(ui.screens, |e| match e {
                 Editor::Choice { selected, .. } => *selected == at.index(),
                 _ => false,
             }) == Some(true)
         };
         let swatch = move || {
-            let s = setting(ui)?;
+            let s = setting(ui.screens)?;
             swatch_color(&s.ty, variant()?)
         };
         let label = move || {
-            let (Some(s), Some(v)) = (setting(ui), variant()) else {
+            let (Some(s), Some(v)) = (setting(ui.screens), variant()) else {
                 return String::new();
             };
             let family = s.ty.editor_choices().map_or("", |c| c.family);
@@ -174,7 +174,7 @@ fn choice(ui: Ui) -> impl IntoElement {
                 words::choice(family, v)
             )
         };
-        let mark = move || entry_mark(ui, focus.get() == Some(at.index()));
+        let mark = move || entry_mark(ui.chrome, focus.get() == Some(at.index()));
         list_rows::row(size, ROW, mark)
             .role(AccessibilityRole::Option)
             .accessibility_state(move || AccessibilityState {
@@ -228,8 +228,8 @@ fn choice(ui: Ui) -> impl IntoElement {
 }
 
 /// The stepper's value and its range, in the setting's unit.
-fn number_text(ui: Ui) -> (String, String) {
-    let Some((s, value)) = editor(ui, |e| match e {
+fn number_text(screens: crate::ScreensUi) -> (String, String) {
+    let Some((s, value)) = editor(screens, |e| match e {
         Editor::Number { setting, value } => Some((*setting, *value)),
         _ => None,
     })
@@ -304,12 +304,17 @@ fn stepper(ui: Ui) -> impl IntoElement {
                         .gap(move || size.px(20.0))
                         .child(step_button(ui, size, "−", step(-1)))
                         .child(
-                            ui_kit::title(size, move || format!("◀  {}  ▶", number_text(ui).0))
-                                .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
+                            ui_kit::title(size, move || {
+                                format!("◀  {}  ▶", number_text(ui.screens).0)
+                            })
+                            .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                         )
                         .child(step_button(ui, size, "+", step(1))),
                 )
-                .child(ui_kit::caption(size, move || number_text(ui).1).px(move || size.px(14.0)))
+                .child(
+                    ui_kit::caption(size, move || number_text(ui.screens).1)
+                        .px(move || size.px(14.0)),
+                )
                 .child(
                     view()
                         .flex_row()
@@ -324,14 +329,16 @@ fn stepper(ui: Ui) -> impl IntoElement {
 /// Text: the wizard's entry sheet.
 fn text_sheet(ui: Ui) -> View {
     let current = move || {
-        editor(ui, |e| match e {
+        editor(ui.screens, |e| match e {
             Editor::Text { text, .. } => text.clone(),
             _ => String::new(),
         })
         .unwrap_or_default()
     };
     let note = move || {
-        let invalid = editor(ui, |e| matches!(e, Editor::Text { invalid: true, .. }));
+        let invalid = editor(ui.screens, |e| {
+            matches!(e, Editor::Text { invalid: true, .. })
+        });
         if invalid == Some(true) {
             tr("That is not a valid value here").to_owned()
         } else {
@@ -341,7 +348,7 @@ fn text_sheet(ui: Ui) -> View {
     entry::panel(
         ui,
         Sheet {
-            label: subject(ui).to_owned(),
+            label: subject(ui.screens).to_owned(),
             placeholder: "",
             keyboard: KeyboardType::Default,
             masked: false,
@@ -380,7 +387,7 @@ fn question(key: &str) -> &'static str {
 /// "Really?" before a command: what it does, Cancel and the command.
 fn confirm(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    let key = move || editor(ui, Editor::key).unwrap_or("");
+    let key = move || editor(ui.screens, Editor::key).unwrap_or("");
     view()
         .absolute()
         .inset_0()
@@ -389,7 +396,9 @@ fn confirm(ui: Ui) -> impl IntoElement {
         .child(backdrop(ui))
         .child(
             dialog(ui, size)
-                .child(ui_kit::title(size, move || format!("{}?", subject(ui))))
+                .child(ui_kit::title(size, move || {
+                    format!("{}?", subject(ui.screens))
+                }))
                 .child(ui_kit::body(size, move || question(key())))
                 .child(
                     view()
@@ -401,7 +410,7 @@ fn confirm(ui: Ui) -> impl IntoElement {
                         .child(ui_kit::button(
                             ui,
                             size,
-                            move || subject(ui),
+                            move || subject(ui.screens),
                             || true,
                             move || keep(ui),
                         )),

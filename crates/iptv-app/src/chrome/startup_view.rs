@@ -88,9 +88,9 @@ pub(crate) fn store_failed(
     });
 }
 
-fn change_controls(ui: crate::Ui, f: impl FnOnce(&mut Recovery) -> bool) -> bool {
+fn change_controls(chrome: crate::ChromeUi, f: impl FnOnce(&mut Recovery) -> bool) -> bool {
     let mut changed = false;
-    ui.chrome.store_startup_failure.update(|failure| {
+    chrome.store_startup_failure.update(|failure| {
         if let Some(failure) = failure {
             changed = f(&mut failure.controls);
         }
@@ -98,25 +98,25 @@ fn change_controls(ui: crate::Ui, f: impl FnOnce(&mut Recovery) -> bool) -> bool
     changed
 }
 
-fn controls(ui: crate::Ui) -> Option<Recovery> {
-    ui.chrome
+fn controls(chrome: crate::ChromeUi) -> Option<Recovery> {
+    chrome
         .store_startup_failure
         .with(|failure| failure.as_ref().map(|failure| failure.controls))
 }
 
-fn select_recovery(ui: crate::Ui, action: RecoveryAction) {
-    if change_controls(ui, |controls| controls.select(action)) {
+fn select_recovery(chrome: crate::ChromeUi, action: RecoveryAction) {
+    if change_controls(chrome, |controls| controls.select(action)) {
         crate::runtime::data::retry_startup(&crate::wiring::runtime_owner::runtime());
     }
 }
 
-pub(crate) fn store_failure_back(ui: crate::Ui) -> bool {
-    change_controls(ui, Recovery::back)
+pub(crate) fn store_failure_back(chrome: crate::ChromeUi) -> bool {
+    change_controls(chrome, Recovery::back)
 }
 
 /// Recovery is a root screen once its details have been closed.
-pub(crate) fn store_failure_back_leaves(ui: crate::Ui) -> bool {
-    controls(ui).is_some_and(|controls| !controls.details())
+pub(crate) fn store_failure_back_leaves(chrome: crate::ChromeUi) -> bool {
+    controls(chrome).is_some_and(|controls| !controls.details())
 }
 
 pub(crate) fn store_failure_key(ui: crate::Ui, action: iptv_nav::Action) {
@@ -125,14 +125,14 @@ pub(crate) fn store_failure_key(ui: crate::Ui, action: iptv_nav::Action) {
         Action::MoveUp | Action::MoveLeft => RecoveryAction::Retry,
         Action::MoveDown | Action::MoveRight => RecoveryAction::Details,
         Action::Select => {
-            if let Some(controls) = controls(ui) {
-                select_recovery(ui, controls.focus());
+            if let Some(controls) = controls(ui.chrome) {
+                select_recovery(ui.chrome, controls.focus());
             }
             return;
         }
         _ => return,
     };
-    if !change_controls(ui, |controls| controls.move_to(focus)) {
+    if !change_controls(ui.chrome, |controls| controls.move_to(focus)) {
         let distance = crate::chrome::scale::now() * 96.0;
         match action {
             Action::MoveUp => ui.chrome.store_failure_scroll.scroll_by(-distance),
@@ -149,8 +149,8 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
 
     let size = Scale::new();
     let scrolling = ui.chrome.store_failure_scroll;
-    let retry = move || controls(ui).map_or(Retry::Unavailable, Recovery::retry);
-    let expanded = move || controls(ui).is_some_and(Recovery::details);
+    let retry = move || controls(ui.chrome).map_or(Retry::Unavailable, Recovery::retry);
+    let expanded = move || controls(ui.chrome).is_some_and(Recovery::details);
     let newer = move || {
         ui.chrome.store_startup_failure.with(|failure| {
             failure
@@ -166,12 +166,12 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
         })
     };
     let focus_at = move |action| {
-        ui.keys_shown() && controls(ui).is_some_and(|controls| controls.focus() == action)
+        ui.keys_shown() && controls(ui.chrome).is_some_and(|controls| controls.focus() == action)
     };
     let retry_focused = move || focus_at(RecoveryAction::Retry);
     let details_focused = move || focus_at(RecoveryAction::Details);
     when(
-        move || controls(ui).is_some(),
+        move || controls(ui.chrome).is_some(),
         move || {
             let intro = setup_view::intro(
                 size,
@@ -214,7 +214,7 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
                                 ui, size,
                                 move || tr(if retry() == Retry::Checking { "Checking library…" } else { "Try again" }),
                                 retry_focused,
-                                move || select_recovery(ui, RecoveryAction::Retry),
+                                move || select_recovery(ui.chrome, RecoveryAction::Retry),
                             )
                             .test_id("store-recovery-retry")
                             .accessibility_state(move || AccessibilityState {
@@ -230,7 +230,7 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
                             ui, size,
                             move || tr(if expanded() { "Hide details" } else { "Show details" }),
                             details_focused,
-                            move || select_recovery(ui, RecoveryAction::Details),
+                            move || select_recovery(ui.chrome, RecoveryAction::Details),
                         )
                         .test_id("store-recovery-details-button")
                         .accessibility_state(move || AccessibilityState {

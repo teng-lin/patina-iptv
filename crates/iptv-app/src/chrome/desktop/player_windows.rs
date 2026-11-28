@@ -4,10 +4,9 @@ use crate::{Ui, chrome::i18n::tr};
 use iptv_presentation::playback_windows::SessionId;
 use nsh_core::prelude::*;
 
-pub fn mounted(ui: Ui, surface: usize) -> bool {
+pub fn mounted(playback: crate::PlaybackUi, surface: usize) -> bool {
     crate::host::PLAYER_POPUPS
-        && ui
-            .playback
+        && playback
             .player_windows
             .with(|w| w.on_surface(surface).is_some())
 }
@@ -15,7 +14,7 @@ pub fn mounted(ui: Ui, surface: usize) -> bool {
 pub fn can_open(ui: Ui, channel: usize) -> bool {
     if ui.playback.player_surface != 0
         || !crate::host::PLAYER_POPUPS
-        || crate::playback::multiview::session(ui)
+        || crate::playback::multiview::session(ui.playback)
     {
         return false;
     }
@@ -120,8 +119,8 @@ fn follow_lists(local: Ui) {
 /// it; moving the keyboard focus between windows never changes which
 /// (only Listen to this, its own Mute or volume, or the main player's
 /// sound controls do; `listen.rs`).
-pub fn audible(ui: Ui, id: SessionId) -> bool {
-    ui.playback.player_windows.with(|w| {
+pub fn audible(playback: crate::PlaybackUi, id: SessionId) -> bool {
+    playback.player_windows.with(|w| {
         w.audible() == Some(id) && w.sessions().iter().any(|s| s.id == id && !s.volume.muted)
     })
 }
@@ -172,7 +171,7 @@ pub fn bind(ui: Ui) {
 pub fn windows(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
     view().children((1..crate::playback::player::SURFACES).map(move |surface| {
         when(
-            move || mounted(ui, surface),
+            move || mounted(ui.playback, surface),
             move || player_window(ui, surface, back_action),
         )
     }))
@@ -207,7 +206,7 @@ fn player_window(ui: Ui, surface: usize, back_action: fn(Ui) -> bool) -> impl In
                 .unwrap_or_default();
             // Which window has the sound shows in its title, where the
             // taskbar and window switcher show it too (`docs/desktop.md`).
-            if audible(ui, id) {
+            if audible(ui.playback, id) {
                 channel
             } else {
                 crate::chrome::i18n::trf(
@@ -291,7 +290,7 @@ fn bind_pip(
         key_window.close();
     });
     effect(move || {
-        let compact = crate::playback::pip::in_window(local);
+        let compact = crate::playback::pip::in_window(local.playback);
         if was_compact.replace(compact) == compact {
             return;
         }
@@ -405,7 +404,7 @@ fn player_content(
         });
     });
     effect(move || {
-        let muted = !audible(parent, id);
+        let muted = !audible(parent.playback, id);
         untracked(|| {
             if local.playback.media.volume.with(|v| v.muted) != muted {
                 local.playback.media.volume.update(|v| v.muted = muted);
@@ -463,7 +462,7 @@ fn player_content(
         .on_mouse_enter(move |e: &MouseEvent| {
             let at = e.page_position;
             super::pointer_entered(surface, at.x.0, at.y.0);
-            if !crate::playback::pip::in_window(local)
+            if !crate::playback::pip::in_window(local.playback)
                 && !untracked(|| {
                     local
                         .overlay_open(crate::chrome::overlays::Overlay::keeps_pointer_from_play_bar)
@@ -474,7 +473,7 @@ fn player_content(
             }
         })
         .on_mouse_move(move |event: &MouseEvent| {
-            if !crate::playback::pip::in_window(local) {
+            if !crate::playback::pip::in_window(local.playback) {
                 crate::pointer_moved(local, event);
             }
         })
@@ -482,17 +481,17 @@ fn player_content(
             native(iptv_player_mpv::PIP_VIEW)
                 .prop("surface", move || serde_json::json!(surface))
                 .prop("compact", move || {
-                    serde_json::json!(crate::playback::pip::in_window(local))
+                    serde_json::json!(crate::playback::pip::in_window(local.playback))
                 })
                 .absolute()
                 .inset_0(),
         )
         .child(when(
-            move || crate::playback::pip::in_window(local),
+            move || crate::playback::pip::in_window(local.playback),
             move || super::pip_window::chrome(local),
         ))
         .child(when(
-            move || !crate::playback::pip::in_window(local),
+            move || !crate::playback::pip::in_window(local.playback),
             move || {
                 let window = window.clone();
                 view()
