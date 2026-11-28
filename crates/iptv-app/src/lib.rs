@@ -332,6 +332,8 @@ pub(crate) struct ChromeUi {
     /// (`input.rs`).
     pub back_guard: Signal<iptv_nav::BackGuard>,
     exit_deadline: Signal<Option<u64>>,
+    /// Side effects wired by `Ui::new` when any control is touched or clicked.
+    on_touch: Stored<Option<Rc<dyn Fn()>>>,
 }
 
 impl SharedUi {
@@ -352,10 +354,45 @@ impl SharedUi {
         }
     }
 
-    fn now_ms(&self) -> u64 {
+    /// Tracks the programs on screen: a new schedule or a day paged in.
+    /// The value changes with either.
+    pub fn guide_data(&self) -> u64 {
+        self.data_version.get() << 32 | (self.guide_pages.get() & 0xFFFF_FFFF)
+    }
+
+    /// Milliseconds since the app started, on the engine's clock (a
+    /// test's manual clock moves it with the timers).
+    pub fn now_ms(&self) -> u64 {
         nsh_core::time::now()
             .saturating_duration_since(self.epoch)
             .as_millis() as u64
+    }
+}
+
+impl ChromeUi {
+    pub(crate) fn keys_shown(&self) -> bool {
+        self.input.get().key_hints()
+    }
+
+    /// Visible ways back (`iptv_presentation::input_mode::InputMode::back_controls`):
+    /// always on tablets and desktops, including after a keyboard is used;
+    /// on TVs and terminals only once touch or a pointer is used.
+    pub(crate) fn back_controls(&self) -> bool {
+        let remote_back = matches!(
+            idiom(),
+            nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
+        );
+        self.input.get().back_controls(remote_back)
+    }
+
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
+    pub(crate) fn touched(&self) {
+        self.exit_deadline.set(None);
+        if let Some(hook) = self.on_touch.with(|slot| slot.clone()) {
+            hook();
+        }
+        self.input.set(self.last_press.get_untracked());
     }
 }
 
@@ -467,8 +504,20 @@ impl Ui {
                 store_failure_scroll: ui_kit::FocusScroll::new(),
                 back_guard: signal(iptv_nav::BackGuard::default()),
                 exit_deadline: signal(None),
+                on_touch: stored(None),
             },
         };
+        ui.chrome.on_touch.with(|slot| {
+            *slot = Some(Rc::new(move || {
+                // PIN entry continues the choice that opened the prompt. Dismissing
+                // the prompt cancels it in `parental_view::abort`.
+                if ui.top_overlay() != Some(overlays::Overlay::Parental) {
+                    external_player::cancel_pending(ui);
+                }
+                ui.playback.pending_zap.set(None);
+                browse_playback::activity(ui);
+            }));
+        });
         player_panels::bind_auto_hide(app, ui.playback);
         ui
     }
@@ -478,11 +527,17 @@ impl Ui {
     /// Tracks the programs on screen: a new schedule or a day paged in.
     /// The value changes with either.
     pub fn guide_data(&self) -> u64 {
-        self.app.data_version.get() << 32 | (self.app.guide_pages.get() & 0xFFFF_FFFF)
+        self.app.guide_data()
     }
 
     pub fn keys_shown(&self) -> bool {
-        self.chrome.input.get().key_hints()
+        self.chrome.keys_shown()
+    }
+
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
+    pub fn touched(&self) {
+        self.chrome.touched();
     }
 
     /// Whether lists are edited by dragging with visible Save and Cancel
@@ -500,11 +555,7 @@ impl Ui {
     /// always on tablets and desktops, including after a keyboard is used;
     /// on TVs and terminals only once touch or a pointer is used.
     pub fn back_controls(&self) -> bool {
-        let remote_back = matches!(
-            idiom(),
-            nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
-        );
-        self.chrome.input.get().back_controls(remote_back)
+        self.chrome.back_controls()
     }
 
     /// A foreground UI surface color. In guide mode the opaque colors are
