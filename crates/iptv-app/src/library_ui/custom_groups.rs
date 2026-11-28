@@ -1,14 +1,14 @@
 //! Custom groups and filtered bulk membership editing. Provider membership
 //! remains imported data; moves are offered only between custom groups.
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input_kit::dismiss_keyboard;
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
 
 use crate::runtime::Error;
 use crate::{
     Ui,
-    chrome::scale::Scale,
-    chrome::ui_kit,
-    chrome::ui_kit::entry::{self, Sheet},
+    kit::scale::Scale,
+    kit::ui_kit,
+    kit::ui_kit::entry::{self, Sheet},
     wiring::data,
 };
 use iptv_library::{ChannelScope, SourceId};
@@ -512,7 +512,7 @@ fn entry_sheet(ui: Ui) -> impl IntoElement {
     )
 }
 /// Under the screen's title: what copying and moving do.
-const CAPTION: &str = crate::chrome::i18n::key(
+const CAPTION: &str = crate::kit::i18n::key(
     "Copy adds membership. Move transfers between custom groups. \
      Channels and provider groups are retained.",
 );
@@ -637,7 +637,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui_kit::screen(ui, size)
                 .test_id("custom-groups-screen")
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlay::Overlay::CustomGroups.accessibility_covered(ui)
+                    crate::kit::overlay::Overlay::CustomGroups.accessibility_covered(ui)
                 })
                 .child(
                     ui_kit::header(ui, size, tr("Custom groups"), |ui| close(ui.screens))
@@ -664,9 +664,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     )
                     .element_ref(&controls)
                     .accessibility_elements_hidden(move || contents_hidden(ui.screens))
-                    .estimated_item_size(crate::guide::list_rows::pitch(
+                    .estimated_item_size(crate::kit::list_rows::pitch(
                         size,
-                        crate::guide::list_rows::ROW,
+                        crate::kit::list_rows::ROW,
                     ))
                     .h(move || {
                         size.px(if on_members_page(ui.screens) {
@@ -685,9 +685,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         )
                         .element_ref(&members)
                         .accessibility_elements_hidden(move || contents_hidden(ui.screens))
-                        .estimated_item_size(crate::guide::list_rows::pitch(
+                        .estimated_item_size(crate::kit::list_rows::pitch(
                             size,
-                            crate::guide::list_rows::ROW,
+                            crate::kit::list_rows::ROW,
                         ))
                         .flex_1()
                     },

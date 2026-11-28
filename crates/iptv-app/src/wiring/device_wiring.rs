@@ -82,7 +82,7 @@ fn offered_rows(device: iptv_presentation::capabilities::Device) -> String {
 /// The signals in words: `tablet medium keyboard dpad` (a headless probe).
 #[cfg(any(test, feature = "test-support"))]
 fn describe(device: iptv_presentation::capabilities::Device) -> String {
-    use crate::chrome::layout::Class;
+    use crate::kit::layout::Class;
 
     let window = match device.window {
         Class::Compact => "compact",
@@ -103,7 +103,7 @@ fn describe(device: iptv_presentation::capabilities::Device) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chrome::layout::Class;
+    use crate::kit::layout::Class;
     use iptv_core::capabilities::{FormFactor, Host, Input, Platform};
     use iptv_presentation::capabilities::Device;
 

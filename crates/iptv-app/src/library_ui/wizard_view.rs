@@ -9,7 +9,7 @@
 //! Entry points: first run without a stored source, the top bar's "Add
 //! playlist" (tap), and Menu in the groups pane (remote).
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 
 mod entry;
 pub(crate) mod words;
@@ -22,10 +22,10 @@ use iptv_presentation::wizard::{
 use nsh_core::picker::FilePickRequest;
 use nsh_core::prelude::*;
 
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::icons::{self, Icon};
-use crate::chrome::ui_kit::{self, ERROR};
-use crate::guide::list_rows::Mark;
+use crate::kit::list_rows::Mark;
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::icons::{self, Icon};
+use crate::kit::ui_kit::{self, ERROR};
 use crate::library_ui::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::wiring::data::{self, Job, Purpose, Update};
@@ -63,7 +63,7 @@ fn imports_unavailable() -> bool {
     if crate::host::IMPORTS {
         return false;
     }
-    crate::chrome::toast::notify(crate::chrome::i18n::tr(
+    crate::kit::toast::notify(crate::kit::i18n::tr(
         "This device cannot import playlists yet.",
     ));
     true
@@ -195,7 +195,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
         WizardEffect::StartImport { draft } => {
             let runtime = crate::wiring::runtime_owner::runtime();
             let fallback =
-                iptv_presentation::i18n::translate(crate::chrome::i18n::language(), "Playlist");
+                iptv_presentation::i18n::translate(crate::kit::i18n::language(), "Playlist");
             let (source, epg_url) = data::source_from_draft(&draft, fallback);
             let source_kind = source.kind();
             let job = Job {
@@ -333,7 +333,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .test_id("wizard-layer")
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
                 .accessibility_elements_hidden(move || {
-                    crate::chrome::overlay::Overlay::Wizard.accessibility_covered(ui)
+                    crate::kit::overlay::Overlay::Wizard.accessibility_covered(ui)
                 })
                 .child(dynamic(move || {
                     let shown = screen.get();
@@ -424,7 +424,7 @@ fn choice(
                     .gap(move || size.px(4.0))
                     .child(
                         ui_kit::body(size, title)
-                            .font_weight(crate::chrome::fonts::MEDIUM)
+                            .font_weight(crate::kit::fonts::MEDIUM)
                             .text_color(move || mark().text()),
                     )
                     .child(ui_kit::caption(size, detail).text_color(move || mark().secondary())),

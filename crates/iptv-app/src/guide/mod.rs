@@ -6,7 +6,6 @@ pub(crate) mod favorites;
 pub(crate) mod grid;
 pub(crate) mod guide_clock;
 pub(crate) mod header;
-pub(crate) mod list_rows;
 pub(crate) mod listing_labels;
 pub(crate) mod lists;
 pub(crate) mod numbers;

@@ -20,7 +20,7 @@
 //! it (Super+W, Alt+F4) closes it, as its ✕ does. Meanwhile the main
 //! window shows [`placeholder`] where the video was.
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -35,7 +35,7 @@ use nsh_core::geometry::point;
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::chrome::ui_kit::icons::{self, Icon};
+use crate::kit::ui_kit::icons::{self, Icon};
 use crate::tint;
 
 /// The window's video view, a native component of the desktop players
@@ -342,7 +342,7 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
         move || crate::playback::pip::in_window(ui.playback),
         move || {
             let rect = move || crate::playback::video::layout_rect(ui, 0);
-            let size = crate::chrome::scale::Scale::new();
+            let size = crate::kit::scale::Scale::new();
             view()
                 .test_id("pip-placeholder")
                 .accessibility_elements_hidden(move || ui.any_overlay_open())
@@ -360,12 +360,12 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
                         .size(px(32.0))
                         .text_color(tint(WHITE, 0xB0)),
                 )
-                .child(crate::chrome::ui_kit::caption(
+                .child(crate::kit::ui_kit::caption(
                     size,
                     tr("Playing in picture-in-picture"),
                 ))
                 .child(
-                    crate::chrome::ui_kit::button(
+                    crate::kit::ui_kit::button(
                         ui,
                         size,
                         tr("Back to the app"),

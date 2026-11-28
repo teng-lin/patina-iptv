@@ -4,15 +4,15 @@
 //! the guide's light focus pill. Left from the groups lands on Search. The icons
 //! are our own simple line drawings.
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 
 use iptv_presentation::browse::RailItem;
 use iptv_presentation::guide::Pane;
 use nsh_core::element::ImageSrc;
 use nsh_core::prelude::*;
 
-use crate::chrome::fonts::LIST_ITEM;
-use crate::chrome::scale::Scale;
+use crate::kit::fonts::LIST_ITEM;
+use crate::kit::scale::Scale;
 use crate::theme::{FOCUSED_CELL, FOCUSED_TEXT, RADIUS, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, tint};
 
@@ -49,7 +49,7 @@ pub fn width(guide: crate::GuideUi) -> f32 {
     match guide.focus.with(|f| f.layout_pane()) {
         Pane::Guide | Pane::Preview => 0.0,
         Pane::Groups => RAIL_W,
-        Pane::Rail => RAIL_W + (RAIL_OPEN_W - RAIL_W) * crate::chrome::scale::now(),
+        Pane::Rail => RAIL_W + (RAIL_OPEN_W - RAIL_W) * crate::kit::scale::now(),
     }
 }
 
@@ -172,7 +172,7 @@ fn item_view(ui: Ui, size: Scale, item: RailItem) -> impl IntoElement {
                 .flex_1()
                 .number_of_lines(1)
                 .text_overflow(nsh_core::EllipsizeMode::Tail)
-                .font_family(crate::chrome::fonts::SANS)
+                .font_family(crate::kit::fonts::SANS)
                 .accessibility_elements_hidden(move || !open())
                 .opacity(move || if open() { 1.0_f32 } else { 0.0 })
                 .text_size(move || {
@@ -246,7 +246,7 @@ mod tests {
             (480.0, 300.0, 1.3),
             (960.0, 200.0, 1.0),
         ] {
-            let header = crate::chrome::layout::GuideHeader::of(w, h, 0.8, font).height;
+            let header = crate::kit::layout::GuideHeader::of(w, h, 0.8, font).height;
             let item = item_height_for((h - header - 16.0).max(0.0), 8);
             assert!(item > 0.0, "{w}x{h} at {font}: header {header}");
         }

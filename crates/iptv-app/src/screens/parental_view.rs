@@ -1,10 +1,10 @@
 //! Parental modal: the core owns PIN entry and transitions; the runtime owns
 //! credentials and access. Callbacks run only after the authoritative gate.
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input_kit::dismiss_keyboard;
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
 use crate::runtime::Runtime;
 use crate::wiring::navigation::request;
-use crate::{Ui, chrome::scale::Scale, chrome::ui_kit, tint};
+use crate::{Ui, kit::scale::Scale, kit::ui_kit, tint};
 use iptv_core::parental::{ContentKind, Target};
 use iptv_nav::{Action, RemoteKey};
 use iptv_presentation::parental::{Phase, PromptState, Submission};
@@ -184,7 +184,7 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
                     {
                         ui.play(channel, playback);
                     } else {
-                        crate::chrome::toast::notify(tr(
+                        crate::kit::toast::notify(tr(
                             "Guide time changed. Choose the program again.",
                         ));
                     }
@@ -609,7 +609,7 @@ fn display_target(target: &Target) -> String {
     trf("Unblock {name}", &[("name", name.as_str().into())])
 }
 fn notify_message(message: &str) {
-    crate::chrome::toast::notify(tr(message));
+    crate::kit::toast::notify(tr(message));
 }
 fn focused(screens: crate::ScreensUi, index: usize) -> bool {
     screens
@@ -662,7 +662,7 @@ fn manager(ui: Ui, size: Scale) -> View {
                         .and_then(|o| o.state.blocks.as_ref())
                         .and_then(|blocks| blocks.get(at.index()))
                         .map_or_else(
-                            || crate::chrome::i18n::tr("Lock now").to_owned(),
+                            || crate::kit::i18n::tr("Lock now").to_owned(),
                             display_target,
                         )
                 })
@@ -698,9 +698,9 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
             let index = row * 3 + column;
             let text = match index {
                 0..=8 => (index + 1).to_string(),
-                9 => crate::chrome::i18n::tr("Delete").into(),
+                9 => crate::kit::i18n::tr("Delete").into(),
                 10 => "0".into(),
-                _ => crate::chrome::i18n::tr("Continue").into(),
+                _ => crate::kit::i18n::tr("Continue").into(),
             };
             cells = cells.child(
                 ui_kit::button(
@@ -728,7 +728,7 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
             ui_kit::button(
                 ui,
                 size,
-                crate::chrome::i18n::tr("Forgot PIN?"),
+                crate::kit::i18n::tr("Forgot PIN?"),
                 move || focused(ui.screens, 12),
                 move || activate(ui, 12),
             )
@@ -738,7 +738,7 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     )
 }
 fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
-    use crate::chrome::i18n::tr;
+    use crate::kit::i18n::tr;
     let recovery = recovery_input(ui.screens).unwrap_or_else(element_ref);
     view().gap(px(8.0))
         .child(ui_kit::body(size,move||ui.screens.parental.with(|o|o.as_ref()
@@ -812,7 +812,7 @@ pub fn layer(ui: Ui) -> View {
                     .bg(move || tint(ui.app.theme.with(|t| t.background.panel), 255))
                     .child(ui_kit::heading(size, move || {
                         let title = label(ui.screens);
-                        crate::chrome::i18n::tr(&title).to_owned()
+                        crate::kit::i18n::tr(&title).to_owned()
                     }))
                     .child(when(
                         move || managing(ui.screens),
@@ -832,7 +832,7 @@ pub fn layer(ui: Ui) -> View {
                         ui_kit::button(
                             ui,
                             size,
-                            crate::chrome::i18n::tr("Cancel"),
+                            crate::kit::i18n::tr("Cancel"),
                             move || cancel_focused(ui.screens),
                             move || close(ui),
                         )

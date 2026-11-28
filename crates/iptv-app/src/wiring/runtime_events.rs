@@ -19,7 +19,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 });
             }
         }
-        RuntimeEvent::SchedulePresented(steps) => crate::chrome::startup::shown(&steps),
+        RuntimeEvent::SchedulePresented(steps) => crate::kit::startup::shown(&steps),
         RuntimeEvent::CatalogChanged => {
             ui.app.data_version.update(|version| *version += 1);
             crate::wiring::tasks::spawn_in_app(async move {
@@ -35,7 +35,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 let _ = done.send(());
             })
         }
-        RuntimeEvent::Message(message) => crate::chrome::toast::notify(&message),
+        RuntimeEvent::Message(message) => crate::kit::toast::notify(&message),
         RuntimeEvent::SettingsSaveFailed(failure) => {
             crate::screens::settings_view::save_failed(failure)
         }
@@ -92,16 +92,14 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             ui.chrome.store_startup_failure.set(None);
         }),
         RuntimeEvent::StoreStartupFailed { path, error } => {
-            crate::chrome::startup_view::store_failed(ui, path, error)
+            crate::shell::startup_view::store_failed(ui, path, error)
         }
-        RuntimeEvent::Notify(message) => {
-            crate::chrome::toast::notify(crate::chrome::i18n::tr(message))
-        }
+        RuntimeEvent::Notify(message) => crate::kit::toast::notify(crate::kit::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
             if ui.playback.playing.get_untracked().is_some() {
                 ui.chrome
                     .mode
-                    .apply(crate::chrome::mode::Action::EnterFullscreen);
+                    .apply(crate::kit::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
         }
@@ -126,7 +124,7 @@ fn schedule_changed(
     batch(|| {
         let kept = crate::guide::lists::keep_in(ui, previous.clone());
         crate::playback::player::stop_archive_after_clock_edit(ui, &*previous, &*current);
-        crate::chrome::menu_view::invalidate_shifted_context(ui, &*previous, &*current);
+        crate::shell::menu_view::invalidate_shifted_context(ui, &*previous, &*current);
         if let ScheduleCause::Catalog { has_vod, any_vod } = cause {
             crate::guide::clock::mark_shown();
             if ui
@@ -148,7 +146,7 @@ fn schedule_changed(
             if clamped != rows {
                 ui.guide.visible_rows.set(clamped);
             }
-            crate::chrome::menu_view::catalog_changed(ui.screens);
+            crate::shell::menu_view::catalog_changed(ui.screens);
             ui.screens.description.set(None);
             ui.screens.editor.set(None);
             ui.app.data_version.update(|version| *version += 1);

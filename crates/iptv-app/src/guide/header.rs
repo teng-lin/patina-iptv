@@ -3,19 +3,17 @@
 //! the focused channel and its source, then the program's title, timing
 //! and description.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use iptv_core::guide::Schedule;
 use std::time::Duration;
 
 use nsh_core::prelude::*;
 
-use crate::chrome::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE, MEDIUM, SANS};
-use crate::chrome::layout::{
-    COLUMN_GAP, DETAILS_GAP, MAX_TIMES_LINES, TIMES_GAP, TIMES_PROGRESS_W,
-};
-use crate::chrome::scale::Scale;
 use crate::guide::{Airing, Pane, Program};
+use crate::kit::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE, MEDIUM, SANS};
+use crate::kit::layout::{COLUMN_GAP, DETAILS_GAP, MAX_TIMES_LINES, TIMES_GAP, TIMES_PROGRESS_W};
+use crate::kit::scale::Scale;
 use crate::playback::panels::{PREVIEW_MARGIN, PREVIEW_RADIUS, header_now};
 use crate::theme::{BRIGHT_TEXT, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, clock, tint};
@@ -100,7 +98,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
             if !idle() {
                 ui.chrome
                     .mode
-                    .apply(crate::chrome::mode::Action::EnterFullscreen);
+                    .apply(crate::kit::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
         })
@@ -501,7 +499,7 @@ fn corner_back_shown(ui: Ui) -> bool {
 /// preview, kept inside a preview `preview_w` wide.
 fn corner_back_left(inset: f32, preview_w: f32) -> f32 {
     let wanted = 20.0 + (inset - PREVIEW_MARGIN).max(0.0);
-    let last = PREVIEW_MARGIN + preview_w - crate::chrome::ui_kit::TOUCH;
+    let last = PREVIEW_MARGIN + preview_w - crate::kit::ui_kit::TOUCH;
     wanted.min(last.max(PREVIEW_MARGIN))
 }
 
@@ -521,8 +519,8 @@ fn corner_back(ui: Ui) -> impl IntoElement {
         // preview's right edge.
         .left(move || px(corner_back_left(safe_area().left.0, header_now().1)))
         .top(px(16.0))
-        .child(crate::chrome::ui_kit::round_back(
-            crate::chrome::ui_kit::TOUCH,
+        .child(crate::kit::ui_kit::round_back(
+            crate::kit::ui_kit::TOUCH,
             0.0,
             crate::playback::play_bar::back_bg(ui),
             move || {
@@ -541,7 +539,7 @@ fn corner_back(ui: Ui) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use super::overlay_wanted;
+    use crate::kit::overlay_wanted;
 
     #[test]
     fn the_corner_back_clears_a_leading_inset_inside_the_preview() {

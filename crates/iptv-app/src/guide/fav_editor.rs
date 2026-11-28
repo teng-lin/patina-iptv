@@ -4,7 +4,7 @@
 //! "Remove all" asks for confirmation with Cancel focused. Changes are saved
 //! by channel key (`favorites.rs`) at once.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use iptv_presentation::editor::FavoritesEditor;
 use iptv_presentation::lists::{ChannelList, ListId};
@@ -12,9 +12,9 @@ use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::chrome::fonts::{CAPTION, LIST_ITEM, SANS, TITLE};
-use crate::chrome::scale::Scale;
-use crate::guide::list_rows::{self, Mark, ROW};
+use crate::kit::fonts::{CAPTION, LIST_ITEM, SANS, TITLE};
+use crate::kit::list_rows::{self, Mark, ROW};
+use crate::kit::scale::Scale;
 use crate::theme::LIST_TEXT;
 
 /// Opens the editor on the list that owns the action, at its selected channel.
@@ -177,7 +177,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         })
     };
     let button = move |label: &'static str, control: usize, act: fn(Ui)| {
-        crate::chrome::ui_kit::button(
+        crate::kit::ui_kit::button(
             ui,
             size,
             move || tr(label),
@@ -265,7 +265,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .test_id("favorites-editor")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::FavoritesEditor.accessibility_hidden(ui)
+            crate::kit::overlay::Overlay::FavoritesEditor.accessibility_hidden(ui)
         })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
@@ -337,18 +337,18 @@ fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                 .with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some()))
         },
         move || {
-            let (outer, card) = crate::chrome::ui_kit::entry::frame(ui, size);
+            let (outer, card) = crate::kit::ui_kit::entry::frame(ui, size);
             outer
                 .on_press(|| {})
                 .test_id("favorites-clear-confirmation")
                 .child(
-                    card.child(crate::chrome::ui_kit::title(size, move || {
+                    card.child(crate::kit::ui_kit::title(size, move || {
                         tr("Remove all favorites in this list?")
                     }))
-                    .child(crate::chrome::ui_kit::body(size, move || {
+                    .child(crate::kit::ui_kit::body(size, move || {
                         tr("Only channels in this list will be removed from favorites.")
                     }))
-                    .child(crate::chrome::ui_kit::button(
+                    .child(crate::kit::ui_kit::button(
                         ui,
                         size,
                         move || tr("Cancel"),
@@ -360,7 +360,7 @@ fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                         },
                         move || resolve_clear(ui, false),
                     ))
-                    .child(crate::chrome::ui_kit::button(
+                    .child(crate::kit::ui_kit::button(
                         ui,
                         size,
                         move || tr("Remove all"),

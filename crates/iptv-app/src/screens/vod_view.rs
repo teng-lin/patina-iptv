@@ -3,9 +3,9 @@
 //! state, details and playback; only their list is read differently.
 use crate::{
     Ui,
-    chrome::i18n::{tr, trf},
-    chrome::scale::Scale,
-    chrome::ui_kit,
+    kit::i18n::{tr, trf},
+    kit::scale::Scale,
+    kit::ui_kit,
     runtime::Runtime,
 };
 use iptv_core::vod::{Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Progress, Shelf, Sort};
@@ -114,7 +114,7 @@ pub fn return_from_player(ui: Ui) -> bool {
         .update(|s| s.return_from_player(details, &played, saved));
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::ReturnToBrowse);
+        .apply(crate::kit::mode::Action::ReturnToBrowse);
     true
 }
 
@@ -249,7 +249,7 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
                 }
                 // The focused title is kept: Retry looks for it again.
                 Err(_) => s.fail(
-                    crate::chrome::i18n::key("On-demand library could not be loaded"),
+                    crate::kit::i18n::key("On-demand library could not be loaded"),
                     if append {
                         Operation::More { offset }
                     } else if through > 0 {
@@ -289,7 +289,7 @@ fn load_previous(ui: Ui, step_up: bool) {
             match result {
                 Ok(page) => s.finish_previous(generation, start, page, step_up),
                 Err(_) => s.fail(
-                    crate::chrome::i18n::key("On-demand library could not be loaded"),
+                    crate::kit::i18n::key("On-demand library could not be loaded"),
                     Operation::Previous { start, step_up },
                 ),
             }
@@ -372,7 +372,7 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
                     ui.screens.vod.update(|s| {
                         s.reject_replaced_playlist(
                             generation,
-                            crate::chrome::i18n::key(
+                            crate::kit::i18n::key(
                                 "Playback unavailable; refresh the playlist and try again",
                             ),
                         );
@@ -390,13 +390,13 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
                         details,
                         &key,
                         &incarnation,
-                        crate::chrome::i18n::key(
+                        crate::kit::i18n::key(
                             "Playback unavailable; refresh the playlist and try again",
                         ),
                     ),
                     Err(_) => {
                         s.fail(
-                            crate::chrome::i18n::key(
+                            crate::kit::i18n::key(
                                 "Playback unavailable; refresh the playlist and try again",
                             ),
                             Operation::Play {
@@ -449,7 +449,7 @@ fn select_authorized(ui: Ui, key: Key) {
             match result {
                 Ok(details) => s.show_details(details),
                 Err(_) => s.fail(
-                    crate::chrome::i18n::key(
+                    crate::kit::i18n::key(
                         "Details unavailable; refresh the playlist and try again",
                     ),
                     Operation::Details(key),
@@ -563,7 +563,7 @@ fn play_authorized(
                     // Once a recording stops, Retry resolves a new link.
                     ui.screens.vod.update(|s| {
                         s.fail(
-                            crate::chrome::i18n::key(
+                            crate::kit::i18n::key(
                                 "No provider connection available while recording; stop a recording or check Streams at once",
                             ),
                             failed,
@@ -584,7 +584,7 @@ fn play_authorized(
             Err(_) => {
                 ui.screens.vod.update(|s| {
                     s.fail(
-                        crate::chrome::i18n::key(
+                        crate::kit::i18n::key(
                             "Playback unavailable; refresh the playlist and try again",
                         ),
                         failed,
@@ -892,7 +892,7 @@ enum Watched {
 }
 
 fn where_watched(ui: Ui, series: &Key) -> Watched {
-    use crate::chrome::overlay::Overlay;
+    use crate::kit::overlay::Overlay;
     let details = ui.top_overlay() == Some(Overlay::Vod)
         && ui
             .screens
@@ -913,7 +913,7 @@ fn where_watched(ui: Ui, series: &Key) -> Watched {
 /// choose the next episode `key` of `season`; `ready` says it waits for
 /// Play.
 fn select_next(ui: Ui, details: Details, key: &Key, season: u32, ready: bool) {
-    let notice = ready.then(|| crate::chrome::i18n::key("Ready for the next episode"));
+    let notice = ready.then(|| crate::kit::i18n::key("Ready for the next episode"));
     ui.screens
         .vod
         .update(|s| s.select_next_episode(details, key.clone(), season, notice));
@@ -929,7 +929,7 @@ fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u
                 details,
                 key,
                 season,
-                crate::chrome::i18n::key("Ready for the next episode"),
+                crate::kit::i18n::key("Ready for the next episode"),
             );
         }),
         Watched::Details => {
@@ -1441,7 +1441,7 @@ fn detail_screen(ui: Ui, size: Scale) -> View {
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::Vod.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Vod.accessibility_covered(ui)
         })
         .child(details(ui, size))
         .child(
@@ -1530,7 +1530,7 @@ fn library_screen(ui: Ui, size: Scale) -> View {
     ui_kit::screen(ui, size)
         .test_id("vod-screen")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::Vod.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Vod.accessibility_covered(ui)
         })
         .child(header)
         .child(hint)

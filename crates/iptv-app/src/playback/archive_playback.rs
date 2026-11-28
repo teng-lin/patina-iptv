@@ -206,7 +206,7 @@ pub(crate) fn select(
         {
             ui.chrome
                 .mode
-                .apply(crate::chrome::mode::Action::EnterFullscreen);
+                .apply(crate::kit::mode::Action::EnterFullscreen);
             ui.show_playing();
             if let Some(list) = missing_handler {
                 crate::playback::external_player::missing_handler(ui.screens, list);

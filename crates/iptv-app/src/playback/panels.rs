@@ -2,14 +2,14 @@
 //! layer, the groups column (shown with the rail while either has the
 //! focus) and the geometry of the header (`header.rs`) and its preview.
 
-use crate::chrome::layout::GuideHeader;
 use crate::guide::lists;
+use crate::kit::layout::GuideHeader;
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::chrome::scale::Scale;
 use crate::guide::Pane;
-use crate::guide::list_rows::{self, Mark, ROW};
+use crate::kit::list_rows::{self, Mark, ROW};
+use crate::kit::scale::Scale;
 
 /// The groups column's width at full size (scaled with the guide).
 pub const GROUPS_W: f32 = 260.0;
@@ -17,14 +17,14 @@ pub const GROUPS_W: f32 = 260.0;
 /// The groups column's width now (0 while the guide has the focus).
 pub fn groups_width(ui: crate::GuideUi) -> f32 {
     if crate::guide::lists::columns_shown(ui) {
-        (GROUPS_W * crate::chrome::scale::now()).round()
+        (GROUPS_W * crate::kit::scale::now()).round()
     } else {
         0.0
     }
 }
 /// The preview's margin and corner radius (dp); its geometry and the
-/// header's come from `crate::chrome::layout::GuideHeader`.
-pub use crate::chrome::layout::PREVIEW_MARGIN;
+/// header's come from `crate::kit::layout::GuideHeader`.
+pub use crate::kit::layout::PREVIEW_MARGIN;
 pub const PREVIEW_RADIUS: f32 = 10.0;
 
 /// The header in the window now (reactive): the guide's scale and the
@@ -34,7 +34,7 @@ pub fn guide_header_now() -> GuideHeader {
     GuideHeader::of(
         w.width.0,
         w.height.0,
-        crate::chrome::scale::now(),
+        crate::kit::scale::now(),
         crate::wiring::settings::text_factor(),
     )
 }

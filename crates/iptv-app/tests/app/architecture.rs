@@ -9,7 +9,7 @@ const UI_TOP_LEVEL_FIELDS: usize = 7;
 #[test]
 fn ui_only_holds_domain_handles() {
     let (root, _) = app_sources();
-    let source = code(&root.join("lib.rs"));
+    let source = code(&root.join("ui.rs"));
     let (_, definition) = source.split_once("pub struct Ui {").expect("Ui definition");
     let (fields, _) = definition.split_once("\n}").expect("end of Ui definition");
     let fields: BTreeSet<_> = fields
@@ -54,9 +54,9 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/backup_documents.rs", "PROBE"),          // Android document picker probe request.
     ("library_ui/backup.rs", "PICKERS"),            // The document pickers the host reported.
     ("library_ui/backup.rs", "PICKERS_FOR_TEST"),   // Synthetic picker injection (headless tests).
-    ("chrome/content_image.rs", "CACHE"),           // Artwork cache.
-    ("chrome/content_image.rs", "PERMITS"),         // Artwork concurrency limit.
-    ("chrome/content_image.rs", "CLIENT"),          // Artwork transport cache.
+    ("kit/content_image.rs", "CACHE"),              // Artwork cache.
+    ("kit/content_image.rs", "PERMITS"),            // Artwork concurrency limit.
+    ("kit/content_image.rs", "CLIENT"),             // Artwork transport cache.
     ("host/native/credential_key.rs", "TEST_KEY"),  // Synthetic test key injection.
     ("host/updates/android.rs", "HOST"),            // Direct APK installer JNI class handle.
     ("host/native/external_player.rs", "HOST"),     // Android chooser JNI class handle.
@@ -64,26 +64,26 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
     ("wiring/tasks.rs", "APP_OWNER"),               // UI root owner for detached local tasks.
-    ("chrome/desktop.rs", "WINDOW"),                // Native window handle.
-    ("chrome/desktop.rs", "POINTER"),               // Pointer position within the window.
-    ("chrome/desktop.rs", "LAST_MOVE"),             // Pointer gesture clock.
-    ("chrome/desktop.rs", "TRAVELED"),              // Last pointer place, for Keys to Pointer.
-    ("chrome/desktop.rs", "QUITTING"),              // Stop and quit in progress (no second ask).
+    ("shell/desktop.rs", "WINDOW"),                 // Native window handle.
+    ("shell/desktop.rs", "POINTER"),                // Pointer position within the window.
+    ("shell/desktop.rs", "LAST_MOVE"),              // Pointer gesture clock.
+    ("shell/desktop.rs", "TRAVELED"),               // Last pointer place, for Keys to Pointer.
+    ("shell/desktop.rs", "QUITTING"),               // Stop and quit in progress (no second ask).
     ("wiring/device.rs", "REPORTED"),               // Reactive handle of the host's device report.
     ("wiring/device.rs", "ACCESSIBILITY"), // Reactive handle of the host's accessibility report.
-    ("chrome/fonts.rs", "FITTED"),         // Font measurement cache.
-    ("chrome/fonts.rs", "FONTS_IN"),       // Font registration flag.
+    ("kit/fonts.rs", "FITTED"),            // Font measurement cache.
+    ("kit/fonts.rs", "FONTS_IN"),          // Font registration flag.
     ("guide/header.rs", "ON"),             // Debug overlay environment flag cache.
-    ("chrome/i18n.rs", "SYSTEM"),          // System locale cache.
-    ("chrome/i18n.rs", "WORDING_SETTINGS"), // cfg(test)-only scoped wording preferences.
-    ("chrome/i18n/pseudo.rs", "ENABLED"),  // test-support-only pseudolocale environment flag.
-    ("chrome/i18n/pseudo.rs", "FIXED"),    // test-support-only immutable expanded catalog.
-    ("chrome/input_kit.rs", "REMOTE_PHASES"), // test-support-only remote key phase switch.
-    ("chrome/input.rs", "REPEATS"),        // test-support-only keyboard repeat mirror.
+    ("kit/i18n.rs", "SYSTEM"),             // System locale cache.
+    ("kit/i18n.rs", "WORDING_SETTINGS"),   // cfg(test)-only scoped wording preferences.
+    ("kit/i18n/pseudo.rs", "ENABLED"),     // test-support-only pseudolocale environment flag.
+    ("kit/i18n/pseudo.rs", "FIXED"),       // test-support-only immutable expanded catalog.
+    ("kit/input.rs", "REMOTE_PHASES"),     // test-support-only remote key phase switch.
+    ("shell/input.rs", "REPEATS"),         // test-support-only keyboard repeat mirror.
     ("wiring/runtime_owner.rs", "RUNTIME"), // The shell's single application handle.
     ("wiring/runtime_owner.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
     ("host.rs", "TUI_MODE"), // Host flag: TUI backend bypasses StickyCells trackball wrapper.
-    ("lib.rs", "LEAVE"),     // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
+    ("shell/back.rs", "LEAVE"), // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
     ("guide/lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
@@ -97,10 +97,10 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("playback/pip.rs", "PIP_SUPPORTED"), // The host's picture-in-picture report, for the settings offer.
     ("screens/settings_view.rs", "PAGES"), // Immutable screen definitions.
     ("screens/settings_view.rs", "LAST"), // Last selected settings tab.
-    ("chrome/toast.rs", "NOTICE"),        // Toast signal handle.
+    ("kit/toast.rs", "NOTICE"),           // Toast signal handle.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
-    ("chrome/startup.rs", "MARKED"),                           // Startup phase instrumentation.
-    ("chrome/startup.rs", "FALLBACK"),                         // Startup clock instrumentation.
+    ("kit/startup.rs", "MARKED"),                              // Startup phase instrumentation.
+    ("kit/startup.rs", "FALLBACK"),                            // Startup clock instrumentation.
     ("guide/clock.rs", "SHOWN"),                               // Visible guide clock origin.
     ("playback/video.rs", "OPENS"), // Native player open instrumentation.
     ("playback/video.rs", "SOURCED"), // Native player source projection.
@@ -332,12 +332,13 @@ fn declarations_include_macro_and_local_statics_but_not_lifetimes() {
     assert!(statics("unsafe extern \"C\" { static HOST_NAME: &str; }").is_empty());
     assert!(statics("fn f() -> &'static str { x } struct A(&'static [u8]);").is_empty());
 }
-const VIEW_TREES: [&str; 6] = [
-    "chrome",
+const VIEW_TREES: [&str; 7] = [
     "guide",
+    "kit",
     "library_ui",
     "playback",
     "screens",
+    "shell",
     "wiring",
 ];
 const TREE_SEAMS: [&str; 2] = ["screens", "library_ui"];
@@ -652,7 +653,7 @@ fn grouped_and_aliased_paths_expose_their_dependencies() {
 const IMPORT_VALUES_OUTSIDE_HOST: &[&str] = &["CancelToken"];
 
 /// Known intentional exception: artwork downloads use `Network::client` directly.
-const IMPORT_FETCH_EXCEPTIONS: &[&str] = &["chrome/content_image.rs"];
+const IMPORT_FETCH_EXCEPTIONS: &[&str] = &["kit/content_image.rs"];
 
 #[test]
 fn domain_import_operations_stay_outside_views() {

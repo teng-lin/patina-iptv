@@ -1,11 +1,11 @@
 //! Channel and provider-group organization, including hidden-item recovery.
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input_kit::dismiss_keyboard;
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::entry::{self, TextSheet};
-use crate::guide::list_rows::{self, Mark, ROW};
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
+use crate::kit::list_rows::{self, Mark, ROW};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::entry::{self, TextSheet};
 use crate::runtime::{Error, model::SourceId};
-use crate::{Ui, chrome::ui_kit, wiring::data};
+use crate::{Ui, kit::ui_kit, wiring::data};
 use iptv_core::organization::{Block, BlockKind, Item, Sort};
 use iptv_nav::Action;
 use iptv_presentation::guide::Pane;
@@ -100,7 +100,7 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         crate::guide::lists::open_groups(ui.guide);
         crate::playback::browse_playback::hold(ui);
         ui.screens
@@ -158,7 +158,7 @@ fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
     }
     from_player
 }
@@ -274,7 +274,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
     crate::wiring::tasks::spawn_in_app(async move {
         if save.await.is_err() {
-            crate::chrome::toast::notify(tr(
+            crate::kit::toast::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             ));
             if still_open(ui.screens, generation) {
@@ -282,7 +282,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             }
             return;
         }
-        crate::chrome::toast::notify(if blocked {
+        crate::kit::toast::notify(if blocked {
             tr("Content blocked")
         } else {
             tr("Content unblocked")
@@ -299,7 +299,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             Ok(blocks) => update(ui.screens, |state| state.finish_block(blocks)),
             Err(_) => {
                 close(ui);
-                crate::chrome::toast::notify(tr(
+                crate::kit::toast::notify(tr(
                     "The list could not be reloaded. Reopen it and try again.",
                 ));
             }
@@ -524,7 +524,7 @@ fn check_playlist_order_catalog(ui: Ui) -> bool {
     });
     if !valid {
         untracked(|| close(ui));
-        crate::chrome::toast::notify(tr(
+        crate::kit::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }
@@ -624,7 +624,7 @@ fn persist_order(ui: Ui) {
                         return;
                     }
                     if matches!(error, crate::wiring::settings::SaveError::Storage(_)) {
-                        crate::chrome::toast::notify(tr(
+                        crate::kit::toast::notify(tr(
                             "Playlist positions saved. Could not switch to Custom order. Try saving again.",
                         ));
                     } else {
@@ -647,7 +647,7 @@ fn persist_order(ui: Ui) {
                         crate::wiring::settings::SaveError::ParentalLocked,
                     );
                 } else {
-                    crate::chrome::toast::notify(tr(
+                    crate::kit::toast::notify(tr(
                         "The change could not be saved. Reopen the list and try again.",
                     ));
                 }
@@ -700,7 +700,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             let kind = block_kind(&scope_kind);
             let blocked = block_state(&s, &item.id);
             if kind == BlockKind::Channel && blocked == Block::Group {
-                crate::chrome::toast::notify(tr("This channel is blocked by a group."));
+                crate::kit::toast::notify(tr("This channel is blocked by a group."));
                 return;
             }
             update(ui.screens, Open::begin_block);
@@ -860,7 +860,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
             update(ui.screens, Open::finish_save);
         }
         log::warn!("iptv organization: change refused: {e}");
-        crate::chrome::toast::notify(tr(
+        crate::kit::toast::notify(tr(
             "The change could not be saved. Reopen the list and try again.",
         ));
         return;
@@ -903,7 +903,7 @@ fn commit(ui: Ui) {
         }
     ) && text.trim().is_empty()
     {
-        crate::chrome::toast::notify(tr("Enter a group name."));
+        crate::kit::toast::notify(tr("Enter a group name."));
         return;
     }
     let Some((source, kind)) = s.scope.clone() else {
@@ -1507,7 +1507,7 @@ pub(crate) fn invalidate_changed_guide_order(ui: Ui, keys: &HashMap<String, usiz
     }) == Some(true);
     if stale {
         close(ui);
-        crate::chrome::toast::notify(tr(
+        crate::kit::toast::notify(tr(
             "The list could not be reloaded. Reopen it and try again.",
         ));
     }
@@ -1530,7 +1530,7 @@ pub(crate) fn inline_order_open(screens: crate::ScreensUi) -> bool {
 
 pub(crate) fn guide_order_accessible(ui: Ui) -> bool {
     guide_order_open(ui.screens)
-        && ui.top_overlay() == Some(crate::chrome::overlay::Overlay::Organization)
+        && ui.top_overlay() == Some(crate::kit::overlay::Overlay::Organization)
         && !contents_hidden(ui.screens)
 }
 
@@ -1560,7 +1560,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
         .absolute()
         .inset_0()
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::Organization.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1637,7 +1637,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::Organization.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
         })
         .child(
             view()
@@ -1660,7 +1660,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .child(ui_kit::caption(size, move || reorder_hint(ui)))
                 .child(when(
                     move || {
-                        ui.top_overlay() == Some(crate::chrome::overlay::Overlay::Organization)
+                        ui.top_overlay() == Some(crate::kit::overlay::Overlay::Organization)
                             && ui.drag_editing()
                             && reordering(ui.screens)
                             && !contents_hidden(ui.screens)
@@ -1842,8 +1842,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             .inset_0()
                             .test_id("organization-sort")
                             .accessibility_elements_hidden(move || {
-                                crate::chrome::overlay::Overlay::Organization
-                                    .accessibility_covered(ui)
+                                crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
                             })
                             .child(when(
                                 move || {
@@ -1860,8 +1859,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         ui_kit::screen(ui, size)
                             .test_id("organization-screen")
                             .accessibility_elements_hidden(move || {
-                                crate::chrome::overlay::Overlay::Organization
-                                    .accessibility_covered(ui)
+                                crate::kit::overlay::Overlay::Organization.accessibility_covered(ui)
                             })
                             .child(
                                 ui_kit::header(

@@ -20,7 +20,7 @@
 //! the grid, without leaving full screen; a result adds its channel as a
 //! new tile and the screen closes, Back closes it without one.
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 use nsh_core::time::Instant;
 use std::time::Duration;
 
@@ -252,9 +252,7 @@ pub(crate) fn clear_history(ui: Ui) {
     });
     crate::wiring::tasks::spawn_in_app(async move {
         if saved.await.is_err() {
-            crate::chrome::toast::notify(tr(
-                "Recent channel changes could not be saved; try again",
-            ));
+            crate::kit::toast::notify(tr("Recent channel changes could not be saved; try again"));
         }
     });
 }
@@ -376,7 +374,7 @@ fn run_search(ui: Ui, query: &str) {
         catchup_days: Some(&days),
         // As far back as a guide keeps finished programs (a catch-up
         // archive of up to 14 days, #282); pruning bounds what is there.
-        look_back: i64::from(crate::data::stored::MAX_STORED_GUIDE_PAST_DAYS) * 86_400,
+        look_back: i64::from(crate::wiring::data::stored::MAX_STORED_GUIDE_PAST_DAYS) * 86_400,
         favorites: Some(&favorites),
         favorites_first: true,
         limit: LIMIT,
@@ -473,7 +471,7 @@ pub fn open(ui: Ui) {
     if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
     }
 }
 
@@ -488,7 +486,7 @@ pub fn close(ui: Ui) {
     save_history(ui.screens);
     crate::wiring::runtime_owner::runtime().release_program_index();
     ui.screens.search.set(None);
-    crate::chrome::input_kit::dismiss_keyboard();
+    crate::kit::input::dismiss_keyboard();
 }
 
 /// The screen is shown and takes the remote.
@@ -585,7 +583,7 @@ fn watch(ui: Ui, channel: usize, playback: Playback) {
     // Full screen first: the resume effect ignores a suspended screen in full screen.
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::EnterFullscreen);
+        .apply(crate::kit::mode::Action::EnterFullscreen);
     ui.show_playing();
     ui.screens.search.update(|s| {
         if let Some(s) = s {

@@ -7,13 +7,13 @@ use nsh_core::prelude::*;
 use crate::screens::settings_view::updates as facade;
 use crate::{
     Ui, ViewMode,
-    chrome::i18n::{tr, trf},
-    chrome::scale::Scale,
-    chrome::ui_kit,
     host::updates::{
         self as host, CheckError, Frequency, Metadata, ReleaseStatus, Service, Snapshot, Trigger,
         UpdatePrompts,
     },
+    kit::i18n::{tr, trf},
+    kit::scale::Scale,
+    kit::ui_kit,
 };
 
 #[derive(Clone, Copy)]
@@ -62,7 +62,7 @@ struct Prompts(Ui);
 
 impl UpdatePrompts for Prompts {
     fn notify(&self, key: &'static str) {
-        crate::chrome::toast::notify(tr(key));
+        crate::kit::toast::notify(tr(key));
     }
 
     fn translate(&self, key: &'static str) -> &'static str {
@@ -155,7 +155,7 @@ pub(crate) fn bind(ui: Ui) {
     effect(move || {
         if ui.screens.update_dialog_open.get()
             && lifecycle() != nsh_core::platform::Lifecycle::Background
-            && ui.top_overlay() == Some(crate::chrome::overlay::Overlay::AppUpdate)
+            && ui.top_overlay() == Some(crate::kit::overlay::Overlay::AppUpdate)
             && snapshot(ui.screens).notice.is_some()
         {
             acknowledge(ui.screens);
@@ -227,7 +227,7 @@ fn check(ui: Ui, trigger: Trigger) {
         if let Err(error) = service.persist().await {
             log::warn!("iptv update schedule save failed: {error}");
             if trigger == Trigger::Manual {
-                crate::chrome::toast::notify(tr("Could not save update preferences. Try again."));
+                crate::kit::toast::notify(tr("Could not save update preferences. Try again."));
             }
         }
     });
@@ -238,7 +238,7 @@ fn persist(screens: crate::ScreensUi) {
     crate::wiring::tasks::spawn_in_app(async move {
         if let Err(error) = service().persist().await {
             log::warn!("iptv update preferences save failed: {error}");
-            crate::chrome::toast::notify(tr("Could not save update preferences. Try again."));
+            crate::kit::toast::notify(tr("Could not save update preferences. Try again."));
         }
     });
 }
@@ -667,7 +667,7 @@ fn panel(ui: Ui) -> View {
         .test_id("app-update-panel")
         .on_press(|| {})
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::AppUpdate.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::AppUpdate.accessibility_covered(ui)
         })
         .child(ui_kit::header(
             ui,
@@ -816,9 +816,9 @@ pub(crate) fn notice_open(ui: Ui) -> bool {
     {
         return false;
     }
-    crate::chrome::overlay::Overlay::ALL
+    crate::kit::overlay::Overlay::ALL
         .into_iter()
-        .filter(|overlay| *overlay != crate::chrome::overlay::Overlay::AppUpdateNotice)
+        .filter(|overlay| *overlay != crate::kit::overlay::Overlay::AppUpdateNotice)
         .all(|overlay| !overlay.is_open(ui))
 }
 

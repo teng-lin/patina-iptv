@@ -8,12 +8,12 @@ use iptv_nav::Action;
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::chrome::fonts::MEDIUM;
-use crate::chrome::i18n::tr;
-use crate::chrome::overlay::Overlay;
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::icons::{self, Icon};
-use crate::chrome::ui_kit::{self, FocusScroll};
+use crate::kit::fonts::MEDIUM;
+use crate::kit::i18n::tr;
+use crate::kit::overlay::Overlay;
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::icons::{self, Icon};
+use crate::kit::ui_kit::{self, FocusScroll};
 use crate::library_ui::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS};
 

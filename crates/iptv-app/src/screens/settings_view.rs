@@ -13,9 +13,9 @@
 //! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
 //! own (`words`).
 
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input_kit::dismiss_keyboard;
-use crate::chrome::toast::notify;
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
+use crate::kit::toast::notify;
 use crate::wiring::navigation::{request, settings_guarded};
 use crate::wiring::settings_wiring::refresh;
 

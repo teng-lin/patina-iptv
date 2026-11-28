@@ -7,10 +7,10 @@ use nsh_core::prelude::*;
 
 use super::details::Param;
 use super::{ERROR, WHITE, mark, state, update, words};
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit;
-use crate::guide::list_rows::{self, ROW_TWO};
+use crate::kit::i18n::{tr, trf};
+use crate::kit::list_rows::{self, ROW_TWO};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit;
 use crate::wiring::data::Activity;
 use crate::{Ui, rgb};
 

@@ -1,6 +1,6 @@
 //! The guide sources screen's wording (iptv-rs's own).
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use crate::runtime::model::{GuideSource, ImportErrorKind};
 use iptv_presentation::wizard::FieldError;
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn the_status_follows_the_language() {
-        use crate::chrome::i18n::in_language;
+        use crate::kit::i18n::in_language;
         let when = |_| "14:05".to_owned();
         let mut r = FeedResult {
             feed: guides::FIRST_USER_FEED,
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn every_guide_failure_is_told_in_every_language() {
-        use crate::chrome::i18n::in_language;
+        use crate::kit::i18n::in_language;
         let kinds = [
             ImportErrorKind::Network,
             ImportErrorKind::Timeout,

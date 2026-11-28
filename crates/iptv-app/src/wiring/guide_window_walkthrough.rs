@@ -10,13 +10,13 @@ pub fn bind(ui: Ui) {
     let _guide = set_timeout(Duration::from_secs(2), move || {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         println!("DEMO: the actual guide; the main channel continues in its preview");
     });
     let _menu = set_timeout(Duration::from_secs(4), move || {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         let schedule = crate::wiring::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_SECOND_KEY")
             .ok()
@@ -36,7 +36,7 @@ pub fn bind(ui: Ui) {
     let _next_menu = set_timeout(Duration::from_secs(14), move || {
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
+            .apply(crate::kit::mode::Action::Restore(crate::ViewMode::Guide));
         let schedule = crate::wiring::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_THIRD_KEY")
             .ok()

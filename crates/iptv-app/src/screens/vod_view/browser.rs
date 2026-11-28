@@ -67,8 +67,8 @@ fn navigation(ui: Ui, size: Scale) -> View {
                     close(ui);
                 })
                 .child(
-                    svg(crate::chrome::ui_kit::icons::src(
-                        crate::chrome::ui_kit::icons::Icon::Close,
+                    svg(crate::kit::ui_kit::icons::src(
+                        crate::kit::ui_kit::icons::Icon::Close,
                     ))
                     .size(move || size.px(24.0))
                     .text_color(rgb(crate::theme::LIST_TEXT)),
@@ -176,7 +176,7 @@ fn category_button(
 ) -> View {
     let label = label.into_reactive();
     let spoken = label.clone();
-    let mark = move || crate::guide::list_rows::Mark::of(focused(), false);
+    let mark = move || crate::kit::list_rows::Mark::of(focused(), false);
     view()
         .min_h(move || size.px(ui_kit::TOUCH))
         .px(move || size.px(16.0))
@@ -393,9 +393,7 @@ fn tools(ui: Ui, size: Scale) -> View {
                         svg(if control == Control::Search {
                             crate::guide::rail::icon(RailItem::Search)
                         } else {
-                            crate::chrome::ui_kit::icons::src(
-                                crate::chrome::ui_kit::icons::Icon::Sort,
-                            )
+                            crate::kit::ui_kit::icons::src(crate::kit::ui_kit::icons::Icon::Sort)
                         })
                         .size(move || size.px(26.0))
                         .text_color(move || {
@@ -527,7 +525,7 @@ fn poster(
                             card().is_some_and(|c| c.poster.as_ref().is_some_and(|p| !p.is_empty()))
                         },
                         move || {
-                            let source = crate::chrome::content_image::source(move || {
+                            let source = crate::kit::content_image::source(move || {
                                 card().and_then(|c| c.poster).unwrap_or_default()
                             });
                             image(source)
@@ -702,10 +700,10 @@ fn category_heading_button(ui: Ui, size: Scale) -> View {
 
 pub(super) fn screen(ui: Ui, size: Scale) -> View {
     super::empty::bind(ui);
-    // The layout class at the current text size (`crate::chrome::layout`):
+    // The layout class at the current text size (`crate::kit::layout`):
     // a compact window shows the empty catalog as its one pane.
     let compact = computed(move || {
-        use crate::chrome::layout::Class;
+        use crate::kit::layout::Class;
         let text = size.of(1.0) * crate::wiring::settings::text_factor();
         Class::of(window().width.0, text) == Class::Compact
     });
@@ -759,7 +757,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         });
     });
     let field = element_ref();
-    crate::chrome::input_kit::bind_field_focus(field, move || {
+    crate::kit::input::bind_field_focus(field, move || {
         ui.screens
             .vod
             .with(|s| s.control == Control::Search && s.search_open)
@@ -773,7 +771,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         .test_id("vod-screen")
         .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::Vod.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Vod.accessibility_covered(ui)
         })
         .child(when(
             move || ui.screens.vod.with(|s| s.shows_navigation()),

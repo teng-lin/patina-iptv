@@ -83,7 +83,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         return false;
     }
     log::info!("iptv player: resuming the last channel before the guide");
-    crate::chrome::startup::mark("last channel resolved");
+    crate::kit::startup::mark("last channel resolved");
     let main = ui.playback.player.main();
     let mut session = 0;
     let now = ui.now_ms();
@@ -100,7 +100,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     super::load_authorized(ui, 0, session, source, Some(authority));
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::EnterFullscreen);
+        .apply(crate::kit::mode::Action::EnterFullscreen);
     true
 }
 
@@ -128,7 +128,7 @@ pub fn adopt(ui: Ui) -> bool {
         super::stop(ui);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
         return true;
     };
     if crate::wiring::runtime_owner::schedule().channel_block(channel)
@@ -137,7 +137,7 @@ pub fn adopt(ui: Ui) -> bool {
         super::stop(ui);
         ui.chrome
             .mode
-            .apply(crate::chrome::mode::Action::ReturnToBrowse);
+            .apply(crate::kit::mode::Action::ReturnToBrowse);
         return true;
     }
     // Preparing the early stream already owns this request, even before a

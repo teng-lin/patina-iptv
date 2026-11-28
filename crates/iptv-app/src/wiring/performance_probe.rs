@@ -41,7 +41,7 @@ pub(crate) fn bind(ui: Ui) {
         if ready.as_ref().is_some_and(|path| !path.exists()) {
             return;
         }
-        if !crate::chrome::startup::marked("guide frame")
+        if !crate::kit::startup::marked("guide frame")
             || ui.app.library.shown.get_untracked().is_none()
             || ui.guide.visible_rows.get_untracked().is_none()
         {
@@ -69,7 +69,7 @@ pub(crate) fn bind(ui: Ui) {
                     json!({"kind": "start", "at_us": 0, "selection": 1, "token": expected}),
                 ],
             }));
-            crate::chrome::input::synthetic_enter(ui);
+            crate::shell::input::synthetic_enter(ui);
         });
     });
 }

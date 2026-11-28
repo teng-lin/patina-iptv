@@ -1,5 +1,5 @@
 //! Application-owned release discovery, inline notes and native installation.
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 use nsh_core::prelude::*;
 
 pub(super) use crate::host::updates::RELEASES;

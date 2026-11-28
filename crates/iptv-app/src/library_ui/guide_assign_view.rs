@@ -13,8 +13,8 @@
 
 use iptv_presentation::library::guide_assign as state;
 
-use crate::chrome::i18n::{tr, trf};
-use crate::chrome::input_kit::dismiss_keyboard;
+use crate::kit::i18n::{tr, trf};
+use crate::kit::input::dismiss_keyboard;
 use crate::runtime::model::{GuideChannel, SourceId};
 use iptv_nav::Action;
 use nsh_core::element::input;
@@ -23,9 +23,9 @@ use nsh_core::prelude::*;
 pub use state::Picker as Open;
 use state::{Effect, Key, Picker, Row, Subject};
 
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit;
-use crate::guide::list_rows::{self, Mark, ROW_TWO};
+use crate::kit::list_rows::{self, Mark, ROW_TWO};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit;
 use crate::wiring::data::assign::{self, Applied};
 use crate::{Ui, tint};
 
@@ -39,7 +39,7 @@ pub fn open(ui: Ui, channel: usize) {
         crate::wiring::data::combined::owner(&crate::wiring::runtime_owner::runtime(), &k)
     }) else {
         ui.screens.guide_assign.next_request();
-        crate::chrome::toast::notify(tr("No playlist on screen"));
+        crate::kit::toast::notify(tr("No playlist on screen"));
         return;
     };
     let request = ui.screens.guide_assign.open(Picker::new(Subject {
@@ -58,7 +58,7 @@ pub fn open(ui: Ui, channel: usize) {
         }
         if channels.is_empty() {
             close(ui.screens);
-            crate::chrome::toast::notify(tr("No guide data is stored yet: update the guide first"));
+            crate::kit::toast::notify(tr("No guide data is stored yet: update the guide first"));
             return;
         }
         let feeds: Vec<_> = crate::wiring::runtime_owner::runtime()
@@ -156,7 +156,7 @@ fn perform(screens: crate::ScreensUi, playlist: SourceId, key: String, effect: E
                 choice,
                 move |applied| {
                     if screens.guide_assign.is_current(request) {
-                        crate::chrome::toast::notify(applied_words(applied));
+                        crate::kit::toast::notify(applied_words(applied));
                         close(screens);
                     }
                 },
@@ -193,7 +193,7 @@ fn panel(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     view()
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::GuideAssign.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::GuideAssign.accessibility_covered(ui)
         })
         .absolute()
         .inset_0()
@@ -377,7 +377,7 @@ fn channel_detail(screens: crate::ScreensUi, c: &GuideChannel) -> String {
 fn search_field(ui: Ui, size: Scale, focused: Memo<Option<usize>>) -> impl IntoElement {
     let field = element_ref();
     let typing = computed(move || state(ui.screens, Picker::typing).unwrap_or(false));
-    crate::chrome::input_kit::bind_field_focus(field, move || typing.get());
+    crate::kit::input::bind_field_focus(field, move || typing.get());
     view().h(move || size.px(ROW_TWO)).justify_center().child(
         ui_kit::field(size, input())
             .element_ref(&field)

@@ -1,8 +1,8 @@
 //! Intent handling for the Cast picker and remote.
 use crate::{
     Playback, Ui,
-    chrome::i18n::{tr, trf},
-    chrome::toast::notify,
+    kit::i18n::{tr, trf},
+    kit::toast::notify,
     runtime::model::{ResolveFailure, StreamPurpose},
     wiring::navigation::{ChooserKind, close_chooser, open_chooser, show_cast_receivers},
     wiring::runtime_owner::{runtime, schedule},

@@ -247,7 +247,7 @@ pub fn surface_rect(playback: crate::PlaybackUi, surface: usize) -> Option<(f32,
 /// On a detour it goes back to the grid.
 pub fn open(ui: Ui) {
     if let Some(reason) = untracked(|| crate::playback::multiview::availability(ui)).reason() {
-        crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
+        crate::kit::toast::notify(crate::wiring::capabilities::reason(reason));
         return;
     }
     if untracked(|| detour(ui.playback)) {

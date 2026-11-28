@@ -74,7 +74,7 @@ fn current(ui: Ui) -> Option<Target> {
 /// apply. Desktops and TVs keep them regardless of the input report.
 pub(crate) fn autoplay_supported(host: Host) -> bool {
     !crate::wiring::device::handheld(host.form_factor)
-        || crate::chrome::input_kit::keys_for(host).is_some()
+        || crate::kit::input::keys_for(host).is_some()
 }
 
 /// Whether choosing a channel in the guide over the video or in the
@@ -282,7 +282,7 @@ fn full(ui: Ui) {
     }
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::EnterFullscreen);
+        .apply(crate::kit::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {

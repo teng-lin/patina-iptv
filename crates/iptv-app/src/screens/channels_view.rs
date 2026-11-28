@@ -9,18 +9,18 @@
 //! persistent layer: preview mode only changes its rectangle
 //! ([`preview_rect`]).
 
-use crate::chrome::i18n::tr;
 use crate::guide::lists::{browser_entry_name, visible_entries};
+use crate::kit::i18n::tr;
 
-use crate::chrome::layout::ListPanel;
+use crate::kit::layout::ListPanel;
 use iptv_nav::Action;
 use iptv_presentation::channel_list::{ChannelList, ListMode, ListPane, Outcome};
 use iptv_presentation::lists::{ALL, ChannelList as Rows, FAVORITES, VisibleEntries};
 use nsh_core::prelude::*;
 
-use crate::chrome::fonts::{CONDENSED, HEADER_TIMES, MEDIUM, SANS, SECTION, TITLE};
-use crate::chrome::scale::Scale;
-use crate::guide::list_rows::{self, INSET, Mark, ROW, ROW_TWO};
+use crate::kit::fonts::{CONDENSED, HEADER_TIMES, MEDIUM, SANS, SECTION, TITLE};
+use crate::kit::list_rows::{self, INSET, Mark, ROW, ROW_TWO};
+use crate::kit::scale::Scale;
 use crate::playback::panels::GROUPS_W;
 use crate::theme::BRIGHT_TEXT;
 use crate::{Ui, ViewMode, clock, tint};
@@ -78,9 +78,9 @@ fn groups_shown(playback: crate::PlaybackUi) -> bool {
 }
 
 /// The columns at the left in a window `width` points wide, kept inside
-/// it (`crate::chrome::layout::ListPanel`).
+/// it (`crate::kit::layout::ListPanel`).
 fn panel(playback: crate::PlaybackUi, width: f32) -> ListPanel {
-    let scale = crate::chrome::scale::now();
+    let scale = crate::kit::scale::now();
     let groups = if groups_shown(playback) {
         (GROUPS_W * scale).round()
     } else {
@@ -108,7 +108,7 @@ pub fn preview_rect(
     let preview = playback.channels.with(|c| {
         c.is_some_and(|c| {
             c.mode == ListMode::Preview
-                || crate::wiring::device::window_class() == crate::chrome::layout::Class::Compact
+                || crate::wiring::device::window_class() == crate::kit::layout::Class::Compact
         })
     });
     if !preview {
@@ -359,7 +359,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .inset_0()
         .flex_row()
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::ChannelList.accessibility_hidden(ui)
+            crate::kit::overlay::Overlay::ChannelList.accessibility_hidden(ui)
         })
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
@@ -486,14 +486,14 @@ pub(crate) fn group_more(
                 .right(move || size.px(4.0))
                 .justify_center()
                 .child(
-                    crate::chrome::ui_kit::round_more(
+                    crate::kit::ui_kit::round_more(
                         || GROUP_MORE,
                         crate::playback::play_bar::back_bg(ui),
                         {
                             let name = name.clone();
                             move || {
                                 let name = name();
-                                crate::chrome::i18n::trf(
+                                crate::kit::i18n::trf(
                                     "More options for {name}",
                                     &[("name", name.as_str().into())],
                                 )
@@ -585,7 +585,7 @@ fn channel_row(
         .child(when(
             move || is_open(ui.playback) && crate::guide::grid::show_channel_logos(ui.app),
             move || {
-                image(crate::chrome::content_image::source(move || {
+                image(crate::kit::content_image::source(move || {
                     crate::guide::grid::channel_logo(ui.app, channel())
                 }))
                 .test_id("player-channel-logo")
@@ -633,12 +633,12 @@ fn channel_row(
                     .right(move || size.px(INSET))
                     .justify_center()
                     .child(
-                        crate::chrome::ui_kit::round_more(
+                        crate::kit::ui_kit::round_more(
                             || MORE,
                             crate::playback::play_bar::back_bg(ui),
                             move || {
                                 let channel = name();
-                                crate::chrome::i18n::trf(
+                                crate::kit::i18n::trf(
                                     "More options for {channel}",
                                     &[("channel", channel.as_str().into())],
                                 )

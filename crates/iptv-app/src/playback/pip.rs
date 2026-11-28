@@ -125,7 +125,7 @@ pub fn bind(ui: Ui) {
 /// desktops, opens the app's own).
 pub fn enter(ui: Ui) {
     if ui.cast.remote.get_untracked() {
-        crate::chrome::toast::notify(crate::chrome::i18n::tr(
+        crate::kit::toast::notify(crate::kit::i18n::tr(
             "Stop casting to open picture in picture.",
         ));
         return;
@@ -139,7 +139,7 @@ pub fn enter(ui: Ui) {
             .pip
             .with_untracked(|p| iptv_presentation::capabilities::pip(p, playing).reason())
         {
-            crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
+            crate::kit::toast::notify(crate::wiring::capabilities::reason(reason));
         }
         return;
     }
@@ -164,7 +164,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
             if how == Exit::Close {
                 ui.chrome
                     .mode
-                    .apply(crate::chrome::mode::Action::ReturnToBrowse);
+                    .apply(crate::kit::mode::Action::ReturnToBrowse);
             }
         });
         return true;
@@ -172,9 +172,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
     report(ui, false);
     match how {
         Exit::BackToApp => {
-            ui.chrome
-                .mode
-                .apply(crate::chrome::mode::Action::PipBackToApp);
+            ui.chrome.mode.apply(crate::kit::mode::Action::PipBackToApp);
             crate::wiring::navigation::focus_main();
         }
         Exit::Close => crate::playback::player_keys::stop_playback(ui),

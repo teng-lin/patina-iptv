@@ -320,7 +320,7 @@ fn on_unread(playback: crate::PlaybackUi, surface: usize, error: PlayerEventErro
         PlayerEventError::UnknownState(name) => (PlayerEventKind::State, name),
         PlayerEventError::NoSize { width, height } => {
             if surface == 0 {
-                crate::chrome::startup::mark("video size");
+                crate::kit::startup::mark("video size");
             }
             (PlayerEventKind::Size, format!("{width}×{height}"))
         }
@@ -403,7 +403,7 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
             crate::wiring::performance_probe::rendered(ui, surface, token);
             if token == stream.token.get_untracked() {
                 if surface == 0 {
-                    crate::chrome::startup::mark("video rendered");
+                    crate::kit::startup::mark("video rendered");
                 }
                 if crate::host::video_under_page() {
                     stream.rendered.set(Some(token));
@@ -424,7 +424,7 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         PlayerEvent::Size { width, height } => {
             stream.size.set(Some((width as u32, height as u32)));
             if surface == 0 {
-                crate::chrome::startup::mark("video size");
+                crate::kit::startup::mark("video size");
             }
             format!("{width}×{height}")
         }

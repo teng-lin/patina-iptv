@@ -6,13 +6,13 @@
 
 use std::time::Duration;
 
-use crate::chrome::i18n::{tr, trf};
+use crate::kit::i18n::{tr, trf};
 
 use super::*;
-use crate::chrome::fonts::{LIST_ITEM, SANS, SECTION};
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit::{self, HEADING_ROW};
-use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::kit::fonts::{LIST_ITEM, SANS, SECTION};
+use crate::kit::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit::{self, HEADING_ROW};
 use crate::theme::LIST_TEXT;
 use nsh_core::Checked;
 
@@ -31,7 +31,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     view()
         .test_id("settings-layer")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::Settings.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Settings.accessibility_covered(ui)
         })
         .absolute()
         .inset_0()

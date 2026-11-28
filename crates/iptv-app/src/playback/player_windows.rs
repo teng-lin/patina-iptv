@@ -1,6 +1,6 @@
 //! Desktop guide-menu prototype: auxiliary players belong to the app, independently
 //! of the main guide's navigation and the multiview layout.
-use crate::{Ui, chrome::i18n::tr};
+use crate::{Ui, kit::i18n::tr};
 use iptv_presentation::playback_windows::SessionId;
 use nsh_core::prelude::*;
 
@@ -209,10 +209,7 @@ fn player_window(ui: Ui, surface: usize, back_action: fn(Ui) -> bool) -> impl In
             if audible(ui.playback, id) {
                 channel
             } else {
-                crate::chrome::i18n::trf(
-                    "{channel} · muted",
-                    &[("channel", channel.as_str().into())],
-                )
+                crate::kit::i18n::trf("{channel} · muted", &[("channel", channel.as_str().into())])
             }
         })
         .default_size(nsh_core::Size::new(px(960.0), px(540.0)))
@@ -366,7 +363,7 @@ fn player_content(
     local
         .chrome
         .mode
-        .apply(crate::chrome::mode::Action::EnterFullscreen);
+        .apply(crate::kit::mode::Action::EnterFullscreen);
     local.chrome.input.set(crate::Input::Pointer);
     local.chrome.last_press.set(crate::Input::Pointer);
     local.playback.paused.set(initial.paused);
@@ -465,7 +462,7 @@ fn player_content(
             crate::wiring::navigation::pointer_entered(surface, at.x.0, at.y.0);
             if !crate::playback::pip::in_window(local.playback)
                 && !untracked(|| {
-                    local.overlay_open(crate::chrome::overlay::Overlay::keeps_pointer_from_play_bar)
+                    local.overlay_open(crate::kit::overlay::Overlay::keeps_pointer_from_play_bar)
                 })
             {
                 local.touched();

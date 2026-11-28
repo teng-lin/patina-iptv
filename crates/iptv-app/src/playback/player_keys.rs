@@ -193,7 +193,7 @@ fn stop_to_guide(ui: Ui, stop: impl FnOnce(Ui)) {
     stop(ui);
     ui.chrome
         .mode
-        .apply(crate::chrome::mode::Action::ReturnToBrowse);
+        .apply(crate::kit::mode::Action::ReturnToBrowse);
 }
 
 /// Channel up/down: switches playback and keeps the focus on it. Wraps
@@ -241,7 +241,7 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
             }
             ui.chrome
                 .mode
-                .apply(crate::chrome::mode::Action::ReturnToBrowse);
+                .apply(crate::kit::mode::Action::ReturnToBrowse);
         }
         QuickAction::History => crate::wiring::navigation::open_chooser(
             ui,
@@ -266,7 +266,7 @@ pub fn press_control(ui: Ui, control: Control) {
                 nsh_core::prelude::untracked(|| crate::playback::multiview::availability(ui))
                     .reason()
         {
-            crate::chrome::toast::notify(crate::wiring::capabilities::reason(reason));
+            crate::kit::toast::notify(crate::wiring::capabilities::reason(reason));
         }
         return;
     }

@@ -20,7 +20,7 @@ pub(crate) fn button(ui: Ui, size: f32, id: &'static str) -> View {
             })
             .w(px(size))
             .h(px(size))
-            .label(move || crate::chrome::i18n::tr("Cast to TV"))
+            .label(move || crate::kit::i18n::tr("Cast to TV"))
             .prop("owner", move || json!(runtime().native_cast_view()))
             .prop("accent", move || {
                 json!(ui.app.theme.with(|t| t.accent.light))

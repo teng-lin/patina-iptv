@@ -144,7 +144,7 @@ fn abandoned_operation_does_not_write_disposed_panel_signals() {
 
 #[test]
 fn retained_package_does_not_hide_manual_check_progress_or_failure() {
-    crate::chrome::i18n::in_language("en", || {
+    crate::kit::i18n::in_language("en", || {
         use iptv_runtime::app_updates::github::{DownloadLink, ReleaseCheck, ReleaseInfo};
         let mut state = Snapshot {
             checking: true,

@@ -3,14 +3,14 @@
 //! titles in Roboto Condensed at the guide's sizes, the focus its light
 //! pill.
 
-use crate::chrome::i18n::tr;
+use crate::kit::i18n::tr;
 use nsh_core::Checked;
 
 use super::*;
-use crate::chrome::fonts::{CAPTION, CONDENSED, SANS};
-use crate::chrome::scale::Scale;
-use crate::chrome::ui_kit;
-use crate::guide::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::kit::fonts::{CAPTION, CONDENSED, SANS};
+use crate::kit::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::kit::scale::Scale;
+use crate::kit::ui_kit;
 
 fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Screen) -> R) -> Option<R> {
     screens.search.with(|s| s.as_ref().map(f))
@@ -53,7 +53,7 @@ fn screen(ui: Ui) -> impl IntoElement {
         .style_when(move || compact_header(size), move |s| s.px(size.px(16.0)))
         .test_id("search-screen")
         .accessibility_elements_hidden(move || {
-            crate::chrome::overlay::Overlay::Search.accessibility_covered(ui)
+            crate::kit::overlay::Overlay::Search.accessibility_covered(ui)
         })
         .child(header(ui, size))
         .child(ui_kit::caption(size, move || hint(ui)))
@@ -103,9 +103,9 @@ fn button(ui: Ui, size: Scale, label: &'static str, act: fn(Ui)) -> impl IntoEle
     ui_kit::button(ui, size, move || tr(label), || false, move || act(ui))
 }
 
-/// The query takes its own row in a compact window (`crate::chrome::layout`).
+/// The query takes its own row in a compact window (`crate::kit::layout`).
 fn compact_header(size: Scale) -> bool {
-    use crate::chrome::layout::Class;
+    use crate::kit::layout::Class;
     let text = size.of(1.0) * crate::wiring::settings::text_factor();
     Class::of(window().width.0, text) == Class::Compact
 }
@@ -118,8 +118,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         })
         .unwrap_or(false)
     });
-    crate::chrome::input_kit::bind_field_focus(field, move || want_keyboard.get());
-    crate::chrome::keyboard::on_dismissed(
+    crate::kit::input::bind_field_focus(field, move || want_keyboard.get());
+    crate::kit::keyboard::on_dismissed(
         move || want_keyboard.get(),
         move || apply(ui, SearchAction::KeyboardHidden),
     );

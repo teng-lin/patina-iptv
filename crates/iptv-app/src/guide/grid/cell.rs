@@ -17,9 +17,9 @@
 use nsh_core::prelude::*;
 
 use super::{CELL_GAP, CELL_H, CELL_INSET, CELL_RADIUS, PAST_DIM, WHITE, pan::Pan};
-use crate::chrome::fonts::{CELL_TITLE, CONDENSED};
-use crate::chrome::scale::Scale;
 use crate::guide::{Program, floor_of};
+use crate::kit::fonts::{CELL_TITLE, CONDENSED};
+use crate::kit::scale::Scale;
 use crate::theme::{
     BRIGHT_TEXT, FOCUSED_CELL, FOCUSED_TEXT, GuideColors, TEXT_SECONDARY_ALPHA, blend, with_alpha,
 };
@@ -188,7 +188,7 @@ pub(super) fn cell(
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| open_actions())
         .absolute()
         .top(move || {
-            px(((size.whole(crate::guide::list_rows::ROW) - size.whole(CELL_H)) / 2.0).floor())
+            px(((size.whole(crate::kit::list_rows::ROW) - size.whole(CELL_H)) / 2.0).floor())
         })
         .h(move || px(size.whole(CELL_H)))
         .left(move || px(geometry().0 + size.of(CELL_GAP) / 2.0))
