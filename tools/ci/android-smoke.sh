@@ -62,7 +62,10 @@ adb() {
         "uiautomator dump") limit=30 ;;
       esac ;;
   esac
-  case "$phase" in "failure diagnostics"|cleanup) limit=5 ;; esac
+  case "$phase" in
+    "failure diagnostics"|cleanup) limit=5 ;;
+    "failure evidence") limit=20 ;;
+  esac
   python3 "$adb_guard" --timeout "$limit" --phase "$phase" --category "$1" \
     --diagnostic-fd 3 -- adb -s "$serial" "$@"
 }
@@ -88,11 +91,58 @@ mkdir -p "$out"
 rm -f "$out"/*.png "$out"/*.log
 
 pause() { sleep "$1"; }
+# A stalled emulator can leave every guest command unanswered (#445), so these
+# look from the host first and wait for the guest, for a bounded time, before
+# reading what it holds. The smoke has already failed: no step is retried.
+stall_wait=120
+# The host's load, the emulator's threads, and whether its console and the adb
+# server still answer while the guest may not. Thread names only, no arguments.
+host_snapshot() {
+  {
+    echo "== $1 $(date -u +%FT%TZ)"
+    grep . /proc/loadavg /proc/pressure/cpu /proc/pressure/io /proc/pressure/memory
+    grep -E '^(MemTotal|MemAvailable|SwapFree):' /proc/meminfo
+    top -b -H -n 1 | head -n 60
+    ps -L -o pid,tid,stat,pcpu,time,wchan:32,comm -p "$(pgrep -d, -f qemu-system)"
+    echo "-- adb devices"
+    adb devices -l || echo "failed: $?"
+    echo "-- emulator console"
+    adb emu avd status || echo "failed: $?"
+  } >> "$out/host-at-failure.log" 2>&1 || true
+}
+await_guest() {
+  local start=$SECONDS answer
+  while :; do
+    if answer=$(adb shell 'cat /proc/uptime /proc/loadavg' 2>/dev/null); then
+      printf 'guest answered %ss into the wait (uptime, load):\n%s\n' \
+        $((SECONDS - start)) "$answer" >> "$out/host-at-failure.log"
+      return 0
+    fi
+    echo "no guest answer $((SECONDS - start))s into the wait" >> "$out/host-at-failure.log"
+    [ $((SECONDS - start)) -lt "$stall_wait" ] || return 1
+    pause 5
+  done
+}
+# Taken before mark clears logcat. Synthetic profile only.
+guest_evidence() {
+  phase="failure evidence"
+  adb logcat -d -b main,system,crash,events -v threadtime > "$out/logcat-at-failure.log" || true
+  adb shell dumpsys activity lastanr > "$out/last-anr.log" || true
+  adb shell dumpsys dropbox --print > "$out/dropbox-at-failure.log" || true
+  adb shell top -b -H -n 1 -m 40 > "$out/guest-top-at-failure.log" || true
+  phase="failure diagnostics"
+}
 fail() {
   phase="failure diagnostics"
   echo "FAIL: $*" >&2
+  host_snapshot "at failure"
+  local guest=silent
+  ! await_guest || guest=answering
+  host_snapshot "after waiting, guest $guest"
+  echo "guest $guest after the failure (see host-at-failure.log)" >&2
   adb exec-out screencap -p > "$out/failure.png" 2>/dev/null || true
   adb shell dumpsys activity -p "$pkg" activities > "$out/activities-at-failure.log" 2>/dev/null || true
+  [ "$guest" = silent ] || guest_evidence
   mark || true
   echo "last app log lines:" >&2
   tail -20 "$out/app.log" >&2 || true
@@ -112,7 +162,8 @@ mark() {
   adb logcat -d -s ActivityTaskManager:I ActivityManager:I WindowManager:I '*:S' >> "$out/lifecycle.log"
   adb logcat -b events -d -s wm_create_activity:I wm_destroy_activity:I wm_relaunch_resume_activity:I \
     wm_restart_activity:I wm_resume_activity:I wm_on_destroy_called:I wm_on_create_called:I \
-    am_kill:I am_low_memory:I '*:S' > "$out/lifecycle-events.log"
+    wm_pause_activity:I wm_on_paused_called:I wm_stop_activity:I wm_on_stop_called:I \
+    am_anr:I am_kill:I am_low_memory:I '*:S' > "$out/lifecycle-events.log"
   adb logcat -d -b crash >> "$out/crash.log"
   adb logcat -b main -b system -b crash -c
 }

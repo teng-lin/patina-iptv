@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "tools/ci/android-smoke.sh").read_text()
 WAIT = re.search(r"(?ms)^wait_stopped\(\) \{\n.*?^\}", SOURCE)
 BACKGROUND = re.search(r'(?ms)^step "background and resume"\n(.*?)^echo "  ok: activity stopped"', SOURCE)
-if WAIT is None or BACKGROUND is None:
+FAILURE = re.search(r"(?ms)^stall_wait=.*?^fail\(\) \{\n.*?^\}", SOURCE)
+if WAIT is None or BACKGROUND is None or FAILURE is None:
     raise RuntimeError("Android smoke must expose its stopped-state wait and background journey")
 
 MOCK = '''import json, os, pathlib, sys
@@ -215,6 +216,70 @@ printf '%s %s %s' "$samples" "$actions" "$menu_selection"
         result = self.run_menu_wait(["Search"])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("samples=6 actions=1", result.stderr)
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "Android smoke uses a Unix host")
+class FailureEvidence(unittest.TestCase):
+    def run_fail(self, silent_probes, stall_wait):
+        with tempfile.TemporaryDirectory(prefix="patina-failure-") as temporary:
+            root = Path(temporary)
+            script = '''
+pkg=com.synthetic.patina
+out=$FAILURE_CASE
+phase="generated step"
+adb() {
+  printf '%s|%s\\n' "$phase" "$*" >> "$out/calls.txt"
+  case "$*" in
+    "shell cat /proc/uptime /proc/loadavg")
+      # The probe runs in a command substitution, so count its calls on disk.
+      [ "$(grep -c 'proc/uptime' "$out/calls.txt")" -gt "$SILENT_PROBES" ] || return 124
+      echo "generated uptime" ;;
+  esac
+}
+# Host tools are not under test.
+top() { :; }
+ps() { :; }
+pgrep() { :; }
+pause() { sleep 0.05; }
+mark() { echo "$phase|mark" >> "$out/calls.txt"; }
+''' + FAILURE[0] + '''
+stall_wait=$STALL_WAIT
+fail "generated failure"
+'''
+            result = subprocess.run(
+                [shutil.which("bash"), "-euo", "pipefail", "-c", script], text=True,
+                capture_output=True, check=False, timeout=30,
+                env=dict(os.environ, FAILURE_CASE=str(root), SILENT_PROBES=str(silent_probes),
+                         STALL_WAIT=str(stall_wait)),
+            )
+            calls = [line.split("|", 1) for line in (root / "calls.txt").read_text().splitlines()]
+            return result, calls, (root / "host-at-failure.log").read_text()
+
+    def test_recovered_guest_is_read_before_logcat_is_cleared_and_still_fails(self):
+        result, calls, host = self.run_fail(silent_probes=2, stall_wait=60)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("FAIL: generated failure", result.stderr)
+        self.assertIn("guest answering", result.stderr)
+        self.assertEqual(host.count("no guest answer"), 2)
+        self.assertIn("generated uptime", host)
+        commands = [command for _, command in calls]
+        # The host and the emulator console are read before waiting on the guest.
+        self.assertLess(commands.index("emu avd status"),
+                        commands.index("shell cat /proc/uptime /proc/loadavg"))
+        logcat = next(i for i, command in enumerate(commands) if command.startswith("logcat -d -b main"))
+        self.assertEqual(calls[logcat][0], "failure evidence")
+        self.assertLess(logcat, commands.index("mark"))
+        self.assertEqual(calls[commands.index("mark")][0], "failure diagnostics")
+
+    def test_silent_guest_wait_is_bounded_and_skips_the_long_captures(self):
+        result, calls, host = self.run_fail(silent_probes=100000, stall_wait=1)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("guest silent", result.stderr)
+        self.assertIn("after waiting, guest silent", host)
+        self.assertNotIn("failure evidence", [phase for phase, _ in calls])
+        # The short captures are still attempted.
+        self.assertIn(["failure diagnostics", "exec-out screencap -p"], calls)
+        self.assertIn(["failure diagnostics", "mark"], calls)
 
 
 @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "Android smoke uses a Unix host")
