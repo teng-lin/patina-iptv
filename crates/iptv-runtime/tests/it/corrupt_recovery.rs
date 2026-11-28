@@ -1302,4 +1302,33 @@ fn failed_restore_rollback_keeps_three_recovered_copies_and_second_owner_closes_
         .filter_map(|e| e.ok().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())))
         .count();
     assert_eq!(remaining_count, backup::MAX_RECOVERED_LIBRARIES);
+
+    // Verify interrupted rollback with a future-dated older slot and no `.latest` marker
+    // keeps an already-returned `-wal` in `root` rather than moving it into the future slot.
+    let partial_root = temp.path().join("partial-rollback-wal");
+    let future_slot = partial_root.join("recovered/20991231-235959Z");
+    let target_slot = partial_root.join("recovered/20260101-000001Z");
+    fs::create_dir_all(&future_slot).unwrap();
+    fs::create_dir_all(&target_slot).unwrap();
+    fs::write(future_slot.join("iptv.sqlite"), b"older-future-copy").unwrap();
+    fs::write(target_slot.join("iptv.sqlite"), b"rolling-back-db").unwrap();
+    fs::write(partial_root.join("iptv.sqlite-wal"), b"returned-wal").unwrap();
+    fs::write(
+        backup::sibling(&partial_root, "restore-corrupt-active"),
+        b"rollback:20260101-000001Z",
+    )
+    .unwrap();
+    let partial_owner = runtime_with_ports(ports_with_key(&partial_root, KEY_A));
+    assert!(partial_owner.restore_activation()().is_ok());
+    assert!(partial_owner.drain_services());
+    assert_eq!(
+        fs::read(partial_root.join("iptv.sqlite")).unwrap(),
+        b"rolling-back-db"
+    );
+    assert_eq!(
+        fs::read(partial_root.join("iptv.sqlite-wal")).unwrap(),
+        b"returned-wal",
+        "resumed rollback must keep the returned WAL alongside the restored database"
+    );
+    assert!(!future_slot.join("iptv.sqlite-wal").exists());
 }

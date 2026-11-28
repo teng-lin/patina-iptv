@@ -1078,8 +1078,10 @@ fn rollback_rejected_resumed_restore(
     pending: &Path,
 ) {
     let slot_text = slot.file_name().unwrap_or_default().to_string_lossy();
+    if write_sync_marker(active_corrupt, format!("rollback:{slot_text}").as_bytes()).is_err() {
+        return;
+    }
     let _ = cancel(root);
-    let _ = write_sync_marker(active_corrupt, format!("rollback:{slot_text}").as_bytes());
     if rollback_set_aside(&root.join("iptv.sqlite"), slot).is_ok() {
         let promoted = if prior.exists() && !pending.exists() {
             fs::rename(prior, pending).is_ok()
@@ -1226,6 +1228,10 @@ fn prepare_and_install_locked(
         }
         if active_corrupt.exists() && !root.join("iptv.sqlite").is_file() {
             if let Some(slot) = &active_slot {
+                let slot_text = slot.file_name().unwrap_or_default().to_string_lossy();
+                write_sync_marker(&active_corrupt, format!("rollback:{slot_text}").as_bytes())
+                    .context("Could not move the damaged library aside")
+                    .map_err(ActivateFailure::PreInstall)?;
                 rollback_set_aside(&root.join("iptv.sqlite"), slot)
                     .context("Could not move the damaged library aside")
                     .map_err(ActivateFailure::PreInstall)?;
@@ -1860,10 +1866,13 @@ fn commit_corrupt_restore(
             let pending = sibling(root, "restore-pending");
             let prior = sibling(root, "restore-prior");
             let rollback_failed_attempt = |slot: &Path| {
+                if write_sync_marker(&active_marker, format!("rollback:{slot_text}").as_bytes())
+                    .is_err()
+                {
+                    return;
+                }
                 let _ = fs::remove_dir_all(&staged);
                 let _ = cancel(root);
-                let _ =
-                    write_sync_marker(&active_marker, format!("rollback:{slot_text}").as_bytes());
                 if rollback_set_aside(&database, slot).is_ok() {
                     let promoted = if prior.exists() && !pending.exists() {
                         fs::rename(&prior, &pending).is_ok()
@@ -1881,11 +1890,13 @@ fn commit_corrupt_restore(
             if pending.exists()
                 && let Err(err) = fs::rename(&pending, &prior)
             {
-                let _ = fs::remove_dir_all(&staged);
-                let _ =
-                    write_sync_marker(&active_marker, format!("rollback:{slot_text}").as_bytes());
-                if rollback_set_aside(&database, &slot).is_ok() {
-                    let _ = fs::remove_file(&active_marker);
+                if write_sync_marker(&active_marker, format!("rollback:{slot_text}").as_bytes())
+                    .is_ok()
+                {
+                    let _ = fs::remove_dir_all(&staged);
+                    if rollback_set_aside(&database, &slot).is_ok() {
+                        let _ = fs::remove_file(&active_marker);
+                    }
                 }
                 return Err(RecoveryRestoreError::Backup(Error::new(
                     "Could not schedule the restore",
