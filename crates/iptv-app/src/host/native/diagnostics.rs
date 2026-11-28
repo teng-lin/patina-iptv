@@ -370,6 +370,7 @@ pub(crate) fn ensure_diagnostics_dir(data_dir: &Path) -> io::Result<PathBuf> {
     {
         return Err(io::Error::from(io::ErrorKind::InvalidData));
     }
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
