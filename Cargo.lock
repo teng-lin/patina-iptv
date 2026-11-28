@@ -2467,7 +2467,7 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "iptv-app"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -2523,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-cast"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "dbus",
  "futures-util",
@@ -2550,14 +2550,14 @@ dependencies = [
 
 [[package]]
 name = "iptv-core"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "zeroize",
 ]
 
 [[package]]
 name = "iptv-epg"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "flate2",
  "iptv-core",
@@ -2568,7 +2568,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-guide"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2577,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-import"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "flate2",
  "iptv-core",
@@ -2592,7 +2592,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-library"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "iptv-epg",
  "iptv-providers",
@@ -2600,11 +2600,11 @@ dependencies = [
 
 [[package]]
 name = "iptv-nav"
-version = "0.1.13"
+version = "0.1.14"
 
 [[package]]
 name = "iptv-net"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "cookie_store",
  "flate2",
@@ -2627,7 +2627,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-player-mpv"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "dispatch2",
  "iptv-core",
@@ -2654,7 +2654,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-presentation"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2668,7 +2668,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-providers"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "iptv-core",
  "percent-encoding",
@@ -2682,7 +2682,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-runtime"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "chrono",
  "futures-channel",
@@ -2716,7 +2716,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-search"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2725,21 +2725,21 @@ dependencies = [
 
 [[package]]
 name = "iptv-settings"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "iptv-sqlcipher-init"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "rusqlite",
 ]
 
 [[package]]
 name = "iptv-store-sqlite"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2762,7 +2762,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-tui"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "base64 0.22.1",
  "crossterm",
@@ -2786,7 +2786,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-web"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "futures-channel",
  "iptv-core",

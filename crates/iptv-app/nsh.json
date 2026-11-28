@@ -28,7 +28,9 @@
   },
   "ios": {
     "infoPlist": {
-      "UIBackgroundModes": ["audio"],
+      "UIBackgroundModes": [
+        "audio"
+      ],
       "UIDeviceFamily": [
         2
       ],
@@ -51,7 +53,7 @@
       }
     }
   },
-  "version": "0.1.13",
+  "version": "0.1.14",
   "schemes": [
     "patina"
   ]
