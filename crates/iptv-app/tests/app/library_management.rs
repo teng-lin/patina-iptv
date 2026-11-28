@@ -28,13 +28,35 @@ fn rail(app: &mut Headless) {
     step(app.press_key("left"));
 }
 // Use remote navigation for actions beyond the visible portion of the sheet.
-fn edit(app: &mut Headless, row: usize, label: &str, index: usize) {
+fn open_edit(app: &mut Headless, row: usize, label: &str, index: usize) {
     step(app.press(&format!("id:organization-row-{row}")));
     for _ in 0..index {
         step(app.press_key("down"));
     }
     step(app.wait_for(&format!("text:{label}")));
     step(app.press_key("enter"));
+}
+/// A saved edit closes its sheet only after the store write and the reload
+/// of the rows. Until then the database may hold the old state, and the
+/// editor ignores the next edit.
+fn wait_edit_done(app: &mut Headless, label: &str) {
+    step(app.wait_for_gone(&format!("text:{label}"), Duration::from_secs(5)));
+}
+fn edit(app: &mut Headless, row: usize, label: &str, index: usize) {
+    open_edit(app, row, label, index);
+    wait_edit_done(app, label);
+}
+fn choose(app: &mut Headless, label: &str) {
+    step(app.wait_for(&format!("text:{label}")));
+    step(app.press(&format!("text:{label}")));
+    wait_edit_done(app, label);
+}
+/// "Hide all" and "Show all" ask first.
+fn edit_all(app: &mut Headless, label: &str, index: usize) {
+    open_edit(app, 0, label, index);
+    step(app.wait_for("text:Confirm"));
+    step(app.press("text:Confirm"));
+    wait_edit_done(app, label);
 }
 fn submit_name(app: &mut Headless, field: &str) {
     step(app.submit(field));
@@ -131,8 +153,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press_key("enter"));
     step(app.wait_for("text:Organize channels"));
     step(app.press("id:organization-row-0"));
-    step(app.wait_for("text:Hide channel"));
-    step(app.press("text:Hide channel"));
+    choose(&mut app, "Hide channel");
     assert!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -147,12 +168,10 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
             .hidden
     );
     step(app.press("id:organization-row-0"));
-    step(app.wait_for("text:Show channel"));
-    step(app.press("text:Show channel"));
+    choose(&mut app, "Show channel");
     step(app.wait_for("id:organization-row-2"));
     step(app.press("id:organization-row-2"));
-    step(app.wait_for("text:Move to first"));
-    step(app.press("text:Move to first"));
+    choose(&mut app, "Move to first");
     assert_eq!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -162,23 +181,23 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
         "Local C"
     );
     // Rename, cancel and reset change overlays without changing provider identity.
-    edit(&mut app, 0, "Rename", 3);
+    open_edit(&mut app, 0, "Rename", 3);
     step(app.clear("text:Local C"));
     step(app.type_text("text:Empty restores the provider name", "Renamed C"));
     submit_name(&mut app, "text:Renamed C");
     assert_eq!(channels(&path, source)[0], "Renamed C");
-    edit(&mut app, 0, "Rename", 3);
+    open_edit(&mut app, 0, "Rename", 3);
     step(app.type_text("text:Renamed C", " unsaved"));
     step(app.back());
     assert_eq!(channels(&path, source)[0], "Renamed C");
     step(app.back());
-    edit(&mut app, 0, "Rename", 3);
+    open_edit(&mut app, 0, "Rename", 3);
     step(app.type_text("text:Renamed C", " discarded"));
     step(app.wait_for("text:Cancel"));
     step(app.press("text:Cancel"));
     assert_eq!(channels(&path, source)[0], "Renamed C");
     step(app.back());
-    edit(&mut app, 0, "Rename", 3);
+    open_edit(&mut app, 0, "Rename", 3);
     step(app.clear("text:Renamed C"));
     submit_name(&mut app, "text:Empty restores the provider name");
     assert_eq!(channels(&path, source)[0], "Local C");
@@ -202,14 +221,10 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     edit(&mut app, 0, "Show selected", 12);
     assert_eq!(channels(&path, source).len(), 3);
     edit(&mut app, 0, "Select / deselect for bulk visibility", 10);
-    edit(&mut app, 0, "Hide all", 13);
-    step(app.wait_for("text:Confirm"));
-    step(app.press("text:Confirm"));
+    edit_all(&mut app, "Hide all", 13);
     assert!(channels(&path, source).is_empty());
     assert!(app.screen().matches("id:organization-row-2").unwrap());
-    edit(&mut app, 0, "Show all", 14);
-    step(app.wait_for("text:Confirm"));
-    step(app.press("text:Confirm"));
+    edit_all(&mut app, "Show all", 14);
     assert_eq!(channels(&path, source).len(), 3);
     step(app.back());
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(2)));
@@ -218,8 +233,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press_key("enter"));
     step(app.wait_for("text:Organize groups"));
     step(app.press("id:organization-row-0"));
-    step(app.wait_for("text:Hide group"));
-    step(app.press("text:Hide group"));
+    choose(&mut app, "Hide group");
     assert!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -228,9 +242,8 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
             .hidden
     );
     step(app.press("id:organization-row-0"));
-    step(app.wait_for("text:Show group"));
-    step(app.press("text:Show group"));
-    edit(&mut app, 0, "Rename", 6);
+    choose(&mut app, "Show group");
+    open_edit(&mut app, 0, "Rename", 6);
     step(app.clear("text:News"));
     step(app.type_text("text:Empty restores the provider name", "Local news"));
     submit_name(&mut app, "text:Local news");
@@ -256,9 +269,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     edit(&mut app, 0, "Move later", 9);
     edit(&mut app, 1, "Move to first", 10);
     edit(&mut app, 0, "Restore provider order", 12);
-    edit(&mut app, 0, "Hide all", 16);
-    step(app.wait_for("text:Confirm"));
-    step(app.press("text:Confirm"));
+    edit_all(&mut app, "Hide all", 16);
     assert!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -267,9 +278,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
             .iter()
             .all(|g| g.hidden)
     );
-    edit(&mut app, 0, "Show all", 17);
-    step(app.wait_for("text:Confirm"));
-    step(app.press("text:Confirm"));
+    edit_all(&mut app, "Show all", 17);
     step(app.press("id:organization-screen >> text:Close"));
     // Back to actions, refresh interval and startup setting are persisted.
     for _ in 0..3 {
