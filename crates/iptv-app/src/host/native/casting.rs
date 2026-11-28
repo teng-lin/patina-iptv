@@ -62,6 +62,7 @@ struct Routes {
 struct Client {
     cast: Cast,
     airplay: bool,
+    generation: u64,
 }
 
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(5);
@@ -154,6 +155,7 @@ impl Sender {
                 cast: iptv_cast::test_support::sender(address)
                     .map_err(|error| map_error(&error))?,
                 airplay: false,
+                generation: 1,
             };
             *slot = Some(client.clone());
             return Ok(client);
@@ -167,6 +169,9 @@ impl Sender {
         {
             return Ok(client.clone());
         }
+        let generation = slot
+            .as_ref()
+            .map_or(1, |previous| previous.generation.wrapping_add(1));
         #[cfg(any(target_os = "linux", windows))]
         let client = if want_airplay {
             Client {
@@ -176,6 +181,7 @@ impl Sender {
                     .build()
                     .map_err(|error| map_error(&error))?,
                 airplay: true,
+                generation,
             }
         } else {
             Client {
@@ -184,6 +190,7 @@ impl Sender {
                     .build()
                     .map_err(|error| map_error(&error))?,
                 airplay: false,
+                generation,
             }
         };
         #[cfg(not(any(target_os = "linux", windows)))]
@@ -197,6 +204,7 @@ impl Sender {
                     .build()
                     .map_err(|error| map_error(&error))?,
                 airplay: want_airplay,
+                generation,
             }
         };
         if slot.is_some()
@@ -264,6 +272,16 @@ impl Port for Sender {
                 .map_err(|error| map_error(&error))?;
             #[cfg(target_os = "android")]
             let current = android::topology()?;
+            // Do not publish routes from a Cast client that was replaced mid-scan.
+            let current_generation = self
+                .client
+                .lock()
+                .await
+                .as_ref()
+                .map(|active| active.generation);
+            if current_generation != Some(client.generation) {
+                return Ok(Vec::new());
+            }
             let mut route_cache = self.routes.lock().map_err(|_| Error::Unavailable)?;
             *route_cache = Routes::default();
             #[cfg(target_os = "android")]

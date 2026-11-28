@@ -160,9 +160,7 @@ pub(crate) fn local_ipv4_subnet() -> Option<String> {
         let default_ip = default_route_ipv4();
         let candidates = lan_ipv4_interfaces();
         if let Some(default_ip) = default_ip
-            && let Some((_, cidr)) = candidates
-                .iter()
-                .find(|(ip, _)| *ip == default_ip && ip.is_private())
+            && let Some((_, cidr)) = candidates.iter().find(|(ip, _)| *ip == default_ip)
         {
             return Some(cidr.clone());
         }

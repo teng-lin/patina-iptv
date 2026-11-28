@@ -85,6 +85,7 @@ fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewa
         .as_deref()
         .or(help.subnet.as_deref())
         .unwrap_or("192.168.1.0/24");
+    let family = if source.contains(':') { "ipv6" } else { "ipv4" };
     let mut lines = Vec::new();
     for (port, proto) in [(help.tcp_port, "tcp"), (help.udp_port, "udp")] {
         let Some(port) = port else { continue };
@@ -93,7 +94,7 @@ fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewa
                 "sudo ufw allow from {source} to any port {port} proto {proto}"
             )),
             crate::host::LinuxFirewall::Firewalld => lines.push(format!(
-                "sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"{source}\" port port=\"{port}\" protocol=\"{proto}\" accept'"
+                "sudo firewall-cmd --add-rich-rule='rule family=\"{family}\" source address=\"{source}\" port port=\"{port}\" protocol=\"{proto}\" accept'"
             )),
         }
     }

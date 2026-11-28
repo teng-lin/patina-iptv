@@ -456,8 +456,8 @@ impl Records {
             let txt = |key: &str| {
                 entry.txt.iter().find_map(|raw| {
                     let text = std::str::from_utf8(raw).ok()?;
-                    let rest = text.strip_prefix(key)?;
-                    rest.strip_prefix('=')
+                    let (name, value) = text.split_once('=')?;
+                    name.eq_ignore_ascii_case(key).then_some(value)
                 })
             };
             let record_identity = txt("deviceid").and_then(normalize_identity);

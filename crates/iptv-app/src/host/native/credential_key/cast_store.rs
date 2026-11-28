@@ -153,7 +153,7 @@ impl CredentialStore for CastStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub(super) fn verify_disposable_pairing_store() {
     assert_eq!(
         std::env::var("IPTV_TEST_ISOLATED_BROKER").as_deref(),
