@@ -811,8 +811,24 @@ fn account_streams(home: &crate::isolated::Home, scenario: AccountScenario) {
     } else {
         "id:guide-row >> text:/^Test Channel One$/ >> nth=0"
     };
-    step(app.wait_for_within(first, IMPORT));
+    if another_playlist {
+        step(app.wait_until(
+            "both accounts imported before choosing Alpha's channel",
+            IMPORT,
+            |screen| {
+                screen
+                    .count("id:guide-row >> text:/^Test Channel One$/")
+                    .unwrap()
+                    == 2
+            },
+        ));
+    } else {
+        step(app.wait_for_within(first, IMPORT));
+    }
     step(app.press(first));
+    if !native_primary {
+        step(app.wait_for("id:guide-header-details >> text:/^Alpha · /"));
+    }
     step(
         app.wait_until("primary account stream and native delivery", IMPORT, |_| {
             // Source calculation precedes delivery of the mount batch to the test
