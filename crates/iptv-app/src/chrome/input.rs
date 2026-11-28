@@ -28,24 +28,6 @@ pub(crate) use back::swallow_back;
 use back::{act, swallow_release};
 use keys::{DIGITS, KEYS, RawKeys};
 
-impl Ui {
-    /// A touch or a click on any control: touch or pointer mode, whichever
-    /// made the press.
-    pub fn touched(&self) {
-        self.chrome.exit_deadline.set(None);
-        // PIN entry continues the choice that opened the prompt. Dismissing
-        // the prompt cancels it in `parental_view::abort`.
-        if self.top_overlay() != Some(crate::chrome::overlays::Overlay::Parental) {
-            crate::playback::external_player::cancel_pending(*self);
-        }
-        self.playback.pending_zap.set(None);
-        crate::playback::browse_playback::activity(*self);
-        self.chrome
-            .input
-            .set(self.chrome.last_press.get_untracked());
-    }
-}
-
 /// A TV remote's profile (Android, a browser TV) distinguishes a tap from
 /// a held key.
 const REMOTE_KEYS: bool = crate::host::REMOTE_KEYS;
@@ -155,7 +137,7 @@ enum Capture {
 }
 
 /// What takes the keys now, if anything (tracked).
-fn capture(ui: Ui) -> Option<Capture> {
+fn capture(ui: crate::ScreensUi) -> Option<Capture> {
     crate::screens::parental_view::prompt(ui)
         .map(Capture::Pin)
         .or_else(|| crate::chrome::remote_editor::capturing(ui).then_some(Capture::Editor))
@@ -187,13 +169,13 @@ fn surface(ui: &Ui) -> Surface {
                 .with(|list| list.map(|list| InputOwner::ChannelList(list.pane)))
                 .unwrap_or(InputOwner::Overlay(overlay))
         } else if overlay == crate::chrome::overlays::Overlay::Settings
-            && let Some(id) = crate::screens::settings_view::focused_playlist(*ui)
+            && let Some(id) = crate::screens::settings_view::focused_playlist(ui.screens)
         {
             InputOwner::SettingsPlaylist(id)
         } else {
             InputOwner::Overlay(overlay)
         }
-    } else if crate::playback::multiview::is_open(*ui) {
+    } else if crate::playback::multiview::is_open(ui.playback) {
         InputOwner::Multiview
     } else if ui.chrome.mode.get() == ViewMode::Fullscreen {
         if crate::playback::play_bar::captures(*ui) {
@@ -368,7 +350,7 @@ pub fn context(ui: &Ui) -> Context {
     if let Some(overlay) = ui.top_overlay() {
         return overlay.key_context();
     }
-    if crate::playback::multiview::is_open(*ui) {
+    if crate::playback::multiview::is_open(ui.playback) {
         return Context::Multiview; // Up/Down/Left/Right, OK, Long OK, Menu
     }
     match (ui.chrome.mode.get(), ui.guide.focus.with(|f| f.pane)) {
@@ -457,7 +439,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     // say) takes that key as one a key event under it would.
     let nav = input.nav.clone();
     effect(move || {
-        let now = capture(ui);
+        let now = capture(ui.screens);
         let mut nav = nav.borrow_mut();
         if nav.session(now).1 {
             nav.cut_short();
@@ -525,7 +507,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
 
 fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if ui.playback.player_surface != 0
-        && crate::playback::pip::in_window(ui)
+        && crate::playback::pip::in_window(ui.playback)
         && !matches!(
             key,
             RemoteKey::PlayPause | RemoteKey::Play | RemoteKey::Pause | RemoteKey::Stop
@@ -549,7 +531,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if key == RemoteKey::Back && phase == Phase::Down {
         ui.chrome.back_guard.update(BackGuard::pressed);
     }
-    let captured = untracked(|| capture(ui));
+    let captured = untracked(|| capture(ui.screens));
     let session = nav.borrow_mut().session(captured.clone()).0;
     if key == RemoteKey::Back {
         let mut nav = nav.borrow_mut();
@@ -598,7 +580,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
                 if pin {
                     crate::screens::parental_view::remote(ui, key);
                 } else {
-                    crate::chrome::remote_editor::capture(ui, key);
+                    crate::chrome::remote_editor::capture(ui.screens, key);
                 }
             }
         }
@@ -653,7 +635,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         let has_long = long_press()
             && nav.keymap.has_long(ctx, key)
             && (crate::chrome::remote_editor::overridden(ctx, key)
-                || !crate::playback::player_keys::seeks(&ui, ctx, key));
+                || !crate::playback::player_keys::seeks(ui.playback, ctx, key));
         let decision = nav.presses.feed(here, key, phase, now, has_long);
         let deadline = (phase == Phase::Down)
             .then(|| nav.presses.long_deadline_ms())
@@ -695,7 +677,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
             // The surface of the moment: a press whose surface changed
             // while it was held does nothing (`HeldPresses`), nor does one
             // that a PIN prompt or the remote editor now captures.
-            let captured = untracked(|| capture(ui)).is_some();
+            let captured = untracked(|| capture(ui.screens)).is_some();
             let decision = nav.borrow_mut().presses.poll(surface(&ui), ui.now_ms());
             let Some(decision) = decision else {
                 return;
@@ -841,7 +823,7 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
         return;
     }
     if action != Action::Ignore {
-        crate::playback::external_player::cancel_pending(ui);
+        crate::playback::external_player::cancel_pending(ui.cast);
     }
     if player_actions::auxiliary(ui, action) {
         return;
@@ -862,7 +844,7 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
     if modal_actions::apply(ui, action) {
         return;
     }
-    if crate::playback::multiview::is_open(ui) {
+    if crate::playback::multiview::is_open(ui.playback) {
         crate::playback::multiview::key(ui, action);
         return;
     }
@@ -904,7 +886,7 @@ mod tests {
                 crate::playback::player::Player::new(),
             )
         });
-        crate::playback::external_player::cancel_pending(ui);
+        crate::playback::external_player::cancel_pending(ui.cast);
         view()
             .child(text(move || {
                 format!("Request {}", ui.cast.external.request.get())

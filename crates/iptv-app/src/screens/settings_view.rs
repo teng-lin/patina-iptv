@@ -140,12 +140,14 @@ pub fn open(ui: Ui) {
         == "blocked_content_and_settings"
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        request(ui, iptv_core::parental::Target::settings(), move || {
-            open(ui)
-        });
+        request(
+            ui.screens,
+            iptv_core::parental::Target::settings(),
+            move || open(ui),
+        );
         return;
     }
-    if !is_open(ui) {
+    if !is_open(ui.screens) {
         // A document picker may have been installed or removed since the
         // host last said which resolve (the backup rows follow).
         crate::library_ui::backup::probe_pickers();
@@ -156,32 +158,31 @@ pub fn open(ui: Ui) {
     }
 }
 
-pub fn close(ui: Ui) {
+pub fn close(screens: crate::ScreensUi) {
     crate::wiring::runtime_owner::runtime().parental_content_closed();
-    if let Some(page) = ui
-        .screens
+    if let Some(page) = screens
         .settings_screen
         .with_untracked(|s| s.as_ref().map(|s| s.page().key))
     {
         LAST.with(|l| l.set(page));
     }
-    let typing = editing_text(ui);
-    if ui.screens.settings_screen.with_untracked(Option::is_some) {
+    let typing = editing_text(screens);
+    if screens.settings_screen.with_untracked(Option::is_some) {
         log::info!("iptv settings: close");
     }
-    ui.screens.settings_screen.set(None);
+    screens.settings_screen.set(None);
     if typing {
         dismiss_keyboard();
     }
 }
 
 /// The screen is shown and takes the remote.
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.settings_screen.with(Option::is_some)
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.settings_screen.with(Option::is_some)
 }
 
-fn editing_text(ui: Ui) -> bool {
-    ui.screens.settings_screen.with_untracked(|s| {
+fn editing_text(screens: crate::ScreensUi) -> bool {
+    screens.settings_screen.with_untracked(|s| {
         s.as_ref()
             .is_some_and(|s| matches!(s.editor(), Some(Editor::Text { .. })))
     })
@@ -229,7 +230,7 @@ pub(crate) fn playlists_changed(ui: Ui) {
 
 /// Changes playlist visibility from a checkbox after the settings PIN check.
 pub(crate) fn set_playlist_visibility(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
-    settings_guarded(ui, move || show_playlist(ui, id, show));
+    settings_guarded(ui.screens, move || show_playlist(ui, id, show));
 }
 
 fn show_playlist(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
@@ -277,7 +278,7 @@ fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
 /// Changes the screen with what the app knows now, then carries out what
 /// it answers.
 fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
-    let typing = editing_text(ui);
+    let typing = editing_text(ui.screens);
     let mut effect = Effect::None;
     with_ctx(|ctx| {
         ui.screens.settings_screen.update(|s| {
@@ -286,7 +287,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
             }
         });
     });
-    if typing && !editing_text(ui) {
+    if typing && !editing_text(ui.screens) {
         dismiss_keyboard();
     }
     match effect {
@@ -298,11 +299,11 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                 && (!crate::wiring::runtime_owner::runtime().parental_has_pin()
                     || !crate::wiring::runtime_owner::runtime().parental_settings_allowed())
             {
-                crate::screens::parental_view::protected_settings(ui, move || {
-                    store(ui, key, value)
+                crate::screens::parental_view::protected_settings(ui.screens, move || {
+                    store(ui.cast, key, value)
                 });
             } else {
-                store(ui, key, value);
+                store(ui.cast, key, value);
             }
         }
         // Playlist rows act on the settings as the commands do: behind the
@@ -310,24 +311,24 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
         Effect::ShowPlaylist(id, show) => {
             set_playlist_visibility(ui, crate::runtime::model::SourceId(id), show);
         }
-        Effect::PlaylistActions(id) => settings_guarded(ui, move || {
+        Effect::PlaylistActions(id) => settings_guarded(ui.screens, move || {
             crate::chrome::menu_view::open_playlist_options(
-                ui,
+                ui.screens,
                 crate::runtime::model::SourceId(id),
             );
         }),
         Effect::Run(key) => run(ui, key),
-        Effect::Close => close(ui),
+        Effect::Close => close(ui.screens),
     }
 }
 
-fn store(ui: Ui, key: &'static str, value: Value) {
+fn store(cast: crate::screens::casting::CastUi, key: &'static str, value: Value) {
     let enabling_linux_airplay = crate::host::LINUX
         && key == iptv_settings::keys::AIRPLAY_CASTING.as_str()
         && value == Value::Bool(true);
     match save_setting(key, value) {
         Ok(()) if enabling_linux_airplay => {
-            crate::screens::cast_pairing::show_linux_airplay_setup(ui);
+            crate::screens::cast_pairing::show_linux_airplay_setup(cast);
         }
         Ok(()) => {}
         Err(error) => notify_setting_error(error),
@@ -366,12 +367,12 @@ fn run(ui: Ui, key: &'static str) {
             == "blocked_content_and_settings"
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::screens::parental_view::protected_settings(ui, move || run(ui, key));
+        crate::screens::parental_view::protected_settings(ui.screens, move || run(ui, key));
         return;
     }
     match key {
         "history.clear" => {
-            crate::playback::player::watch_time::reset(ui);
+            crate::playback::player::watch_time::reset(ui.playback);
             let owner = crate::wiring::runtime_owner::runtime();
             let saved = owner.clear_watch_history();
             ui.playback
@@ -399,16 +400,16 @@ fn run(ui: Ui, key: &'static str) {
             });
         }
         "general.backup" => request(
-            ui,
+            ui.screens,
             iptv_core::parental::Target::settings(),
             crate::library_ui::backup::export_ui,
         ),
         "general.restore" => crate::library_ui::backup::request_restore(ui),
         "epg.update_now" => {
             if stored::update_now(&crate::wiring::runtime_owner::runtime(), move || {
-                refresh(ui)
+                refresh(ui.app)
             }) {
-                refresh(ui);
+                refresh(ui.app);
             } else {
                 notify(tr("This playlist has no guide source switched on"));
             }
@@ -424,17 +425,17 @@ fn run(ui: Ui, key: &'static str) {
                 } else {
                     tr("The guide data could not be deleted")
                 });
-                refresh(ui);
+                refresh(ui.app);
             });
             if !cleared {
                 notify(tr("No playlist on screen"));
             }
         }
-        "remote.customize" => crate::chrome::remote_editor::open(ui),
+        "remote.customize" => crate::chrome::remote_editor::open(ui.screens),
         // The playlists screen, over the settings screen.
-        "playlists.manage" => crate::wiring::navigation::manage_playlists(ui),
+        "playlists.manage" => crate::wiring::navigation::manage_playlists(ui.screens),
         "playlists.show_all" => {
-            close(ui);
+            close(ui.screens);
             crate::wiring::data::switch_all(&crate::runtime());
         }
         // As the playlists screen's Add: behind the PIN once one is set.
@@ -446,8 +447,8 @@ fn run(ui: Ui, key: &'static str) {
     }
 }
 
-fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.screens.settings_screen.with(|s| s.as_ref().map(f))
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Screen) -> R) -> Option<R> {
+    screens.settings_screen.with(|s| s.as_ref().map(f))
 }
 
 fn status(settings: &Settings, row: &Row) -> Status {

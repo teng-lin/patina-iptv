@@ -440,7 +440,7 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
-    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Only Beta", Duration::from_secs(20)));
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▶"));
@@ -459,11 +459,15 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     step(app.press_key("right"));
     step(app.wait_for("role:grid[News]"));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
-    assert!(!app.screen().matches("text:/^Only Beta · Beta/").unwrap());
+    assert!(
+        !app.screen()
+            .matches("id:guide-row >> text:/^Only Beta$/")
+            .unwrap()
+    );
 
-    step(app.press("text:/^Only Alpha · Alpha/"));
+    step(app.press("text:Only Alpha"));
     step(app.wait_for("text:▶"));
-    step(app.press("text:/^Only Alpha · Alpha/"));
+    step(app.press("text:Only Alpha"));
     step(app.wait_for("label:Video"));
     step(app.press("label:Video"));
     step(app.wait_for("label:Multiview"));
@@ -507,8 +511,12 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     step(app.press_key("f"));
     step(app.wait_for("role:grid[News]"));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
-    step(app.wait_for("text:/^Only Alpha · Alpha/"));
-    assert!(!app.screen().matches("text:/^Only Beta · Beta/").unwrap());
+    step(app.wait_for("text:Only Alpha"));
+    assert!(
+        !app.screen()
+            .matches("id:guide-row >> text:/^Only Beta$/")
+            .unwrap()
+    );
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▶"));
@@ -553,11 +561,19 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     })
     .unwrap();
     // Multiple enabled sources are the default, without a visit to management.
-    step(app.wait_for_within("text:/^Shared · Alpha/", Duration::from_secs(20)));
-    step(app.wait_for("text:/^Shared · Beta/"));
+    step(app.wait_for_within("id:guide-row >> text:Shared", Duration::from_secs(20)));
     step(app.wait_for_within("text:Alpha bulletin", Duration::from_secs(20)));
     step(app.wait_for_within("text:Beta bulletin", Duration::from_secs(20)));
-    step(app.wait_for("id:guide-row >> text:/^Beta Sports · Beta/"));
+    step(app.wait_for("id:guide-row >> text:Beta Sports"));
+    assert_eq!(
+        app.screen().count("id:guide-row >> text:Shared").unwrap(),
+        2
+    );
+    assert!(
+        !app.screen()
+            .matches("id:guide-row >> text:/ · (Alpha|Beta)/")
+            .unwrap()
+    );
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 5);
 
     step(app.wait_for("id:guide-header-details >> text:Shared"));
@@ -590,7 +606,7 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
 
     // These shared rows have the same original provider key. The header
     // follows Beta's source, and editing Beta preserves Alpha's membership.
-    step(app.press("text:/^Shared · Beta/"));
+    step(app.press("id:guide-row >> text:Shared >> nth=1"));
     step(app.wait_for("id:guide-header-details >> text:Shared"));
     step(app.wait_for("id:guide-header-details >> text:Beta · News"));
     step(app.press_key("m"));
@@ -676,8 +692,16 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     step(app.press_key("/"));
     step(app.wait_for("id:search-field"));
     step(app.type_text("id:search-field", "shared"));
-    step(app.wait_for_within("text:/Shared · Alpha/", Duration::from_secs(10)));
-    step(app.wait_for("text:/Shared · Beta/"));
+    step(app.wait_until(
+        "both Shared channels in search results",
+        Duration::from_secs(10),
+        |screen| screen.count("id:search-result >> text:/Shared$/").unwrap() == 2,
+    ));
+    assert!(
+        !app.screen()
+            .matches("id:search-result >> text:/ · (Alpha|Beta)/")
+            .unwrap()
+    );
     step(app.clear("id:search-field"));
     step(app.type_text("id:search-field", "bulletin"));
     step(app.wait_for("text:/^Programs/"));
@@ -792,7 +816,7 @@ fn playlist_popup_hides_and_settings_restores_the_original_playlist() {
     let interval_hour = "id:playlist-menu-panel >> text:Automatic refresh: every hour";
     let startup = "id:playlist-menu-panel >> text:Refresh on startup: Yes";
     let no_startup = "id:playlist-menu-panel >> text:Refresh on startup: No";
-    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.wait_for("text:Only Beta"));
     step(app.open_guide_groups());
     step(app.long_press(alpha_heading));
     step(app.wait_for(hide));
@@ -912,7 +936,7 @@ fn playlist_popup_hides_and_settings_restores_the_original_playlist() {
         |_| load().source_policy(alpha).unwrap().enabled,
     ));
     step(app.press("id:settings-content >> role:button[Close]"));
-    step(app.wait_for("text:/^Only Alpha · Alpha/"));
+    step(app.wait_for("text:Only Alpha"));
     assert!(!load().source_policy(gamma).unwrap().enabled);
 
     // Settings exposes a direct delete control for hidden sources, too.
@@ -1203,7 +1227,7 @@ fn playlist_reorder_from_settings_and_guide_restores_expansion_and_visibility() 
         }
         assert_eq!(load().collapsed_playlists().unwrap(), [beta.0]);
     };
-    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.wait_for("text:Only Beta"));
     step(app.open_guide_groups());
     restored(&mut app);
     let command = "id:playlist-menu-panel >> text:Reorder playlist";
@@ -1410,7 +1434,7 @@ fn persisted_combined_mode_recovers_disabled_and_failed_sources_and_deletion() {
     step(app.wait_for_gone("role:checkbox[/Disabled/]", Duration::from_secs(5)));
     step(app.back());
     step(app.back());
-    step(app.wait_for_within("text:/^Only Alpha · Alpha/", Duration::from_secs(15)));
+    step(app.wait_for_within("text:Only Alpha", Duration::from_secs(15)));
     step(app.wait_until(
         "failed refresh recorded with cache retained",
         Duration::from_secs(15),
@@ -1495,7 +1519,7 @@ fn leaving_combined_mode_cancels_a_missing_startup_channel_before_manual_return(
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
-    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Only Beta", Duration::from_secs(20)));
     playlists(&mut app);
     actions(&mut app, "Alpha");
     step(app.wait_for("text:Show this playlist"));
@@ -1529,7 +1553,7 @@ fn leaving_combined_mode_cancels_a_missing_startup_channel_before_manual_return(
     });
     playlists(&mut app);
     step(app.press("id:settings-content >> text:Show all playlists"));
-    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Only Beta", Duration::from_secs(20)));
     step(app.wait_for_within("text:Beta bulletin", Duration::from_secs(20)));
     assert!(
         opened.lock().unwrap().is_empty(),
@@ -1567,7 +1591,7 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
         .unwrap()
     };
     let mut app = start();
-    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Only Beta", Duration::from_secs(20)));
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▼"));
@@ -1588,7 +1612,7 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
         1
     );
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
-    step(app.wait_for("text:/^Only Alpha · Alpha/"));
+    step(app.wait_for("text:Only Alpha"));
     assert_eq!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -1605,18 +1629,18 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> text:    News >> nth=1"));
     step(app.press("id:guide-groups >> text:    News >> nth=1"));
-    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.wait_for("text:Only Beta"));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
     // Fold Alpha again, then move down: Beta's header is the very next row.
     step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.press_key("down"));
     step(app.press_key("right"));
     step(app.wait_for("role:grid[Beta]"));
-    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.wait_for("text:Only Beta"));
     drop(app);
     // Expansion survives a fresh application, while all channels stay available.
     let mut app = start();
-    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Only Beta", Duration::from_secs(20)));
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▶"));
     step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▼"));
@@ -1647,7 +1671,7 @@ fn playlist_section_navigation_does_not_wait_for_the_expansion_writer() {
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
-    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Only Beta", Duration::from_secs(20)));
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▼"));
@@ -1662,7 +1686,7 @@ fn playlist_section_navigation_does_not_wait_for_the_expansion_writer() {
     step(app.press_key("down"));
     step(app.press_key("right"));
     step(app.wait_for("role:grid[Beta]"));
-    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.wait_for("text:Only Beta"));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
     // More folds queue before any save can finish; each uses the immediately
     // preceding projection, and the final fold is the one persisted.
@@ -1700,7 +1724,7 @@ fn playlist_section_navigation_does_not_wait_for_the_expansion_writer() {
     ));
     // The later save/rebuild must preserve Beta by identity, too.
     step(app.wait_for("role:grid[Beta]"));
-    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.wait_for("text:Only Beta"));
 }
 
 #[test]
@@ -1718,7 +1742,7 @@ fn a_failed_expansion_save_preserves_a_newer_choice_and_recovers_the_last_failur
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
-    step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Only Beta", Duration::from_secs(20)));
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     let writer = rusqlite::Connection::open(&path).unwrap();
@@ -1819,8 +1843,8 @@ fn adding_second_playlist_opens_combined_browser_without_management_switch() {
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", Duration::from_secs(20)));
     step(app.press("text:Watch"));
-    step(app.wait_for_within("text:/^Only Alpha · Alpha/", Duration::from_secs(20)));
-    step(app.wait_for("text:/^Added Beta · /"));
+    step(app.wait_for_within("text:Only Alpha", Duration::from_secs(20)));
+    step(app.wait_for("text:Added Beta"));
     step(app.wait_for("role:grid[All playlists]"));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 3);
     assert!(
@@ -1990,7 +2014,7 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
     step(app.wait_for_within("text:Playlist added", Duration::from_secs(20)));
     step(app.press("text:Watch"));
     step(app.wait_for_within("role:grid[All playlists]", Duration::from_secs(20)));
-    step(app.wait_for("text:/^Imported Beta Two · /"));
+    step(app.wait_for("text:Imported Beta Two"));
     wait_for_requests(
         &mut app,
         "original guide download waiting",
@@ -2041,7 +2065,7 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
     step(app.fast_forward(Duration::from_secs(7 * 3600)));
     step(app.wait_for_within("text:Delayed Beta guide 2", Duration::from_secs(20)));
     assert_eq!(accounts.load(Ordering::SeqCst), 1);
-    step(app.press("text:/^Imported Beta One · /"));
+    step(app.press("text:Imported Beta One"));
     step(app.wait_until(
         "TS-only account stream opened",
         Duration::from_secs(5),
@@ -2053,7 +2077,7 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
                 .any(|url| url.ends_with("/1.ts"))
         },
     ));
-    step(app.press("text:/^Imported Beta One · /"));
+    step(app.press("text:Imported Beta One"));
     step(app.wait_for("label:Video"));
     step(app.press("label:Video"));
     step(app.wait_for("label:Multiview"));
@@ -2069,8 +2093,8 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
     step(app.type_text("id:multiview-channel-search", "Imported Beta"));
     step(app.wait_for("text:No matching channels. Clear the search or choose another group."));
     step(app.press(&format!("{picker} >> text:All playlists")));
-    step(app.wait_for(&format!("{picker} >> text:/^4  Imported Beta Two · /")));
-    step(app.press(&format!("{picker} >> text:/^4  Imported Beta Two · /")));
+    step(app.wait_for(&format!("{picker} >> text:4  Imported Beta Two")));
+    step(app.press(&format!("{picker} >> text:4  Imported Beta Two")));
     step(app.wait_for("text:Your account allows 1 stream at once"));
 }
 
@@ -2136,7 +2160,7 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
     step(app.wait_for_within("text:Playlist added", Duration::from_secs(20)));
     step(app.press("text:Watch"));
     step(app.wait_for_within("role:grid[All playlists]", Duration::from_secs(20)));
-    step(app.wait_for_within("text:/^Imported Beta Two · /", Duration::from_secs(20)));
+    step(app.wait_for_within("text:Imported Beta Two", Duration::from_secs(20)));
     assert_eq!(
         accounts.load(Ordering::SeqCst),
         2,
@@ -2145,8 +2169,12 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
     *release.0.lock().unwrap() = true;
     release.1.notify_all();
     step(app.wait_for_within("text:Delayed Beta guide 1", Duration::from_secs(20)));
-    step(app.wait_for("text:/^Added Alpha · /"));
-    assert!(!app.screen().matches("text:/^Cached Beta · /").unwrap());
+    step(app.wait_for("text:Added Alpha"));
+    assert!(
+        !app.screen()
+            .matches("id:guide-row >> text:/^Cached Beta$/")
+            .unwrap()
+    );
 }
 
 enum PreviousGuideAction {
@@ -2335,7 +2363,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
     step(app.press("text:Watch"));
     step(app.wait_for_within("role:grid[All playlists]", Duration::from_secs(20)));
     step(app.wait_for("text:Previous original guide"));
-    step(app.wait_for("text:/^Second channel · /"));
+    step(app.wait_for("text:Second channel"));
     step(app.wait(Duration::from_millis(300)));
     assert_eq!(
         feed_requests.load(Ordering::SeqCst),
@@ -2474,14 +2502,21 @@ fn forty_cached_sources_open_while_both_network_workers_are_stalled() {
     step(app.press_key("right"));
     let deadline =
         std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
-    while app.screen().count("text:Cached 39 · Cached 39").unwrap() == 0
+    while app
+        .screen()
+        .count("id:guide-row >> text:Cached 39")
+        .unwrap()
+        == 0
         && std::time::Instant::now() < deadline
     {
         step(app.press_key("down"));
         app.idle(Duration::from_millis(10)).unwrap();
     }
     assert!(
-        app.screen().count("text:Cached 39 · Cached 39").unwrap() > 0,
+        app.screen()
+            .count("id:guide-row >> text:Cached 39")
+            .unwrap()
+            > 0,
         "the final cached source must hydrate while both refresh workers are stalled"
     );
     stop.store(true, std::sync::atomic::Ordering::Relaxed);

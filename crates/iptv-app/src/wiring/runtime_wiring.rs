@@ -51,18 +51,18 @@ pub(crate) fn start(ui: Ui) {
             .or_else(|| runtime().cast_parental_target());
         runtime().set_foreground_for_external(!background, target.as_ref());
         if was_background.replace(background) && !background && crate::host::ANDROID {
-            crate::playback::external_player::returned(ui);
+            crate::playback::external_player::returned(ui.cast);
         }
         if background && !runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");
         }
     });
     tasks::bind_owner();
-    crate::wiring::data::stored::bind(ui);
-    crate::screens::search_view::load_saved_history(ui);
+    crate::wiring::data::stored::bind(ui.app);
+    crate::screens::search_view::load_saved_history(ui.screens);
     let owner = runtime();
     owner.bind_browser(move || crate::runtime::BrowserState {
-        focused_key: crate::wiring::runtime_events::focused_channel(ui)
+        focused_key: crate::wiring::runtime_events::focused_channel(ui.guide)
             .and_then(|channel| schedule().channel_key(channel)),
         playing: ui.playback.playing.get_untracked().is_some(),
     });

@@ -227,7 +227,7 @@ pub(super) fn now_playing(ui: Ui, size: Scale) -> impl IntoElement {
         move || ui.playback.player.recorded.with(Option::is_some),
         move || {
             style::action(
-                ui,
+                ui.chrome,
                 size,
                 tr("Return to playback"),
                 || false,
@@ -297,7 +297,7 @@ pub(super) fn delete_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
                             tr("Cancel"),
                             move || ui.screens.recordings.with(|s| !s.delete_selected),
                             move || {
-                                back(ui);
+                                back(ui.screens);
                             },
                         ))
                         .child(ui_kit::button(

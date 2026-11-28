@@ -75,11 +75,10 @@ pub(crate) fn start_import_with(
                     return;
                 }
                 let authorization = owner.parental_snapshot();
-                let admission = job.clone();
                 let auth = authorization.clone();
                 let admission = services
                     .parental()
-                    .import_allowed_for(admission, auth)
+                    .import_allowed_for(job.stored, job.source.config.clone(), job.edit, auth)
                     .await;
                 let failure = match admission {
                     _ if cancel.is_canceled() || !services.is_current() => {

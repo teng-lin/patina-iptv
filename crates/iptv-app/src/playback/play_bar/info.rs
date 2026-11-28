@@ -1,7 +1,6 @@
 //! Compact single-line program metadata above the transport controls.
 
 use iptv_core::guide::Listing;
-use iptv_presentation::touch_zap::Direction;
 use iptv_presentation::tracks::fps_label;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
@@ -31,7 +30,7 @@ struct ProgramInfo {
 }
 
 fn program_info(ui: Ui) -> Option<ProgramInfo> {
-    if crate::playback::on_demand::active(ui) || ui.playback.playing.get().is_none() {
+    if crate::playback::on_demand::active(ui.playback) || ui.playback.playing.get().is_none() {
         return None;
     }
     let (channel, program) = progress::program(ui);
@@ -77,7 +76,7 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
         move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::chrome::scale::phone();
     let show_next = move || next.with(Option::is_some) && window().width.0 >= NEXT_MIN_WIDTH;
     let has_title = move || {
-        crate::playback::on_demand::title(ui)
+        crate::playback::on_demand::title(ui.playback)
             .or_else(|| program.with(|p| p.as_ref().map(|p| p.title.clone())))
             .is_some_and(|title| !title.trim().is_empty())
     };
@@ -121,19 +120,6 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                         .text_color(secondary)
                     },
                 ))
-                // Ch± for a finger (#285): live only; direct flex sibling so it
-                // never shrinks or overlaps the program title.
-                .child(when(
-                    move || program.with(Option::is_some) && crate::playback::touch_zap::live(ui),
-                    move || {
-                        view()
-                            .flex_row()
-                            .flex_shrink_0()
-                            .gap(px(4.0))
-                            .child(crate::playback::touch_zap::button(ui, Direction::Previous))
-                            .child(crate::playback::touch_zap::button(ui, Direction::Next))
-                    },
-                ))
                 .child(when(
                     move || program.with(Option::is_some) && has_title(),
                     move || {
@@ -145,11 +131,11 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                 ))
                 .child(
                     text(move || {
-                        crate::playback::on_demand::title(ui)
+                        crate::playback::on_demand::title(ui.playback)
                             .or_else(|| program.with(|p| p.as_ref().map(|p| p.title.clone())))
                             .filter(|title| !title.trim().is_empty())
                             .or_else(|| {
-                                (!crate::playback::on_demand::active(ui)
+                                (!crate::playback::on_demand::active(ui.playback)
                                     && program.with(Option::is_none))
                                 .then(|| ui.playback.playing.get().map(channel_name))
                                 .flatten()

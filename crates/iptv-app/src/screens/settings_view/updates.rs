@@ -25,15 +25,15 @@ pub(crate) fn bind(ui: crate::Ui) {
     }
 }
 
-pub(crate) fn is_open(ui: crate::Ui) -> bool {
-    ui.screens.update_dialog_open.get()
+pub(crate) fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.update_dialog_open.get()
 }
 
-pub(crate) fn close(ui: crate::Ui) {
+pub(crate) fn close(screens: crate::ScreensUi) {
     if AVAILABLE {
-        view::close(ui);
+        view::close(screens);
     } else {
-        ui.screens.update_dialog_open.set(false);
+        screens.update_dialog_open.set(false);
     }
 }
 
@@ -55,14 +55,14 @@ pub(crate) fn notice_open(ui: crate::Ui) -> bool {
     AVAILABLE && view::notice_open(ui)
 }
 
-pub(crate) fn dismiss_notice(ui: crate::Ui) {
+pub(crate) fn dismiss_notice(screens: crate::ScreensUi) {
     if AVAILABLE {
-        view::dismiss_notice(ui);
+        view::dismiss_notice(screens);
     }
 }
 
-pub(crate) fn notice_key(ui: crate::Ui, action: iptv_nav::Action) {
+pub(crate) fn notice_key(screens: crate::ScreensUi, action: iptv_nav::Action) {
     if AVAILABLE {
-        view::notice_key(ui, action);
+        view::notice_key(screens, action);
     }
 }

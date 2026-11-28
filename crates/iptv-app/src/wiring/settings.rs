@@ -90,8 +90,3 @@ pub fn long_press_ms() -> u64 {
 pub fn playlists_by_hand() -> bool {
     choice(keys::PLAYLIST_SORT) == "manual"
 }
-
-/// The network settings of provider requests.
-pub fn network_config() -> crate::runtime::network::NetworkConfig {
-    crate::runtime_owner::runtime().network_config()
-}

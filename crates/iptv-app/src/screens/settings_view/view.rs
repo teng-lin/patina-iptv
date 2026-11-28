@@ -36,15 +36,15 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .absolute()
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
-        .child(when(move || is_open(ui), move || screen(ui, size)))
+        .child(when(move || is_open(ui.screens), move || screen(ui, size)))
 }
 
 fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = computed(move || {
-        let settings = crate::wiring::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui.app);
         // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.playback.pip.with(|p| p.supported);
-        state(ui, |s| {
+        state(ui.screens, |s| {
             s.rows(&Ctx {
                 settings: &settings,
                 offer: &crate::screens::settings_offer::offer_now,
@@ -52,7 +52,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         })
         .unwrap_or_default()
     });
-    let editing = computed(move || state(ui, |s| s.editor().is_some()).unwrap_or(false));
+    let editing = computed(move || state(ui.screens, |s| s.editor().is_some()).unwrap_or(false));
     // What is stored changed (a playlist added, renamed, hidden, moved):
     // the Playlists page follows, after this change has reached the rows
     // already shown (a row it removes must not be read again).
@@ -65,7 +65,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     // only when they change, not when keys or touch are used, so a screen
     // reader's place in it holds.
     let shown = computed(move || {
-        let settings = crate::wiring::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui.app);
         let ctx = Ctx {
             settings: &settings,
             offer: &crate::screens::settings_offer::offer_now,
@@ -102,7 +102,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
                 .bg(tint(0x000000, 0x90))
                 .on_press(move || {
                     ui.touched();
-                    close(ui);
+                    close(ui.screens);
                 }),
         )
         .child(
@@ -143,26 +143,34 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         )
         .child(when(
             move || ui.back_controls(),
-            move || ui_kit::button(ui, size, move || tr("Close"), || false, move || close(ui)),
+            move || {
+                ui_kit::button(
+                    ui,
+                    size,
+                    move || tr("Close"),
+                    || false,
+                    move || close(ui.screens),
+                )
+            },
         ))
 }
 
 fn hint(ui: Ui) -> &'static str {
     // A playlist's sheet over the page: its own keys.
-    if crate::library_ui::playlists_view::task_open(ui) {
+    if crate::library_ui::playlists_view::task_open(ui.screens) {
         return crate::library_ui::playlists_view::hint(ui);
     }
     if !ui.keys_shown() {
         return tr("Tap a page, then a setting to change it");
     }
-    let at = state(ui, |s| (s.pane(), s.editor().cloned())).unwrap_or((Pane::Pages, None));
+    let at = state(ui.screens, |s| (s.pane(), s.editor().cloned())).unwrap_or((Pane::Pages, None));
     match at {
         (_, Some(Editor::Choice { .. })) => tr("▲▼ choose   OK keep   Back cancel"),
         (_, Some(Editor::Number { .. })) => tr("◀▶ change   OK keep   Back cancel"),
         (_, Some(Editor::Text { .. })) => tr("Type, then OK to keep   Back cancel"),
         (_, Some(Editor::Confirm { .. })) => tr("OK go ahead   Back cancel"),
         (Pane::Pages, None) => tr("▲▼ page   ▶ OK its settings   Back close"),
-        (Pane::Rows, None) if focused_playlist(ui).is_some() => {
+        (Pane::Rows, None) if focused_playlist(ui.screens).is_some() => {
             tr("▲▼ move   OK show or hide   Menu its settings   ◀ Back pages")
         }
         (Pane::Rows, None) => tr("▲▼ move   OK change   ◀ Back pages"),
@@ -170,8 +178,8 @@ fn hint(ui: Ui) -> &'static str {
 }
 
 /// The playlist of the focused row, if it is one.
-pub(crate) fn focused_playlist(ui: Ui) -> Option<i64> {
-    match state(ui, |s| {
+pub(crate) fn focused_playlist(screens: crate::ScreensUi) -> Option<i64> {
+    match state(screens, |s| {
         (s.pane() == Pane::Rows && s.editor().is_none())
             .then(|| s.focus_id())
             .flatten()
@@ -184,8 +192,8 @@ pub(crate) fn focused_playlist(ui: Ui) -> Option<i64> {
 }
 
 /// Stored playlist `id` (reactive: the library's version).
-fn stored_playlist(ui: Ui, id: i64) -> Option<crate::wiring::data::Playlist> {
-    ui.app.library.version.get();
+fn stored_playlist(app: crate::SharedUi, id: i64) -> Option<crate::wiring::data::Playlist> {
+    app.library.version.get();
     crate::runtime()
         .playlists()
         .ok()?
@@ -195,19 +203,21 @@ fn stored_playlist(ui: Ui, id: i64) -> Option<crate::wiring::data::Playlist> {
 
 fn pages(ui: Ui, size: Scale) -> impl IntoElement {
     let list = element_ref();
-    let chosen = computed(move || state(ui, Screen::page_index));
+    let chosen = computed(move || state(ui.screens, Screen::page_index));
     effect(move || {
         if let Some(i) = chosen.get() {
             list.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
     let entry = move |at: Position| {
-        let page = move || state(ui, |s| s.pages().get(at.index()).copied()).flatten();
+        let page = move || state(ui.screens, |s| s.pages().get(at.index()).copied()).flatten();
         let is_chosen = move || chosen.get() == Some(at.index());
         let focused = move || {
             ui.keys_shown()
                 && is_chosen()
-                && state(ui, |s| s.pane() == Pane::Pages && s.editor().is_none()) == Some(true)
+                && state(ui.screens, |s| {
+                    s.pane() == Pane::Pages && s.editor().is_none()
+                }) == Some(true)
         };
         let mark = move || Mark::of(focused(), is_chosen());
         list_rows::row(size, ROW, mark)
@@ -229,7 +239,7 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
             .child(
                 list_rows::name(size, move || page().map_or("", |p| words::page(p.key)))
                     .text_color(move || {
-                        crate::wiring::settings_wiring::read(ui);
+                        crate::wiring::settings_wiring::read(ui.app);
                         match mark() {
                             Mark::Focused => Mark::Focused.text(),
                             Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
@@ -239,21 +249,27 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
                     }),
             )
     };
-    virtual_list(move || state(ui, |s| s.pages().len()).unwrap_or(0), entry)
-        // By page: a page that comes or goes (a keyboard attached) leaves
-        // the others' entries, and a screen reader's place on one, alone.
-        .keys(move || {
-            state(ui, |s| s.pages().iter().map(|p| p.key).collect::<Vec<_>>()).unwrap_or_default()
+    virtual_list(
+        move || state(ui.screens, |s| s.pages().len()).unwrap_or(0),
+        entry,
+    )
+    // By page: a page that comes or goes (a keyboard attached) leaves
+    // the others' entries, and a screen reader's place on one, alone.
+    .keys(move || {
+        state(ui.screens, |s| {
+            s.pages().iter().map(|p| p.key).collect::<Vec<_>>()
         })
-        .estimated_item_size(list_rows::pitch(size, ROW))
-        .element_ref(&list)
-        .w(move || size.px(PAGES_W))
+        .unwrap_or_default()
+    })
+    .estimated_item_size(list_rows::pitch(size, ROW))
+    .element_ref(&list)
+    .w(move || size.px(PAGES_W))
 }
 
 fn rows_list(ui: Ui, rows: Memo<Vec<Row>>, size: Scale) -> impl IntoElement {
     let list = element_ref();
     let focused_index = computed(move || {
-        let id = state(ui, |s| {
+        let id = state(ui.screens, |s| {
             (s.pane() == Pane::Rows && s.editor().is_none())
                 .then(|| s.focus_id())
                 .flatten()
@@ -270,7 +286,7 @@ fn rows_list(ui: Ui, rows: Memo<Vec<Row>>, size: Scale) -> impl IntoElement {
     });
     // Another page starts at its top (by key: the page shown keeps its
     // place when a page before it comes or goes).
-    let page = computed(move || state(ui, |s| s.page().key));
+    let page = computed(move || state(ui.screens, |s| s.page().key));
     effect(move || {
         page.get();
         list.scroll_to_index(0, percentage(0.0), px(0.0), false);
@@ -312,7 +328,7 @@ fn row_view(
     let row = move || rows.with(|r| r.get(at.index()).copied());
     let heading = move || matches!(row(), Some(Row::Heading { .. }));
     let lit = move || {
-        let settings = crate::wiring::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui.app);
         row().is_some_and(|r| matches!(status(&settings, &r), Status::Active | Status::ReadOnly))
     };
     let focused = move || ui.keys_shown() && focused_index.get() == Some(at.index());
@@ -332,7 +348,7 @@ fn row_view(
             section,
             subsection,
         }) => words::heading(section, subsection).to_owned(),
-        Some(Row::Playlist(p)) => stored_playlist(ui, p.id)
+        Some(Row::Playlist(p)) => stored_playlist(ui.app, p.id)
             .map(|p| p.name)
             .unwrap_or_default(),
         Some(r) => r.key().map_or("", words::label).to_owned(),
@@ -340,15 +356,15 @@ fn row_view(
     };
     // Each binding reads the row once: a row that went answers one read.
     let note_of = move |row: Option<Row>| match row {
-        Some(Row::Playlist(p)) => stored_playlist(ui, p.id)
+        Some(Row::Playlist(p)) => stored_playlist(ui.app, p.id)
             .map(|p| crate::library_ui::playlists_view::summary(ui, &p).0)
             .unwrap_or_default(),
-        Some(r) => note(&crate::wiring::settings_wiring::read(ui), &r),
+        Some(r) => note(&crate::wiring::settings_wiring::read(ui.app), &r),
         None => String::new(),
     };
     let note = move || note_of(row());
     let current = move || {
-        let settings = crate::wiring::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui.app);
         match row() {
             Some(Row::Setting(s)) => {
                 let value = settings.get(s.key).unwrap_or_else(|_| s.default_value());
@@ -392,7 +408,7 @@ fn row_view(
         })
         .accessibility_state(move || {
             let checked = |on: bool| Some(if on { Checked::True } else { Checked::False });
-            let settings = crate::wiring::settings_wiring::read(ui);
+            let settings = crate::wiring::settings_wiring::read(ui.app);
             match row() {
                 None | Some(Row::Heading { .. }) => AccessibilityState::default(),
                 Some(Row::Playlist(p)) => AccessibilityState {
@@ -510,9 +526,9 @@ fn row_view(
                         move || {
                             ui.touched();
                             if let Some(playlist) = playlist() {
-                                settings_guarded(ui, move || {
+                                settings_guarded(ui.screens, move || {
                                     crate::library_ui::playlists_view::open_only(
-                                        ui,
+                                        ui.screens,
                                         crate::runtime::model::SourceId(playlist.id),
                                         crate::library_ui::playlists_view::Only::Delete,
                                     )
@@ -529,14 +545,14 @@ fn row_view(
 
 fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     let description = move || {
-        let settings = crate::wiring::settings_wiring::read(ui);
+        let settings = crate::wiring::settings_wiring::read(ui.app);
         // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.playback.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
             offer: &crate::screens::settings_offer::offer_now,
         };
-        state(ui, |s| match s.focused_row(&ctx) {
+        state(ui.screens, |s| match s.focused_row(&ctx) {
             Some(Row::Setting(st))
                 if crate::host::LINUX && st.key == iptv_settings::keys::AIRPLAY_CASTING.as_str() =>
             {

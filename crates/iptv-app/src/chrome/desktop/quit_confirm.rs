@@ -19,18 +19,18 @@ pub(crate) enum Choice {
 }
 
 /// Asks, the window shown and in front (on macOS it may be hidden).
-pub(crate) fn open(ui: Ui) {
+pub(crate) fn open(chrome: crate::ChromeUi) {
     super::show_main();
-    ui.chrome.quit_confirm.set(Some(Choice::Keep));
+    chrome.quit_confirm.set(Some(Choice::Keep));
 }
 
-pub(crate) fn is_open(ui: Ui) -> bool {
-    ui.chrome.quit_confirm.with(Option::is_some)
+pub(crate) fn is_open(chrome: crate::ChromeUi) -> bool {
+    chrome.quit_confirm.with(Option::is_some)
 }
 
 /// Back keeps recording.
-pub(crate) fn back(ui: Ui) -> bool {
-    ui.chrome.quit_confirm.set(None);
+pub(crate) fn back(chrome: crate::ChromeUi) -> bool {
+    chrome.quit_confirm.set(None);
     true
 }
 
@@ -51,14 +51,14 @@ pub(crate) fn key(ui: Ui, action: Action) {
             }
         }
         Action::Back => {
-            back(ui);
+            back(ui.chrome);
         }
         _ => {}
     }
 }
 
 pub(crate) fn layer(ui: Ui) -> impl IntoElement {
-    when(move || is_open(ui), move || sheet(ui))
+    when(move || is_open(ui.chrome), move || sheet(ui))
 }
 
 fn sheet(ui: Ui) -> View {

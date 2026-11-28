@@ -954,6 +954,13 @@ fn extra_large_text_keeps_every_focused_bar_control_on_screen() {
         "the remote reaches the bar's live controls: {visited:?}"
     );
     assert!(!visited.contains(&"play-bar-rewind"), "live skips rewind");
+    assert!(
+        !app.screen()
+            .matches("id:play-bar-previous-channel")
+            .unwrap()
+            && !app.screen().matches("id:play-bar-next-channel").unwrap(),
+        "TV omits pointer channel transport buttons"
+    );
     assert_eq!(iptv_app::player_opens(0), 1);
     persistent(app, &lifetime, player);
 }

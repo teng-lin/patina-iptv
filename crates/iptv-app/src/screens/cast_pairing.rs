@@ -13,33 +13,37 @@ use iptv_presentation::cast::{Effect, FirewallHelp, Prompt, State};
 use iptv_runtime::cast::{PairingPrompt, pairing_prompt};
 use nsh_core::prelude::*;
 
-pub(crate) fn prompt(ui: Ui, ticket: u64) -> PairingPrompt {
+pub(crate) fn prompt(cast: crate::screens::casting::CastUi, ticket: u64) -> PairingPrompt {
     let (prompt, request) = pairing_prompt();
     crate::wiring::tasks::spawn_in_app(async move {
         if let Ok(request) = request.await
             && runtime().cast_intent_current(ticket)
-            && ui.cast.busy.try_get() == Some(true)
+            && cast.busy.try_get() == Some(true)
         {
-            ui.cast.pairing.replace(Some(request));
-            ui.cast.state.update(|state| state.open_pin(ticket));
+            cast.pairing.replace(Some(request));
+            cast.state.update(|state| state.open_pin(ticket));
         }
     });
     prompt
 }
 
-pub(crate) fn offer_forget(ui: Ui, ticket: u64, receiver: Receiver, reason: Error) {
-    ui.cast.pairing.replace(None);
-    ui.cast
-        .state
+pub(crate) fn offer_forget(
+    cast: crate::screens::casting::CastUi,
+    ticket: u64,
+    receiver: Receiver,
+    reason: Error,
+) {
+    cast.pairing.replace(None);
+    cast.state
         .update(|state| state.offer_forget(ticket, receiver, reason));
 }
 
-pub(crate) fn show_linux_airplay_setup(ui: Ui) {
+pub(crate) fn show_linux_airplay_setup(cast: crate::screens::casting::CastUi) {
     let tcp_port = configured_port("PATINA_CAST_RELAY_PORT", 49152);
     let udp_port = configured_port("PATINA_AIRPLAY_TIMING_PORT", 49153);
     let subnet = crate::host::local_ipv4_subnet().unwrap_or_else(|| "192.168.1.0/24".into());
-    ui.cast.pairing.replace(None);
-    ui.cast.state.update(|state| {
+    cast.pairing.replace(None);
+    cast.state.update(|state| {
         state.open_firewall_help(FirewallHelp {
             peer_ip: None,
             tcp_port: Some(tcp_port),
@@ -51,13 +55,13 @@ pub(crate) fn show_linux_airplay_setup(ui: Ui) {
 }
 
 pub(crate) fn show_firewall_blocked(
-    ui: Ui,
+    cast: crate::screens::casting::CastUi,
     peer_ip: String,
     tcp_port: Option<u16>,
     udp_port: Option<u16>,
 ) {
-    ui.cast.pairing.replace(None);
-    ui.cast.state.update(|state| {
+    cast.pairing.replace(None);
+    cast.state.update(|state| {
         state.open_firewall_help(FirewallHelp {
             peer_ip: Some(peer_ip),
             tcp_port,
@@ -101,9 +105,8 @@ fn firewall_commands_for(help: &FirewallHelp, firewall: crate::host::LinuxFirewa
     lines.join("\n")
 }
 
-fn copy_firewall_commands(ui: Ui) {
-    let commands = ui
-        .cast
+fn copy_firewall_commands(cast: crate::screens::casting::CastUi) {
+    let commands = cast
         .state
         .with_untracked(|state| state.firewall_help().map(firewall_commands));
     if let Some(commands) = commands
@@ -114,36 +117,36 @@ fn copy_firewall_commands(ui: Ui) {
     }
 }
 
-pub(crate) fn is_open(ui: Ui) -> bool {
-    ui.cast.prompt.with(Option::is_some)
+pub(crate) fn is_open(cast: crate::screens::casting::CastUi) -> bool {
+    cast.prompt.with(Option::is_some)
 }
 
-pub(crate) fn close_for(ui: Ui, ticket: u64) {
-    if untracked(|| ui.cast.prompt.try_get()).is_some()
-        && ui.cast.state.with_untracked(State::pairing_ticket) == Some(ticket)
+pub(crate) fn close_for(cast: crate::screens::casting::CastUi, ticket: u64) {
+    if untracked(|| cast.prompt.try_get()).is_some()
+        && cast.state.with_untracked(State::pairing_ticket) == Some(ticket)
     {
-        close(ui);
+        close(cast);
     }
 }
 
-pub(crate) fn close(ui: Ui) {
-    ui.cast.pairing.replace(None);
-    ui.cast.state.update(State::close_pairing);
+pub(crate) fn close(cast: crate::screens::casting::CastUi) {
+    cast.pairing.replace(None);
+    cast.state.update(State::close_pairing);
     dismiss_keyboard();
 }
 
-fn submit(ui: Ui) {
-    if ui.cast.prompt.get_untracked() != Some(Prompt::Pin) {
+fn submit(cast: crate::screens::casting::CastUi) {
+    if cast.prompt.get_untracked() != Some(Prompt::Pin) {
         return;
     }
     let mut effect = None;
-    ui.cast.state.update(|state| effect = state.submit_pin());
+    cast.state.update(|state| effect = state.submit_pin());
     let Some(Effect::SubmitPin { ticket, pin }) = effect else {
         crate::chrome::toast::notify(tr("Enter the four digits shown on the receiver."));
         return;
     };
-    if let Some(request) = ui.cast.pairing.replace(None) {
-        close(ui);
+    if let Some(request) = cast.pairing.replace(None) {
+        close(cast);
         if runtime().cast_intent_current(ticket) {
             let _ = request.submit(pin);
         }
@@ -157,7 +160,7 @@ fn forget(ui: Ui) {
     let Some((ticket, receiver)) = ui.cast.state.with_untracked(State::forget_receiver) else {
         return;
     };
-    close(ui);
+    close(ui.cast);
     if !runtime().cast_intent_current(ticket) {
         return;
     }
@@ -183,7 +186,7 @@ pub(crate) fn key(ui: Ui, action: iptv_nav::Action) {
                 .state
                 .update(|state| state.select_forget(action == Action::MoveRight)),
             Action::Select if selected => forget(ui),
-            Action::Select | Action::Back | Action::ShowMenu => close(ui),
+            Action::Select | Action::Back | Action::ShowMenu => close(ui.cast),
             _ => {}
         }
         return;
@@ -194,22 +197,22 @@ pub(crate) fn key(ui: Ui, action: iptv_nav::Action) {
                 .cast
                 .state
                 .update(|state| state.select_firewall_copy(action == Action::MoveLeft)),
-            Action::Select if copy_selected => copy_firewall_commands(ui),
-            Action::Select | Action::Back | Action::ShowMenu => close(ui),
+            Action::Select if copy_selected => copy_firewall_commands(ui.cast),
+            Action::Select | Action::Back | Action::ShowMenu => close(ui.cast),
             _ => {}
         }
         return;
     }
     match action {
-        Action::Back | Action::ShowMenu => close(ui),
-        Action::Select => submit(ui),
+        Action::Back | Action::ShowMenu => close(ui.cast),
+        Action::Select => submit(ui.cast),
         _ => {}
     }
 }
 
 pub(crate) fn layer(ui: Ui) -> impl IntoElement {
     when(
-        move || is_open(ui),
+        move || is_open(ui.cast),
         move || {
             let scale = Scale::new();
             let (outer, card) = frame(ui, scale);
@@ -288,14 +291,14 @@ fn firewall_card(ui: Ui, scale: Scale) -> View {
                     scale,
                     tr("Copy command"),
                     wants_copy,
-                    move || copy_firewall_commands(ui),
+                    move || copy_firewall_commands(ui.cast),
                 ))
                 .child(ui_kit::button(
                     ui,
                     scale,
                     tr("Done"),
                     move || !wants_copy(),
-                    move || close(ui),
+                    move || close(ui.cast),
                 )),
         )
 }
@@ -337,7 +340,7 @@ fn forget_card(ui: Ui, scale: Scale) -> View {
                     scale,
                     tr("Cancel"),
                     move || !wants_forget(),
-                    move || close(ui),
+                    move || close(ui.cast),
                 ))
                 .child(
                     ui_kit::button(ui, scale, tr("Forget pairing"), wants_forget, move || {
@@ -367,9 +370,14 @@ fn pin_card(ui: Ui, scale: Scale) -> View {
                 .max_length(4)
                 .auto_correct(false)
                 .on_change(move |text: &str| ui.cast.state.update(|state| state.set_pin(text)))
-                .on_submit(move |_: &str| submit(ui)),
+                .on_submit(move |_: &str| submit(ui.cast)),
         )
-        .child(sheet_buttons(ui, scale, close, submit))
+        .child(sheet_buttons(
+            ui,
+            scale,
+            |ui| close(ui.cast),
+            |ui| submit(ui.cast),
+        ))
 }
 
 #[cfg(test)]

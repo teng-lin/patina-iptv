@@ -34,27 +34,27 @@ impl PartialEq for Screen {
     }
 }
 
-fn catalog(ui: Ui) -> Rc<dyn Schedule> {
-    ui.playback
+fn catalog(playback: crate::PlaybackUi) -> Rc<dyn Schedule> {
+    playback
         .channel_picker
         .with(|p| p.as_ref().map(|p| p.catalog.clone()))
         .unwrap_or_else(crate::schedule)
 }
 
 fn visible_entries(ui: Ui) -> VisibleEntries {
-    crate::guide::lists::entries_in(ui, &*catalog(ui))
+    crate::guide::lists::entries_in(ui.app, &*catalog(ui.playback))
 }
 
 fn combined(catalog: &dyn Schedule) -> Option<&CombinedSchedule> {
     catalog.as_any()?.downcast_ref()
 }
 
-pub fn is_open(ui: Ui) -> bool {
-    ui.playback.channel_picker.with(Option::is_some)
+pub fn is_open(playback: crate::PlaybackUi) -> bool {
+    playback.channel_picker.with(Option::is_some)
 }
 
-fn state<T>(ui: Ui, f: impl FnOnce(&ChannelPicker) -> T) -> Option<T> {
-    ui.playback
+fn state<T>(playback: crate::PlaybackUi, f: impl FnOnce(&ChannelPicker) -> T) -> Option<T> {
+    playback
         .channel_picker
         .with(|p| p.as_ref().map(|p| f(&p.state)))
 }
@@ -62,7 +62,8 @@ fn state<T>(ui: Ui, f: impl FnOnce(&ChannelPicker) -> T) -> Option<T> {
 pub fn open(ui: Ui) {
     let catalog = crate::wiring::runtime_owner::schedule();
     let group = ListId::of(ui.guide.list.with_untracked(|l| l.entry()), &*catalog);
-    let channel = crate::playback::multiview::pick_from(ui).and_then(|c| catalog.channel_key(c));
+    let channel =
+        crate::playback::multiview::pick_from(ui.playback).and_then(|c| catalog.channel_key(c));
     ui.playback.channel_picker.set(Some(Screen {
         state: ChannelPicker::open(group, channel),
         catalog,
@@ -70,13 +71,13 @@ pub fn open(ui: Ui) {
     refresh(ui);
 }
 
-pub fn close(ui: Ui) {
-    ui.playback.channel_picker.set(None);
+pub fn close(ui: crate::PlaybackUi) {
+    ui.channel_picker.set(None);
     crate::playback::multiview::list_closed(ui);
 }
 
-fn update(ui: Ui, f: impl FnOnce(&mut ChannelPicker)) {
-    ui.playback.channel_picker.update(|p| {
+fn update(playback: crate::PlaybackUi, f: impl FnOnce(&mut ChannelPicker)) {
+    playback.channel_picker.update(|p| {
         if let Some(p) = p {
             f(&mut p.state);
         }
@@ -84,11 +85,13 @@ fn update(ui: Ui, f: impl FnOnce(&mut ChannelPicker)) {
 }
 
 fn refresh(ui: Ui) {
-    let catalog = catalog(ui);
+    let catalog = catalog(ui.playback);
     let favorites = crate::guide::favorites::favorite_channels();
     let recent = crate::guide::favorites::recent_channels();
-    let entries = crate::guide::lists::entries_in(ui, &*catalog);
-    update(ui, |p| p.refresh(&*catalog, &favorites, &recent, entries));
+    let entries = crate::guide::lists::entries_in(ui.app, &*catalog);
+    update(ui.playback, |p| {
+        p.refresh(&*catalog, &favorites, &recent, entries)
+    });
 }
 
 /// A new data generation keeps picker-local expansion by source identity.
@@ -96,7 +99,7 @@ fn refresh(ui: Ui) {
 /// still routes playback to its current source and stream.
 fn refresh_catalog(ui: Ui) {
     let current = crate::wiring::runtime_owner::schedule();
-    let previous = catalog(ui);
+    let previous = catalog(ui.playback);
     let next: Rc<dyn Schedule> = match (combined(&*current), combined(&*previous)) {
         (Some(current), Some(previous)) => {
             Rc::new(current.with_browser_expansion(previous.collapsed_sources()))
@@ -112,20 +115,23 @@ fn refresh_catalog(ui: Ui) {
 }
 
 fn type_query(ui: Ui, query: &str) {
-    if state(ui, |p| p.query() == query) == Some(false) {
-        update(ui, |p| p.type_query(query.to_owned()));
+    if state(ui.playback, |p| p.query() == query) == Some(false) {
+        update(ui.playback, |p| p.type_query(query.to_owned()));
         refresh(ui);
     }
 }
 
 fn choose(ui: Ui, row: usize) {
-    let key = state(ui, |p| p.channels().get(row).map(|c| c.key.clone())).flatten();
+    let key = state(ui.playback, |p| {
+        p.channels().get(row).map(|c| c.key.clone())
+    })
+    .flatten();
     if let Some(channel) =
         key.and_then(|key| crate::wiring::runtime_owner::schedule().find_channel(&key))
     {
-        update(ui, |p| p.focus_row(row));
+        update(ui.playback, |p| p.focus_row(row));
         if crate::playback::multiview::picked(ui, channel) {
-            close(ui);
+            close(ui.playback);
         }
     } else {
         refresh_catalog(ui);
@@ -133,8 +139,8 @@ fn choose(ui: Ui, row: usize) {
 }
 
 fn group(ui: Ui, entry: usize, toggle: bool) {
-    let catalog = catalog(ui);
-    update(ui, |p| p.group(entry, &*catalog));
+    let catalog = catalog(ui.playback);
+    update(ui.playback, |p| p.group(entry, &*catalog));
     if toggle
         && let Entry::Group(g) = Entry::at(entry)
         && let Some(all) = combined(&*catalog)
@@ -159,34 +165,36 @@ pub fn key(ui: Ui, action: Action) {
                 Action::PageUp => -8,
                 _ => 8,
             };
-            let catalog = catalog(ui);
-            let before = state(ui, |p| p.entry(&*catalog));
-            let entries = crate::guide::lists::entries_in(ui, &*catalog);
-            update(ui, |p| p.vertical(by, &*catalog, entries));
-            if state(ui, |p| p.entry(&*catalog)) != before {
+            let catalog = catalog(ui.playback);
+            let before = state(ui.playback, |p| p.entry(&*catalog));
+            let entries = crate::guide::lists::entries_in(ui.app, &*catalog);
+            update(ui.playback, |p| p.vertical(by, &*catalog, entries));
+            if state(ui.playback, |p| p.entry(&*catalog)) != before {
                 refresh(ui);
             }
         }
         Action::MoveLeft | Action::MoveRight => {
             let entries = visible_entries(ui);
-            update(ui, |p| p.horizontal(action == Action::MoveRight, entries));
+            update(ui.playback, |p| {
+                p.horizontal(action == Action::MoveRight, entries)
+            });
         }
-        Action::Select => match state(ui, |p| p.pane) {
-            Some(Pane::Search) => update(ui, ChannelPicker::edit),
+        Action::Select => match state(ui.playback, |p| p.pane) {
+            Some(Pane::Search) => update(ui.playback, ChannelPicker::edit),
             Some(Pane::Clear) => type_query(ui, ""),
-            Some(Pane::Close) => close(ui),
+            Some(Pane::Close) => close(ui.playback),
             Some(Pane::Channels) => {
-                if let Some(row) = state(ui, ChannelPicker::row).flatten() {
+                if let Some(row) = state(ui.playback, ChannelPicker::row).flatten() {
                     choose(ui, row);
                 }
             }
             Some(Pane::Groups) => {
-                let catalog = catalog(ui);
-                if let Some(entry) = state(ui, |p| p.entry(&*catalog)) {
+                let catalog = catalog(ui.playback);
+                if let Some(entry) = state(ui.playback, |p| p.entry(&*catalog)) {
                     if matches!(Entry::at(entry), Entry::Group(g) if catalog.group_is_playlist(g)) {
                         group(ui, entry, true);
                     } else {
-                        update(ui, ChannelPicker::results);
+                        update(ui.playback, ChannelPicker::results);
                     }
                 }
             }
@@ -194,36 +202,36 @@ pub fn key(ui: Ui, action: Action) {
         },
         Action::Back => {
             let mut close_picker = false;
-            update(ui, |p| close_picker = p.back());
+            update(ui.playback, |p| close_picker = p.back());
             if close_picker {
-                close(ui);
+                close(ui.playback);
             } else {
                 refresh(ui);
             }
         }
-        Action::OpenSearch => update(ui, ChannelPicker::edit),
+        Action::OpenSearch => update(ui.playback, ChannelPicker::edit),
         _ => {}
     }
 }
 
-fn focused(ui: Ui, pane: Pane) -> bool {
-    state(ui, |p| p.pane == pane).unwrap_or(false)
+fn focused(playback: crate::PlaybackUi, pane: Pane) -> bool {
+    state(playback, |p| p.pane == pane).unwrap_or(false)
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     effect(move || {
         ui.app.data_version.get();
-        if untracked(|| is_open(ui)) {
+        if untracked(|| is_open(ui.playback)) {
             untracked(|| refresh_catalog(ui));
         }
     });
     let categories = computed(move || {
-        crate::guide::lists::category_preferences(&crate::wiring::settings_wiring::read(ui))
+        crate::guide::lists::category_preferences(&crate::wiring::settings_wiring::read(ui.app))
     });
     effect(move || {
         categories.get();
         untracked(|| {
-            if is_open(ui) {
+            if is_open(ui.playback) {
                 refresh(ui);
             }
         });
@@ -237,25 +245,25 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui.playback.channel_picker.set(None);
         }
     });
-    when(move || is_open(ui), move || screen(ui))
+    when(move || is_open(ui.playback), move || screen(ui))
 }
 
 fn screen(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let rows = element_ref();
     let groups = element_ref();
-    let row = computed(move || state(ui, ChannelPicker::row).flatten());
+    let row = computed(move || state(ui.playback, ChannelPicker::row).flatten());
     let entry = computed(move || {
         ui.app.data_version.get();
-        state(ui, |p| p.entry(&*catalog(ui))).unwrap_or(0)
+        state(ui.playback, |p| p.entry(&*catalog(ui.playback))).unwrap_or(0)
     });
     // A touch scroll does not move selection. Changing the group or query must
     // reveal it again even when the selected channel still occupies the same
     // row (or a query keeps the exact same results).
     let scroll_target = computed(move || {
         ui.app.data_version.get();
-        let catalog = catalog(ui);
-        state(ui, |p| {
+        let catalog = catalog(ui.playback);
+        state(ui.playback, |p| {
             let row = p.row()?;
             Some((
                 ListId::of(p.entry(&*catalog), &*catalog),
@@ -305,8 +313,8 @@ fn screen(ui: Ui) -> impl IntoElement {
                     view().flex_1().gap(move || size.px(8.0))
                         .child(ui_kit::heading(size, move || {
                             ui.app.data_version.get();
-                            let catalog = catalog(ui);
-                            state(ui, |p| {
+                            let catalog = catalog(ui.playback);
+                            state(ui.playback, |p| {
                                 let name = entry_name(p.entry(&*catalog), &*catalog);
                                 trf(
                                     "{name} · {count, plural, one {# channel} other {# channels}}",
@@ -315,9 +323,9 @@ fn screen(ui: Ui) -> impl IntoElement {
                             }).unwrap_or_default()
                         }))
                         .child(when(
-                            move || state(ui, |p| p.channels().is_empty()).unwrap_or(false),
+                            move || state(ui.playback, |p| p.channels().is_empty()).unwrap_or(false),
                             move || ui_kit::body(size, move || {
-                                if state(ui, |p| p.query().trim().is_empty()).unwrap_or(true) {
+                                if state(ui.playback, |p| p.query().trim().is_empty()).unwrap_or(true) {
                                     tr("No channels in this group. Choose another group.")
                                 } else {
                                     tr("No matching channels. Clear the search or choose another group.")
@@ -326,7 +334,7 @@ fn screen(ui: Ui) -> impl IntoElement {
                         ))
                         .child(
                             virtual_list(
-                                move || state(ui, |p| p.channels().len()).unwrap_or(0),
+                                move || state(ui.playback, |p| p.channels().len()).unwrap_or(0),
                                 move |at| channel_row(ui, at, size, row),
                             ).test_id("multiview-picker-channels").element_ref(&rows).estimated_item_size(list_rows::pitch(size, ROW_TWO)).flex_1(),
                         ),
@@ -336,12 +344,13 @@ fn screen(ui: Ui) -> impl IntoElement {
 
 fn header(ui: Ui, size: Scale) -> impl IntoElement {
     let field = element_ref();
-    let editing =
-        computed(move || state(ui, |p| p.keyboard && p.pane == Pane::Search).unwrap_or(false));
+    let editing = computed(move || {
+        state(ui.playback, |p| p.keyboard && p.pane == Pane::Search).unwrap_or(false)
+    });
     crate::chrome::input::bind_field_focus(field, move || editing.get());
     crate::chrome::keyboard::on_dismissed(
         move || editing.get(),
-        move || update(ui, ChannelPicker::keyboard_hidden),
+        move || update(ui.playback, ChannelPicker::keyboard_hidden),
     );
     view()
         .flex_row()
@@ -366,32 +375,32 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
                 .element_ref(&field)
                 .flex_1()
                 .test_id("multiview-channel-search")
-                .value(move || state(ui, |p| p.query().to_owned()).unwrap_or_default())
+                .value(move || state(ui.playback, |p| p.query().to_owned()).unwrap_or_default())
                 .placeholder(move || tr("Search this group by channel or number"))
                 .auto_capitalize(AutoCapitalize::None)
                 .auto_correct(false)
                 .return_key_type(ReturnKeyType::Search)
-                .bg(move || ui_kit::field_fill(ui, focused(ui, Pane::Search)))
+                .bg(move || ui_kit::field_fill(ui, focused(ui.playback, Pane::Search)))
                 .border(move || size.px(2.0))
-                .border_color(move || ui_kit::field_border(ui, focused(ui, Pane::Search)))
+                .border_color(move || ui_kit::field_border(ui, focused(ui.playback, Pane::Search)))
                 .on_change(move |text: &str| type_query(ui, text))
-                .on_submit(move |_: &str| update(ui, ChannelPicker::results))
-                .on_focus(move || update(ui, ChannelPicker::edit))
-                .on_blur(move || update(ui, ChannelPicker::keyboard_hidden)),
+                .on_submit(move |_: &str| update(ui.playback, ChannelPicker::results))
+                .on_focus(move || update(ui.playback, ChannelPicker::edit))
+                .on_blur(move || update(ui.playback, ChannelPicker::keyboard_hidden)),
         )
         .child(ui_kit::button(
             ui,
             size,
             tr("Clear"),
-            move || focused(ui, Pane::Clear),
+            move || focused(ui.playback, Pane::Clear),
             move || type_query(ui, ""),
         ))
         .child(ui_kit::button(
             ui,
             size,
             tr("Close"),
-            move || focused(ui, Pane::Close),
-            move || close(ui),
+            move || focused(ui.playback, Pane::Close),
+            move || close(ui.playback),
         ))
 }
 
@@ -400,16 +409,17 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
     let selected = move || visible() == Some(entry.get());
     let mark = move || {
         Mark::of(
-            ui.keys_shown() && focused(ui, Pane::Groups) && selected(),
+            ui.keys_shown() && focused(ui.playback, Pane::Groups) && selected(),
             selected(),
         )
     };
     let name = move || {
         visible().map_or_else(String::new, |entry| {
-            crate::guide::lists::browser_entry_name(entry, &*catalog(ui))
+            crate::guide::lists::browser_entry_name(entry, &*catalog(ui.playback))
         })
     };
-    let expanded = move || crate::guide::lists::playlist_expanded(visible()?, &*catalog(ui));
+    let expanded =
+        move || crate::guide::lists::playlist_expanded(visible()?, &*catalog(ui.playback));
     list_rows::row(size, ROW, mark)
         .flex_row()
         .items_center()
@@ -447,10 +457,12 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
 }
 
 fn channel_row(ui: Ui, at: Position, size: Scale, row: Memo<Option<usize>>) -> impl IntoElement {
-    let channel = move || state(ui, |p| p.channels().get(at.index()).cloned()).flatten();
+    let channel = move || state(ui.playback, |p| p.channels().get(at.index()).cloned()).flatten();
     let mark = move || {
         Mark::of(
-            ui.keys_shown() && focused(ui, Pane::Channels) && row.get() == Some(at.index()),
+            ui.keys_shown()
+                && focused(ui.playback, Pane::Channels)
+                && row.get() == Some(at.index()),
             false,
         )
     };
@@ -473,7 +485,7 @@ fn channel_row(ui: Ui, at: Position, size: Scale, row: Memo<Option<usize>>) -> i
                         return String::new();
                     };
                     let now = ui.guide.focus.with(|f| f.now);
-                    let catalog = catalog(ui);
+                    let catalog = catalog(ui.playback);
                     let program = catalog.program_at(channel.index, now);
                     format!(
                         "{}  {}",

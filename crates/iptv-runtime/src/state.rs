@@ -97,3 +97,21 @@ pub struct OrganizationSnapshot {
     pub organization: iptv_guide::Organization,
     pub lists: Vec<(String, String, Vec<String>)>,
 }
+
+pub(crate) struct RefreshSource {
+    pub(crate) id: SourceId,
+    pub(crate) last_attempt_at: Option<i64>,
+    pub(crate) policy: iptv_library::SourcePolicy,
+}
+
+#[derive(Clone, Copy)]
+pub struct Matching<'a> {
+    pub channels: &'a [iptv_providers::model::Channel],
+    pub overrides: &'a iptv_epg::Overrides,
+}
+
+impl Matching<'_> {
+    pub fn fingerprint(&self) -> u64 {
+        iptv_import::matching_fingerprint(self.channels, self.overrides)
+    }
+}

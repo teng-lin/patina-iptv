@@ -47,8 +47,8 @@ pub fn action_label(action: TileAction) -> &'static str {
 }
 
 /// The open menu's items and focus.
-fn content(ui: Ui) -> (Vec<TileAction>, usize) {
-    with_state(ui, |m| match m.dialog() {
+fn content(playback: crate::PlaybackUi) -> (Vec<TileAction>, usize) {
+    with_state(playback, |m| match m.dialog() {
         Some(Dialog::Options { items, focus, .. }) => (items.clone(), *focus),
         _ => (Vec::new(), 0),
     })
@@ -57,7 +57,7 @@ fn content(ui: Ui) -> (Vec<TileAction>, usize) {
 
 pub fn panel(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    let content = computed(move || content(ui));
+    let content = computed(move || content(ui.playback));
     let item = move |i: usize| {
         let action = move || content.with(|c| c.0.get(i).copied());
         let mark = move || Mark::of(ui.keys_shown() && content.with(|c| c.1 == i), false);

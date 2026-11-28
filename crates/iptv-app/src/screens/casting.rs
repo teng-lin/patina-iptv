@@ -4,6 +4,7 @@ use crate::{
     chrome::chooser,
     chrome::i18n::{tr, trf},
     chrome::toast::notify,
+    runtime::model::{ResolveFailure, StreamPurpose},
     wiring::runtime_owner::{runtime, schedule},
 };
 use iptv_core::{
@@ -50,15 +51,15 @@ pub(crate) fn available(ui: Ui) -> bool {
     runtime().cast_available()
         && crate::wiring::device::host().form_factor != FormFactor::Tv
         && ui.playback.player_surface == 0
-        && !crate::playback::multiview::is_open(ui)
-        && !crate::playback::pip::in_window(ui)
+        && !crate::playback::multiview::is_open(ui.playback)
+        && !crate::playback::pip::in_window(ui.playback)
         && (ui.cast.remote.get()
             || (ui.playback.playing.get().is_some()
                 && ui.playback.playback.get() == Playback::Live))
 }
 
-pub(crate) fn local_blocked(ui: Ui) -> bool {
-    if ui.cast.remote.get_untracked() || ui.cast.busy.get_untracked() {
+pub(crate) fn local_blocked(cast: crate::screens::casting::CastUi) -> bool {
+    if cast.remote.get_untracked() || cast.busy.get_untracked() {
         notify(tr("Stop casting before starting local playback."));
         true
     } else {
@@ -113,6 +114,7 @@ pub(crate) fn destination_selected(value: &str) -> bool {
 pub(crate) fn play_here(ui: Ui) {
     if ui.cast.busy.get_untracked() {
         let owner = runtime();
+        owner.cancel_stream_resolution(StreamPurpose::Cast);
         let ticket = if ui.cast.remote.get_untracked() {
             // Let an outstanding command finish on the current receiver.
             owner.cast_intent()
@@ -172,7 +174,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let Some((epg, local)) = iptv_guide::combined::epg_channel(&*guide, channel) else {
         return;
     };
-    let Some(authority) = epg.resolution_authority(local) else {
+    let Some(authority) = crate::runtime::Runtime::playback_authority(&*guide, channel) else {
         return;
     };
     let resolution = epg.resolve(
@@ -180,8 +182,8 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         None,
         crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
-    let context = epg.shared_playback();
-    let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
+    let context = crate::runtime::Runtime::playback_context(&*guide, channel);
+    let Some(target) = crate::screens::parental_view::live_target(ui.app, channel) else {
         return;
     };
     let owner = runtime();
@@ -219,58 +221,30 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 Ok(grant)
             };
             check().await?;
-            let mut source = match resolution {
-                iptv_guide::playback::Resolution::Play(source) => source,
-                iptv_guide::playback::Resolution::StalkerLink(link) => {
-                    let iptv_guide::playback::StalkerLink {
-                        session: mut portal,
-                        cmd,
-                        channel_headers,
-                    } = *link;
-                    let client = owner.link_client(crate::wiring::settings::network_config());
-                    let (source, portal) = owner
-                        .spawn_network(async move {
-                            let net = client.await.ok()?;
-                            let url = iptv_import::stalker_link(
-                                &net,
-                                &mut portal,
-                                &cmd,
-                                false,
-                                &iptv_import::CancelToken::new(),
-                            )
-                            .await
-                            .ok()?;
-                            Some((
-                                iptv_guide::playback::StalkerLink::source(
-                                    &portal,
-                                    url,
-                                    &channel_headers,
-                                ),
-                                portal,
-                            ))
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                        .ok_or(Error::Unavailable)?;
-                    check().await?;
-                    if let Some(context) = context {
-                        context.update_stalker_session(portal);
-                    }
-                    source
-                }
-                _ => return Err(Error::Unsupported),
-            };
+            if !current() || pending_stop_current(ui.cast) || pending_local_current(ui.cast) {
+                return Err(Error::Cancelled);
+            }
+            let mut source = owner
+                .resolve_stream(StreamPurpose::Cast, resolution, context)
+                .await
+                .map_err(|failure| match failure {
+                    ResolveFailure::Cancelled => Error::Cancelled,
+                    ResolveFailure::Unavailable => Error::Unsupported,
+                    ResolveFailure::Network
+                    | ResolveFailure::TimedOut
+                    | ResolveFailure::Portal(_) => Error::Unavailable,
+                })?;
+            check().await?;
             owner.apply_user_agent(&mut source.headers);
             // Revalidate network identity while an existing cast still owns
             // its relay. Preparing this connection does not bind the new relay.
             let prepared = if let Target::Network(network) = &receiver {
                 let grant = check().await?;
-                let pairing = crate::screens::cast_pairing::prompt(ui, ticket);
+                let pairing = crate::screens::cast_pairing::prompt(ui.cast, ticket);
                 let prepared = owner
                     .prepare_cast(ticket, network.clone(), source.clone(), grant, pairing)
                     .await;
-                crate::screens::cast_pairing::close_for(ui, ticket);
+                crate::screens::cast_pairing::close_for(ui.cast, ticket);
                 let prepared = prepared?;
                 check().await?;
                 Some(prepared)
@@ -346,12 +320,12 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         }
         ui.cast.state.update(|state| state.busy = false);
         if let Err(e) = result {
-            let returning_local = pending_local_current(ui);
+            let returning_local = pending_local_current(ui.cast);
             if matches!(e, Error::PairingIdentityChanged | Error::PairingInvalid)
                 && current()
                 && let Target::Network(receiver) = receiver
             {
-                crate::screens::cast_pairing::offer_forget(ui, ticket, receiver, e);
+                crate::screens::cast_pairing::offer_forget(ui.cast, ticket, receiver, e);
             } else if !returning_local {
                 report(e);
                 if crate::host::LINUX
@@ -361,7 +335,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                     match e {
                         Error::NoRequest { relay_port } => {
                             crate::screens::cast_pairing::show_firewall_blocked(
-                                ui,
+                                ui.cast,
                                 peer_ip,
                                 Some(relay_port),
                                 None,
@@ -369,7 +343,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                         }
                         Error::AirPlayTiming { port } => {
                             crate::screens::cast_pairing::show_firewall_blocked(
-                                ui,
+                                ui.cast,
                                 peer_ip,
                                 None,
                                 Some(port),
@@ -380,7 +354,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 }
             }
 
-            if retired && pending_stop_current(ui) {
+            if retired && pending_stop_current(ui.cast) {
                 // The old receiver is already stopped. Preserve the viewer's Stop
                 // even when the switch failed after releasing its local surface.
                 ui.playback.playing.set(None);
@@ -398,7 +372,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                     }
                     if transferred
                         && ui.playback.playing.get_untracked() == Some(ch)
-                        && crate::screens::parental_view::live_target(ui, ch).as_ref()
+                        && crate::screens::parental_view::live_target(ui.app, ch).as_ref()
                             == Some(&target)
                     {
                         transferred = false;
@@ -469,11 +443,13 @@ pub(crate) fn supports(ui: Ui, command: Command) -> bool {
     !ui.cast.remote.get() || ui.cast.controls.with(|controls| controls.supports(command))
 }
 pub(crate) fn stop(ui: Ui) {
+    runtime().cancel_stream_resolution(StreamPurpose::Cast);
     control(ui, Command::Stop, false);
 }
 fn control(ui: Ui, command: Command, resume_local: bool) {
     if ui.cast.busy.get_untracked() {
         if command == Command::Stop && !resume_local {
+            runtime().cancel_stream_resolution(StreamPurpose::Cast);
             ui.cast
                 .state
                 .update(|state| state.stop_pending = Some(runtime().cast_intent()));
@@ -498,7 +474,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
                 ui.cast.state.update(|state| state.remote = false);
                 ui.playback.playing.set(None);
                 if resume_local
-                    && !pending_stop_current(ui)
+                    && !pending_stop_current(ui.cast)
                     && let Some(ch) = schedule().find_channel(&key)
                 {
                     ui.play(ch, Playback::Live);
@@ -511,22 +487,20 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
         finish_pending_stop(ui);
     });
 }
-fn pending_stop_current(ui: Ui) -> bool {
-    ui.cast
-        .state
+fn pending_stop_current(cast: crate::screens::casting::CastUi) -> bool {
+    cast.state
         .with_untracked(|state| state.stop_pending)
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
-fn pending_local_current(ui: Ui) -> bool {
-    ui.cast
-        .state
+fn pending_local_current(cast: crate::screens::casting::CastUi) -> bool {
+    cast.state
         .with_untracked(|state| state.local_pending)
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
 pub(crate) fn finish_pending_stop(ui: Ui) {
-    let stop_requested = pending_stop_current(ui);
+    let stop_requested = pending_stop_current(ui.cast);
     ui.cast.state.update(|state| state.stop_pending = None);
-    let local = pending_local_current(ui);
+    let local = pending_local_current(ui.cast);
     ui.cast.state.update(|state| state.local_pending = None);
     if ui.cast.remote.get_untracked() {
         if stop_requested {

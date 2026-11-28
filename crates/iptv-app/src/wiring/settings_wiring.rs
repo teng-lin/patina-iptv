@@ -11,14 +11,14 @@ use crate::wiring::device::Recommended;
 use crate::{Ui, wiring::settings};
 
 /// [`settings::get`], subscribing the calling reactive closure to changes.
-pub fn read(ui: Ui) -> Arc<Settings> {
-    ui.app.settings.get();
+pub fn read(app: crate::SharedUi) -> Arc<Settings> {
+    app.settings.get();
     settings::get()
 }
 
 /// Refreshes UI observers after a settings-dependent screen action.
-pub(crate) fn refresh(ui: Ui) {
-    ui.app.settings.update(|v| *v += 1);
+pub(crate) fn refresh(app: crate::SharedUi) {
+    app.settings.update(|v| *v += 1);
 }
 
 /// Applies the settings that live in `Ui` state: colors and panel
@@ -29,7 +29,7 @@ pub fn bind(ui: Ui) {
         effect(move || crate::host::language_changed(crate::chrome::i18n::language().tag));
     }
     effect(move || {
-        let s = read(ui);
+        let s = read(ui.app);
         let theme = crate::theme::theme_of(&s);
         let timeouts = timeouts_of(
             &s,

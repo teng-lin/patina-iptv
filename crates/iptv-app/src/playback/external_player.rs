@@ -1,8 +1,10 @@
 //! Handoff for an explicit channel choice in a group with external playback.
+use crate::runtime::Runtime;
+use crate::runtime::model::{ResolveFailure, StreamPurpose};
 use crate::{Playback, Ui, ViewMode, chrome::i18n::tr, host};
 use iptv_core::guide::{Program, Schedule};
 use iptv_core::parental::Target;
-use iptv_guide::playback::{Resolution, ResolutionAuthority, StalkerLink};
+use iptv_guide::playback::ResolutionAuthority;
 use iptv_presentation::external_player::{Handoff, State};
 use iptv_presentation::lists::{Entry, ListId};
 use nsh_core::prelude::{Memo, Signal, Stored, computed, signal, stored, untracked};
@@ -54,12 +56,12 @@ struct Transport {
     session: host::ExternalSession,
 }
 
-pub fn enforce(ui: Ui) {
-    let Some(active) = ui.cast.external.active() else {
+pub fn enforce(cast: crate::screens::casting::CastUi) {
+    let Some(active) = cast.external.active() else {
         return;
     };
     if active.transport.session.is_retired() {
-        clear_retired(ui, &active.handoff);
+        clear_retired(cast, &active.handoff);
         return;
     }
     if !active.transport.session.is_open() {
@@ -74,41 +76,38 @@ pub fn enforce(ui: Ui) {
         let allowed = owner
             .external_playback_allowed(active.transport.authority, active.transport.group)
             .await;
-        if !matches!(allowed, Ok(true)) && active_ticket(ui, active.handoff.ticket) {
+        if !matches!(allowed, Ok(true)) && active_ticket(cast, active.handoff.ticket) {
             active.transport.session.close();
         }
     });
 }
 
-fn active_ticket(ui: Ui, ticket: u64) -> bool {
-    ui.cast
-        .external
+fn active_ticket(cast: crate::screens::casting::CastUi, ticket: u64) -> bool {
+    cast.external
         .state
         .with_untracked(|state| state.is_active(ticket))
 }
 
-fn clear_retired(ui: Ui, handoff: &Handoff) {
-    if active_ticket(ui, handoff.ticket) {
-        ui.cast.external.session.replace(None);
-        ui.cast
-            .external
+fn clear_retired(cast: crate::screens::casting::CastUi, handoff: &Handoff) {
+    if active_ticket(cast, handoff.ticket) {
+        cast.external.session.replace(None);
+        cast.external
             .state
             .update(|state| state.clear_active(handoff.ticket));
-        if pending_target(ui).as_ref() != Some(&handoff.target) {
+        if pending_target(cast).as_ref() != Some(&handoff.target) {
             crate::wiring::runtime_owner::runtime().parental_end_transfer(&handoff.target);
         }
     }
 }
 
-pub(crate) fn pending_target(ui: Ui) -> Option<Target> {
-    ui.cast
-        .external
+pub(crate) fn pending_target(cast: crate::screens::casting::CastUi) -> Option<Target> {
+    cast.external
         .state
         .with_untracked(|state| state.pending_target().cloned())
 }
 
 pub(crate) fn handoff_target(ui: Ui) -> Option<Target> {
-    pending_target(ui).or_else(|| {
+    pending_target(ui.cast).or_else(|| {
         ui.cast
             .external
             .active()
@@ -117,29 +116,29 @@ pub(crate) fn handoff_target(ui: Ui) -> Option<Target> {
     })
 }
 
-pub(crate) fn is_playing(ui: Ui) -> bool {
-    ui.cast.external.session.with(|transport| {
+pub(crate) fn is_playing(cast: crate::screens::casting::CastUi) -> bool {
+    cast.external.session.with(|transport| {
         transport
             .as_ref()
             .is_some_and(|transport| transport.session.is_open())
     })
 }
 
-pub(crate) fn returned(ui: Ui) {
-    stop(ui);
+pub(crate) fn returned(cast: crate::screens::casting::CastUi) {
+    stop(cast);
     host::external_player_returned();
 }
 
-pub(crate) fn stop(ui: Ui) {
-    cancel_pending(ui);
-    if let Some(active) = ui.cast.external.active() {
+pub(crate) fn stop(cast: crate::screens::casting::CastUi) {
+    cancel_pending(cast);
+    if let Some(active) = cast.external.active() {
         active.transport.session.close();
         crate::wiring::runtime_owner::runtime().parental_end_transfer(&active.handoff.target);
     }
 }
 
-fn clear_pending_target(ui: Ui, ticket: Option<u64>) {
-    let external = ui.cast.external;
+fn clear_pending_target(cast: crate::screens::casting::CastUi, ticket: Option<u64>) {
+    let external = cast.external;
     let Some(mut state) = untracked(|| external.state.try_get()) else {
         return;
     };
@@ -175,7 +174,7 @@ impl PendingHandoff {
     }
 
     fn return_to_internal(&self, target: &Target) {
-        if pending_target(self.ui).as_ref() == Some(target) {
+        if pending_target(self.ui.cast).as_ref() == Some(target) {
             // The existing per-use grant follows the same content back to
             // the native player. Ui::play still checks its ordinary gates.
             self.ui.cast.external.state.update(|state| {
@@ -188,7 +187,7 @@ impl PendingHandoff {
 impl Drop for PendingHandoff {
     fn drop(&mut self) {
         crate::wiring::runtime_owner::with_runtime(self.owner.clone(), || {
-            clear_pending_target(self.ui, Some(self.ticket))
+            clear_pending_target(self.ui.cast, Some(self.ticket))
         });
     }
 }
@@ -204,7 +203,7 @@ impl PreviousPlayback {
     fn capture(ui: Ui) -> Option<Self> {
         let channel = ui.playback.playing.get_untracked()?;
         let schedule = crate::wiring::runtime_owner::schedule();
-        let (epg, local) = iptv_guide::combined::epg_channel(&*schedule, channel)?;
+        let authority = Runtime::playback_authority(&*schedule, channel)?;
         let archive = match ui.playback.playback.get_untracked() {
             Playback::Live => None,
             Playback::CatchUp { start, offset } => {
@@ -215,7 +214,7 @@ impl PreviousPlayback {
         };
         Some(Self {
             key: schedule.channel_key(channel)?,
-            authority: epg.resolution_authority(local)?,
+            authority,
             archive,
             mode: ui.chrome.mode.get_untracked(),
         })
@@ -223,8 +222,7 @@ impl PreviousPlayback {
 
     fn remap(&self, schedule: &dyn Schedule) -> Option<(usize, Playback)> {
         let channel = schedule.find_channel(&self.key)?;
-        let (epg, local) = iptv_guide::combined::epg_channel(schedule, channel)?;
-        if epg.resolution_authority(local).as_ref() != Some(&self.authority) {
+        if Runtime::playback_authority(schedule, channel).as_ref() != Some(&self.authority) {
             return None;
         }
         match &self.archive {
@@ -248,7 +246,7 @@ impl PreviousPlayback {
         let ui = pending.ui;
         if !current()
             || ui.playback.playing.get_untracked().is_some()
-            || crate::playback::on_demand::active(ui)
+            || crate::playback::on_demand::active(ui.playback)
             || ui.cast.external.active().is_some()
         {
             return;
@@ -260,7 +258,7 @@ impl PreviousPlayback {
         if !crate::playback::player::allow_guide_channel(channel) {
             return;
         }
-        let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
+        let Some(target) = crate::screens::parental_view::live_target(ui.app, channel) else {
             return;
         };
         if !pending.owner.parental_allowed(&target) {
@@ -278,9 +276,9 @@ impl PreviousPlayback {
     }
 }
 
-fn group(ui: Ui) -> Option<(ListId, usize)> {
+fn group(guide: crate::GuideUi) -> Option<(ListId, usize)> {
     let schedule = crate::wiring::runtime_owner::schedule();
-    let entry = ui.guide.list.with_untracked(|list| list.entry());
+    let entry = guide.list.with_untracked(|list| list.entry());
     let Entry::Group(group) = Entry::at(entry) else {
         return None;
     };
@@ -290,13 +288,14 @@ fn group(ui: Ui) -> Option<(ListId, usize)> {
         .then(|| (ListId::of(entry, &*schedule), group))
 }
 
-pub fn cancel_pending(ui: Ui) {
-    ui.cast.external.state.update(State::supersede);
-    clear_pending_target(ui, None);
-    if let Some(active) = ui.cast.external.active()
+pub fn cancel_pending(cast: crate::screens::casting::CastUi) {
+    crate::wiring::runtime_owner::runtime().cancel_stream_resolution(StreamPurpose::External);
+    cast.external.state.update(State::supersede);
+    clear_pending_target(cast, None);
+    if let Some(active) = cast.external.active()
         && active.transport.session.is_retired()
     {
-        clear_retired(ui, &active.handoff);
+        clear_retired(cast, &active.handoff);
     }
 }
 
@@ -324,8 +323,8 @@ pub(crate) fn open_archive(
 }
 
 /// Archive fallback calls this only after authorization starts playback.
-pub(crate) fn missing_handler(ui: Ui, list: ListId) {
-    crate::chrome::menu_view::offer_external_player_reset(ui, list);
+pub(crate) fn missing_handler(screens: crate::ScreensUi, list: ListId) {
+    crate::chrome::menu_view::offer_external_player_reset(screens, list);
     crate::chrome::toast::notify(tr(
         "No external player is installed, so this channel plays here.",
     ));
@@ -340,7 +339,7 @@ fn open_from(
     if !host::EXTERNAL_PLAYER || ui.playback.player_surface != 0 {
         return Outcome::Internal;
     }
-    let Some((list, group_index)) = group(ui) else {
+    let Some((list, group_index)) = group(ui.guide) else {
         return Outcome::Internal;
     };
     let schedule = crate::wiring::runtime_owner::schedule();
@@ -356,11 +355,11 @@ fn open_from(
     // group's preference off.
     let available = host::external_player_available();
     if !available && choice.is_none() {
-        missing_handler(ui, list);
+        missing_handler(ui.screens, list);
         return Outcome::Internal;
     }
     let owner = crate::wiring::runtime_owner::runtime();
-    let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
+    let Some(target) = crate::screens::parental_view::live_target(ui.app, channel) else {
         return if choice.is_some() {
             Outcome::Handled
         } else {
@@ -450,12 +449,12 @@ fn open_from(
         };
         Some((epg.resolve(local, archive, clock), epg.shared_playback()))
     };
-    cancel_pending(ui);
+    cancel_pending(ui.cast);
     let ticket = ui.cast.external.request.get_untracked();
     crate::playback::browse_playback::hold(ui);
     let current = move || {
         ui.cast.external.request.get_untracked() == ticket
-            && group(ui).is_some_and(|(now, _)| now == list)
+            && group(ui.guide).is_some_and(|(now, _)| now == list)
             && guarded
                 .as_ref()
                 .is_none_or(|choice| choice.resolve_handoff(ui).is_some())
@@ -470,154 +469,153 @@ fn open_from(
             unavailable();
             return;
         };
-        let config = crate::wiring::settings::network_config();
         let owner = crate::wiring::runtime_owner::runtime();
         crate::wiring::tasks::spawn_in_app(async move {
-            let source = if let Resolution::StalkerLink(link) = resolution {
-                let StalkerLink {
-                    session: mut portal,
-                    cmd,
-                    channel_headers,
-                } = *link;
-                let client = owner.link_client(config);
-                let cancel = iptv_import::CancelToken::new();
-                let result = owner
-                    .spawn_network(async move {
-                        let net = client.await.ok()?;
-                        let url =
-                            iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)
-                                .await
-                                .ok()?;
-                        Some((StalkerLink::source(&portal, url, &channel_headers), portal))
-                    })
-                    .await;
-                result.ok().flatten().map(|(source, portal)| {
-                    if current()
-                        && let Some(context) = context
-                    {
-                        context.update_stalker_session(portal);
-                    }
-                    source
-                })
-            } else {
-                resolution.ready()
-            };
-            if !current() {
-                return;
-            }
-            let Some(mut source) = source else {
-                unavailable();
-                return;
-            };
-            owner.apply_user_agent(&mut source.headers);
-            let pending = PendingHandoff::new(ui, ticket, owner.clone());
-            let handoff = host::connect_external_player(source, || {
-                if current() {
-                    pending.mark(target.clone());
-                    true
-                } else {
-                    false
-                }
-            })
-            .await;
-            if !current() {
-                return;
-            }
-            let Some(handoff) = handoff else {
-                unavailable();
-                return;
-            };
-            let verified = owner
-                .external_playback_allowed(expected.clone(), group_id.clone())
-                .await;
-            if !current() {
-                return;
-            }
-            if !handoff.is_open()
-                || !matches!(verified, Ok(true))
-                || !owner.parental_allowed(&target)
-                || resolve().is_none()
+            let source = match owner
+                .resolve_stream(StreamPurpose::External, resolution, context)
+                .await
             {
-                unavailable();
-                return;
-            }
-            if let Some(previous) = ui.cast.external.active() {
-                previous.transport.session.close_and_wait().await;
-                clear_retired(ui, &previous.handoff);
-                if !current() {
+                Ok(source) => source,
+                Err(ResolveFailure::Cancelled) => return,
+                Err(_) => {
+                    if current() {
+                        unavailable();
+                    }
                     return;
                 }
-                if !handoff.is_open() {
-                    unavailable();
-                    return;
-                }
-            }
-            let Some(lease) = owner.reserve_external_viewing(iptv_library::SourceId(target.source))
-            else {
-                crate::chrome::toast::notify(tr(
-                    "No provider connection available while recording; stop a recording or check Streams at once",
-                ));
-                return;
             };
-            let previous = PreviousPlayback::capture(ui);
-            crate::playback::interruption::viewer_acted(ui);
-            crate::playback::player_keys::stopped_for_external(ui, &target);
-            owner.retire_viewing_inputs(0).await;
             if !current() {
                 return;
             }
-            let approval = owner
-                .authorize_external_playback(expected.clone(), group_id.clone())
-                .await;
-            if !current() {
-                return;
-            }
-            let session = match (handoff, lease) {
-                (handoff, lease)
-                    if handoff.is_open()
-                        && owner.parental_allowed(&target)
-                        && resolve().is_some()
-                        && matches!(approval, Ok(Some(approval)) if approval.is_current()) =>
-                {
-                    handoff.allow(lease)
-                }
-                // Release the handoff and lease before attempting recovery.
-                _ => None,
-            };
-            if let Some(session) = session {
-                let transport = Transport {
-                    authority: expected,
-                    group: group_id,
-                    session,
-                };
-                let handoff = Handoff { ticket, target };
-                if !ui
-                    .cast
-                    .external
-                    .activate(handoff.clone(), transport.clone())
-                {
-                    transport.session.close();
-                    return;
-                }
-                crate::wiring::tasks::spawn_in_app(async move {
-                    transport.session.wait_retired().await;
-                    clear_retired(ui, &handoff);
-                });
-            } else {
-                unavailable();
-                if let Some(previous) = previous {
-                    previous.restore(&pending, current).await;
-                }
-            }
+            connect_handoff(
+                ui, owner, ticket, target, expected, group_id, source, current, resolve,
+            )
+            .await;
         });
     };
     crate::wiring::navigation::request_if(
-        ui,
+        ui.screens,
         protected,
         move || !archive_choice || before_prompt(),
         admitted,
     );
     Outcome::Handled
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn connect_handoff(
+    ui: Ui,
+    owner: Rc<Runtime>,
+    ticket: u64,
+    target: Target,
+    expected: ResolutionAuthority,
+    group_id: String,
+    mut source: iptv_core::playback::PlaySource,
+    current: impl Fn() -> bool,
+    resolve: impl Fn() -> Option<(
+        iptv_guide::playback::Resolution,
+        Option<Rc<iptv_guide::playback::PlaybackContext>>,
+    )>,
+) {
+    owner.apply_user_agent(&mut source.headers);
+    let pending = PendingHandoff::new(ui, ticket, owner.clone());
+    let handoff = host::connect_external_player(source, || {
+        if current() {
+            pending.mark(target.clone());
+            true
+        } else {
+            false
+        }
+    })
+    .await;
+    if !current() {
+        return;
+    }
+    let Some(handoff) = handoff else {
+        unavailable();
+        return;
+    };
+    let verified = owner
+        .external_playback_allowed(expected.clone(), group_id.clone())
+        .await;
+    if !current() {
+        return;
+    }
+    if !handoff.is_open()
+        || !matches!(verified, Ok(true))
+        || !owner.parental_allowed(&target)
+        || resolve().is_none()
+    {
+        unavailable();
+        return;
+    }
+    if let Some(previous) = ui.cast.external.active() {
+        previous.transport.session.close_and_wait().await;
+        clear_retired(ui.cast, &previous.handoff);
+        if !current() {
+            return;
+        }
+        if !handoff.is_open() {
+            unavailable();
+            return;
+        }
+    }
+    let Some(lease) = owner.reserve_external_viewing(iptv_library::SourceId(target.source)) else {
+        crate::chrome::toast::notify(tr(
+            "No provider connection available while recording; stop a recording or check Streams at once",
+        ));
+        return;
+    };
+    let previous = PreviousPlayback::capture(ui);
+    crate::playback::interruption::viewer_acted(ui.playback);
+    crate::playback::player_keys::stopped_for_external(ui, &target);
+    owner.retire_viewing_inputs(0).await;
+    if !current() {
+        return;
+    }
+    let approval = owner
+        .authorize_external_playback(expected.clone(), group_id.clone())
+        .await;
+    if !current() {
+        return;
+    }
+    let session = match (handoff, lease) {
+        (handoff, lease)
+            if handoff.is_open()
+                && owner.parental_allowed(&target)
+                && resolve().is_some()
+                && matches!(approval, Ok(Some(approval)) if approval.is_current()) =>
+        {
+            handoff.allow(lease)
+        }
+        // Release the handoff and lease before attempting recovery.
+        _ => None,
+    };
+    if let Some(session) = session {
+        let transport = Transport {
+            authority: expected,
+            group: group_id,
+            session,
+        };
+        let handoff = Handoff { ticket, target };
+        if !ui
+            .cast
+            .external
+            .activate(handoff.clone(), transport.clone())
+        {
+            transport.session.close();
+            return;
+        }
+        crate::wiring::tasks::spawn_in_app(async move {
+            transport.session.wait_retired().await;
+            clear_retired(ui.cast, &handoff);
+        });
+    } else {
+        unavailable();
+        if let Some(previous) = previous {
+            previous.restore(&pending, current).await;
+        }
+    }
 }
 
 fn unavailable() {

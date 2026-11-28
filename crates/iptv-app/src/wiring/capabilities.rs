@@ -1,5 +1,4 @@
 //! One host projection for feature controls and action admission.
-use crate::Ui;
 use iptv_presentation::capabilities::{Reason, RecordNow};
 
 /// Where Record now is offered on the device as it is now (reactive): by
@@ -15,15 +14,15 @@ pub fn record_now() -> RecordNow {
 /// Whether the Recordings library shows on the device as it is now
 /// (reactive): always, never, or once the library's last read found
 /// recordings in it ([`iptv_presentation::capabilities::RecordingsLibrary`]).
-pub fn recordings_library(ui: Ui) -> bool {
+pub fn recordings_library(screens: crate::ScreensUi) -> bool {
     crate::host::HAS_WORKERS
         && iptv_presentation::capabilities::recordings_library(crate::wiring::device::host())
-            .shown(ui.screens.recordings.with(|s| !s.jobs.is_empty()))
+            .shown(screens.recordings.with(|s| !s.jobs.is_empty()))
 }
 
 /// [`recordings_library`], without subscribing.
-pub fn recordings_library_untracked(ui: Ui) -> bool {
-    nsh_core::prelude::untracked(|| recordings_library(ui))
+pub fn recordings_library_untracked(screens: crate::ScreensUi) -> bool {
+    nsh_core::prelude::untracked(|| recordings_library(screens))
 }
 
 pub fn reason(reason: Reason) -> &'static str {

@@ -4,7 +4,7 @@ use super::*;
 /// The choosers' layer: `leave` for the question before leaving, over
 /// every screen; else the others, over the video. Each shows only its own.
 pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
-    let open = move || is_open(ui, leave);
+    let open = move || is_open(ui.screens, leave);
     let overlay = if leave {
         crate::chrome::overlays::Overlay::Leave
     } else {
@@ -65,7 +65,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
         // Clear of the play bar while it shows.
         .pb(move || {
             px(if crate::playback::play_bar::shows(ui) {
-                crate::playback::play_bar::height(ui) + 16.0
+                crate::playback::play_bar::height(ui.playback) + 16.0
             } else {
                 40.0
             })
@@ -159,7 +159,7 @@ fn row(ui: Ui, size: Scale, at: Position) -> View {
                     Kind::History | Kind::AirPlay | Kind::CastEnded | Kind::More | Kind::Leave => {
                         false
                     }
-                    Kind::Volume => volume_index(ui) == index,
+                    Kind::Volume => volume_index(ui.playback) == index,
                     _ => c.list.selected == index,
                 };
                 Some((label, checked, c.list.focus == index))
@@ -198,10 +198,27 @@ fn row(ui: Ui, size: Scale, at: Position) -> View {
             ..Default::default()
         })
         .on_press(move || {
-            ui.touched();
+            let index = at.index();
+            let channel_zap = ui.screens.chooser.with_untracked(|c| {
+                c.as_ref()
+                    .filter(|c| c.kind == Kind::More)
+                    .and_then(|c| c.more.as_ref()?.controls.get(index).copied())
+                    .is_some_and(|control| {
+                        matches!(
+                            control,
+                            iptv_presentation::play_bar::Control::PreviousChannel
+                                | iptv_presentation::play_bar::Control::NextChannel
+                        )
+                    })
+            });
+            if channel_zap {
+                crate::playback::touch_zap::touched(ui);
+            } else {
+                ui.touched();
+            }
             // The row unmounts on selection. Playback actions and timers
             // belong to the window where the chooser opened.
-            ui.owner.run(|| pick(ui, at.index()));
+            ui.owner.run(move || pick(ui, index));
         })
         .child(
             list_rows::name(size, move || {

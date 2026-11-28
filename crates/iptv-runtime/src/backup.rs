@@ -152,13 +152,7 @@ impl Drop for Scratch {
     }
 }
 
-pub fn sibling(root: &Path, suffix: &str) -> PathBuf {
-    root.with_file_name(format!(
-        "{}.{}",
-        root.file_name().unwrap_or_default().to_string_lossy(),
-        suffix
-    ))
-}
+pub use crate::storage::sibling;
 fn scratch(services: &Services) -> Result<Scratch> {
     let path = sibling(
         services.directory(),

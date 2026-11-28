@@ -20,7 +20,7 @@ pub(super) fn transport(ui: Ui, key: RemoteKey, press: Press, action: Action) ->
     }
     if action == Action::Stop
         && ui.playback.player_surface == 0
-        && crate::playback::external_player::is_playing(ui)
+        && crate::playback::external_player::is_playing(ui.cast)
     {
         crate::playback::player_keys::stop_playback(ui);
         return true;
@@ -59,7 +59,7 @@ pub(super) fn preview(ui: Ui, key: RemoteKey, press: Press, action: Action, repe
             Action::Select | Action::ReturnToPlayer => crate::guide::lists::ok(ui),
             Action::ShowMenu | Action::ShowControls
                 if ui.playback.playing.get().is_some()
-                    || crate::playback::on_demand::active(ui) =>
+                    || crate::playback::on_demand::active(ui.playback) =>
             {
                 ui.chrome
                     .mode

@@ -141,6 +141,7 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-core/src/parental.rs",
     "iptv-presentation/src/parental.rs",
     "iptv-runtime/src/parental.rs",
+    "iptv-runtime/src/parental/gate.rs",
     "iptv-app/src/screens/parental_view.rs",
     "iptv-runtime/src/backup.rs",
     "iptv-runtime/src/backup/instance.rs",

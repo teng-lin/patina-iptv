@@ -214,7 +214,7 @@ pub fn button(
 ) -> View {
     let mark = move || Mark::of(focused() && ui.keys_shown(), false);
     pill(
-        ui,
+        ui.chrome,
         size,
         label,
         move || match mark() {
@@ -236,7 +236,7 @@ pub(crate) fn primary_button(
 ) -> View {
     let mark = move || Mark::of(focused() && ui.keys_shown(), false);
     pill(
-        ui,
+        ui.chrome,
         size,
         label,
         move || match mark() {
@@ -249,7 +249,7 @@ pub(crate) fn primary_button(
 }
 
 fn pill(
-    ui: Ui,
+    chrome: crate::ChromeUi,
     size: Scale,
     label: impl IntoReactive<SharedString>,
     bg: impl Fn() -> Rgba + 'static,
@@ -269,7 +269,7 @@ fn pill(
         .rounded(px(RADIUS))
         .bg(bg)
         .on_press(move || {
-            ui.touched();
+            chrome.touched();
             on_press();
         })
         .child(

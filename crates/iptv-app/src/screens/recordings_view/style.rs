@@ -20,7 +20,7 @@ pub(super) fn row(size: Scale, height: f32, focused: impl Fn() -> bool + Copy + 
 }
 
 pub(super) fn action(
-    ui: Ui,
+    chrome: crate::ChromeUi,
     size: Scale,
     label: impl IntoReactive<SharedString>,
     focused: impl Fn() -> bool + Copy + 'static,
@@ -29,12 +29,12 @@ pub(super) fn action(
     row(size, 56.0, focused)
         .child(ui_kit::body(size, label).text_color(rgb(crate::theme::LIST_TEXT)))
         .on_press(move || {
-            ui.touched();
+            chrome.touched();
             act();
         })
 }
 
-pub(super) fn header(ui: Ui, size: Scale, title: &'static str) -> View {
+pub(super) fn header(screens: crate::ScreensUi, size: Scale, title: &'static str) -> View {
     view()
         .flex_row()
         .items_center()
@@ -50,7 +50,7 @@ pub(super) fn header(ui: Ui, size: Scale, title: &'static str) -> View {
                 .justify_center()
                 .role(AccessibilityRole::Button)
                 .label(tr("Close"))
-                .on_press(move || close(ui))
+                .on_press(move || close(screens))
                 .child(ui_kit::body(size, tr("Close"))),
         )
 }

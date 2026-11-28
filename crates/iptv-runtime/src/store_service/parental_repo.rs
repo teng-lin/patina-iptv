@@ -1,9 +1,11 @@
 //! Store operations that enforce parental credentials and grants.
 
 use super::{Services, Store, StoreError};
-use crate::parental::{Error, Snapshot, now_ms, policy_settings};
+use crate::error::SETTINGS_LOCKED_REASON;
+use crate::parental::gate::{Error, Snapshot, now_ms, policy_settings};
 use iptv_core::parental::{ContentKind, Pin, Target};
 use iptv_library::SourceId;
+use iptv_providers::model::SourceConfig;
 use iptv_store_sqlite::parental::ParentalCredential;
 use std::collections::BTreeMap;
 use std::sync::{
@@ -335,16 +337,17 @@ impl ParentalRepo {
 
     pub(crate) fn import_allowed(
         store: &Store,
-        job: &crate::imports::Job,
+        stored: Option<SourceId>,
+        config: &SourceConfig,
+        edit: bool,
         snapshot: &Snapshot,
     ) -> Result<bool, StoreError> {
-        let same = job
-            .stored
+        let same = stored
             .map(|id| store.source(id))
             .transpose()?
             .flatten()
-            .is_some_and(|stored| stored.source.config == job.source.config);
-        if same && !job.edit {
+            .is_some_and(|stored| stored.source.config == *config);
+        if same && !edit {
             Ok(true)
         } else {
             Ok(store.parental_credential()?.is_none()
@@ -355,11 +358,13 @@ impl ParentalRepo {
 
     pub(crate) async fn import_allowed_for(
         self,
-        job: crate::imports::Job,
+        stored: Option<SourceId>,
+        config: SourceConfig,
+        edit: bool,
         snapshot: Snapshot,
     ) -> Result<bool, StoreError> {
         self.services
-            .read(move |store| Self::import_allowed(store, &job, &snapshot))
+            .read(move |store| Self::import_allowed(store, stored, &config, edit, &snapshot))
             .await
     }
 
@@ -414,5 +419,5 @@ impl ParentalRepo {
 }
 
 fn settings_locked() -> StoreError {
-    StoreError::Unavailable(crate::parental::SETTINGS_LOCKED_REASON)
+    StoreError::Unavailable(SETTINGS_LOCKED_REASON)
 }

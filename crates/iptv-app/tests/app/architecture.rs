@@ -647,6 +647,46 @@ fn grouped_and_aliased_paths_expose_their_dependencies() {
     assert!(paths_from(&source, "super").contains(&vec!["super", "wiring", "data", "catalog"]));
 }
 
+/// Value types from `iptv_import` that UI code may name outside `src/host/`.
+/// Operations (such as `stalker_link`) belong in `iptv-runtime`.
+const IMPORT_VALUES_OUTSIDE_HOST: &[&str] = &["CancelToken"];
+
+/// Known intentional exception: artwork downloads use `Network::client` directly.
+const IMPORT_FETCH_EXCEPTIONS: &[&str] = &["chrome/content_image.rs"];
+
+#[test]
+fn domain_import_operations_stay_outside_views() {
+    let (root, files) = app_sources();
+    for file in files {
+        let name = file_name(&root, &file);
+        if host_file(&name) || name.ends_with("/tests.rs") {
+            continue;
+        }
+        let source = shipped(&code(&file));
+        let token_list: Vec<_> = tokens(&source).collect();
+        for (at, &token) in token_list.iter().enumerate() {
+            if token == "iptv_import" && token_list.get(at + 1) != Some(&"::") {
+                panic!(
+                    "{name} aliases or imports bare `iptv_import`; move provider I/O operations into iptv-runtime"
+                );
+            }
+        }
+        for path in paths_from(&source, "iptv_import") {
+            let item = path.first().copied().unwrap_or("");
+            if IMPORT_VALUES_OUTSIDE_HOST.contains(&item) {
+                continue;
+            }
+            if item == "Fetch" && IMPORT_FETCH_EXCEPTIONS.contains(&name.as_str()) {
+                continue;
+            }
+            panic!(
+                "{name} names iptv_import::{}; move provider I/O operations into iptv-runtime",
+                path.join("::")
+            );
+        }
+    }
+}
+
 #[test]
 fn host_cannot_reach_views_through_root_imports() {
     let (root, _) = app_sources();
@@ -663,4 +703,127 @@ fn host_cannot_reach_views_through_root_imports() {
         );
     }
     assert!(is_module_in(&root, "screens", "parental_view"));
+}
+
+/// Shrink-only count of shipped functions in `crates/iptv-app/src/**` taking
+/// the whole `Ui` (`: Ui` or `: &Ui`). Lower this as more functions move to
+/// narrower `Ui` sub-handles.
+const UI_PARAMETER_LIMIT: usize = 869;
+
+fn ui_parameter_functions(source: &str) -> usize {
+    let tokens: Vec<_> = tokens(source).collect();
+    let mut count = 0usize;
+    let mut i = 0usize;
+    while i < tokens.len() {
+        if tokens[i] != "fn" {
+            i += 1;
+            continue;
+        }
+        // Require a function name identifier (excludes `fn(Ui)` pointer types).
+        let Some(&name) = tokens.get(i + 1) else {
+            break;
+        };
+        if !name.chars().next().is_some_and(is_word) {
+            i += 1;
+            continue;
+        }
+        i += 2;
+        if tokens.get(i) == Some(&"<") {
+            let mut angle = 0usize;
+            while i < tokens.len() {
+                match tokens[i] {
+                    "<" => angle += 1,
+                    ">" if tokens.get(i.saturating_sub(1)) != Some(&"-") => {
+                        angle -= 1;
+                        if angle == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    ";" | "{" => break,
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+        if tokens.get(i) != Some(&"(") {
+            continue;
+        }
+        let mut paren = 0usize;
+        let mut angle = 0usize;
+        let mut takes_ui = false;
+        while i < tokens.len() {
+            match tokens[i] {
+                "(" => paren += 1,
+                ")" => {
+                    paren -= 1;
+                    if paren == 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                "<" if paren == 1 => angle += 1,
+                ">" if paren == 1 => angle = angle.saturating_sub(1),
+                ":" if paren == 1 && angle == 0 => {
+                    let mut j = i + 1;
+                    if tokens.get(j) == Some(&"&") {
+                        j += 1;
+                        if tokens.get(j) == Some(&"'") {
+                            j += 2;
+                        }
+                        if tokens.get(j) == Some(&"mut") {
+                            j += 1;
+                        }
+                    }
+                    while matches!(tokens.get(j), Some(&"crate" | &"super"))
+                        && tokens.get(j + 1) == Some(&"::")
+                    {
+                        j += 2;
+                    }
+                    if tokens.get(j) == Some(&"Ui")
+                        && matches!(tokens.get(j + 1), Some(&"," | &")"))
+                    {
+                        takes_ui = true;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        if takes_ui {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[test]
+fn ui_parameter_count_only_shrinks() {
+    let (root, files) = app_sources();
+    let actual: usize = files
+        .iter()
+        .filter(|file| !file_name(&root, file).ends_with("/tests.rs"))
+        .map(|file| ui_parameter_functions(&shipped(&code(file))))
+        .sum();
+    assert_eq!(
+        actual, UI_PARAMETER_LIMIT,
+        "shipped functions taking whole `Ui` changed (actual={actual}, limit={UI_PARAMETER_LIMIT}); \
+         narrow parameters to `Ui` sub-handles and lower `UI_PARAMETER_LIMIT` as they shrink"
+    );
+}
+
+#[test]
+fn ui_parameter_counter_handles_refs_paths_generics_and_tests() {
+    let source = "
+        fn takes_value(ui: Ui) {}
+        fn takes_ref(ui: &Ui, other: usize) {}
+        fn takes_crate_path<T: Fn(Ui)>(ui: crate::Ui, cb: T) {}
+        fn takes_sub_handle(screens: ScreensUi) {}
+        fn takes_fn_ptr(cb: fn(Ui)) {}
+        #[cfg(test)]
+        mod tests {
+            fn test_helper(ui: Ui) {}
+        }
+    ";
+    assert_eq!(ui_parameter_functions(&shipped(source)), 3);
 }

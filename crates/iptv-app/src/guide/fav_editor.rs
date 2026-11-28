@@ -39,12 +39,12 @@ pub fn open(ui: Ui, list: &ListId, channel: Option<usize>) {
     ui.screens.editor.set(Some(editor));
 }
 
-pub fn close(ui: Ui) {
-    ui.screens.editor.set(None);
+pub fn close(screens: crate::ScreensUi) {
+    screens.editor.set(None);
 }
 
-pub fn move_focus(ui: Ui, step: isize) {
-    ui.screens
+pub fn move_focus(screens: crate::ScreensUi, step: isize) {
+    screens
         .editor
         .update(|e| e.iter_mut().for_each(|e| e.move_focus(step)));
 }
@@ -62,8 +62,8 @@ pub fn toggle(ui: Ui) {
     with_favorites(ui, |e, fav| e.toggle(fav));
 }
 
-pub fn request_clear(ui: Ui) {
-    ui.screens.editor.update(|editor| {
+pub fn request_clear(screens: crate::ScreensUi) {
+    screens.editor.update(|editor| {
         if let Some(editor) = editor {
             editor.request_clear();
         }
@@ -115,10 +115,10 @@ pub fn key(ui: Ui, action: iptv_nav::Action) {
                 .update(|e| e.as_mut().unwrap().control = None),
             Action::Select => match control {
                 0 => set_group(ui),
-                1 => request_clear(ui),
-                _ => close(ui),
+                1 => request_clear(ui.screens),
+                _ => close(ui.screens),
             },
-            Action::Back => close(ui),
+            Action::Back => close(ui.screens),
             _ => {}
         }
     } else {
@@ -128,11 +128,11 @@ pub fn key(ui: Ui, action: iptv_nav::Action) {
                     .editor
                     .update(|e| e.as_mut().unwrap().control = Some(0));
             }
-            Action::MoveUp => move_focus(ui, -1),
-            Action::MoveDown => move_focus(ui, 1),
+            Action::MoveUp => move_focus(ui.screens, -1),
+            Action::MoveDown => move_focus(ui.screens, 1),
             Action::Select => toggle(ui),
             Action::MoveRight => set_group(ui),
-            Action::Back => close(ui),
+            Action::Back => close(ui.screens),
             _ => {}
         }
     }
@@ -296,8 +296,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         .text_color(rgb(LIST_TEXT)),
                 )
                 .child(button("Add all", 0, set_group))
-                .child(button("Remove all", 1, request_clear))
-                .child(button("Done", 2, close)),
+                .child(button("Remove all", 1, |ui| request_clear(ui.screens)))
+                .child(button("Done", 2, |ui| close(ui.screens))),
         )
         .child(
             text(move || {

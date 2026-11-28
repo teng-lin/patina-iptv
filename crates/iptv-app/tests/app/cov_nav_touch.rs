@@ -268,7 +268,7 @@ fn multiview_past_the_account(app: &mut Headless, now: i64) {
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
-    step(app.wait_for_within("text:/^Xtream Channel 1 · /", IMPORT));
+    step(app.wait_for_within("text:Xtream Channel 1", IMPORT));
     // Explicitly open the account alone: this journey exercises its
     // single-account multiview picker and stream-limit warning.
     step(app.open_playlist_actions("127.0.0.1"));

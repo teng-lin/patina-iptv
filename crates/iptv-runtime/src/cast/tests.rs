@@ -5,6 +5,7 @@ use iptv_providers::{
     model::{M3uSourceConfig, SourceConfig},
     secret::SecretUrl,
 };
+use std::pin::Pin;
 use std::{
     task::{Context, Wake, Waker},
     time::{Duration, Instant},

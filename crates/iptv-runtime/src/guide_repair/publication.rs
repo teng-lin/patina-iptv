@@ -89,8 +89,9 @@ pub(super) async fn after_commit(
         let published = owner.services().epg().repair_publication(read, keep).await;
         let still_current = crate::stored::guide_edit_revision(&owner, source) == edit;
         let effective = match published {
-            Ok(Some(imported)) => {
+            Ok(Some(rebuilt)) => {
                 if still_current && crate::data::repair_source_shown(&owner, source) {
+                    let imported = Box::new(crate::imports::Imported::current(*rebuilt));
                     crate::data::show_repair(&owner, imported, owner.browser_generation(), edit)
                         .await;
                 }

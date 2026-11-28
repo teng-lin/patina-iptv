@@ -36,8 +36,8 @@ async fn items(source: SourceId, kind: &Kind, order: Option<Sort>) -> Result<Ite
     })
 }
 
-fn still_open(ui: Ui, generation: u64) -> bool {
-    ui.screens.organization.is_current(generation)
+fn still_open(screens: crate::ScreensUi, generation: u64) -> bool {
+    screens.organization.is_current(generation)
 }
 
 pub fn open(ui: Ui, source: SourceId, kind: Kind, focus: Option<String>) {
@@ -93,15 +93,15 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
     let mut editor = Editor::new(rows, preferred.map(|id| id.0.to_string()));
     editor.start_reorder(|_| true);
     batch(|| {
-        if crate::screens::settings_view::is_open(ui) {
-            crate::screens::settings_view::close(ui);
+        if crate::screens::settings_view::is_open(ui.screens) {
+            crate::screens::settings_view::close(ui.screens);
         }
-        crate::screens::channels_view::close(ui);
+        crate::screens::channels_view::close(ui.playback);
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
             .apply(crate::chrome::mode::Action::Restore(crate::ViewMode::Guide));
-        crate::guide::lists::open_groups(ui);
+        crate::guide::lists::open_groups(ui.guide);
         crate::playback::browse_playback::hold(ui);
         ui.screens
             .organization
@@ -115,7 +115,7 @@ pub fn open_group_reorder(ui: Ui, source: SourceId, focus: Option<String>, list:
         if let Some(entry) = list.resolve(&*crate::wiring::runtime_owner::schedule()) {
             crate::guide::lists::preview(ui, entry);
         }
-        crate::guide::lists::open_groups(ui);
+        crate::guide::lists::open_groups(ui.guide);
         crate::playback::browse_playback::hold(ui);
         open_with(
             ui,
@@ -154,7 +154,7 @@ pub fn open_context_reorder(
 fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
     let from_player = ui.chrome.mode.get_untracked() == crate::ViewMode::Fullscreen;
     if from_player {
-        crate::screens::channels_view::close(ui);
+        crate::screens::channels_view::close(ui.playback);
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
@@ -169,7 +169,7 @@ fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
     {
         Placement::Panel(list)
     } else if *kind == Kind::Groups {
-        crate::guide::lists::open_groups(ui);
+        crate::guide::lists::open_groups(ui.guide);
         Placement::Groups
     } else {
         guide_reorder_placement(ui, list)
@@ -218,7 +218,7 @@ fn open_with(
     crate::wiring::tasks::spawn_in_app(async move {
         let custom = initial == Some(Edit::Sort(Sort::Manual));
         let loaded = items(source, &kind, custom.then_some(Sort::Manual)).await;
-        if !still_open(ui, generation) || !is_open(ui) {
+        if !still_open(ui.screens, generation) || !is_open(ui.screens) {
             return;
         }
         match loaded {
@@ -232,7 +232,7 @@ fn open_with(
                     close(ui);
                     return;
                 }
-                update(ui, |state| {
+                update(ui.screens, |state| {
                     let guide_keys = match &state.placement {
                         Placement::Guide { list, .. } if mode == Mode::Reorder => {
                             Some(guide_order_keys(ui, source, list))
@@ -277,8 +277,8 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             crate::chrome::toast::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             ));
-            if still_open(ui, generation) {
-                update(ui, Open::finish_save);
+            if still_open(ui.screens, generation) {
+                update(ui.screens, Open::finish_save);
             }
             return;
         }
@@ -288,15 +288,15 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             tr("Content unblocked")
         });
         data::organization_changed(&owner, source);
-        if !still_open(ui, generation) || !is_open(ui) {
+        if !still_open(ui.screens, generation) || !is_open(ui.screens) {
             return;
         }
         let blocks = crate::runtime::commands::guide_blocks(&owner, source).await;
-        if !still_open(ui, generation) {
+        if !still_open(ui.screens, generation) {
             return;
         }
         match blocks {
-            Ok(blocks) => update(ui, |state| state.finish_block(blocks)),
+            Ok(blocks) => update(ui.screens, |state| state.finish_block(blocks)),
             Err(_) => {
                 close(ui);
                 crate::chrome::toast::notify(tr(
@@ -307,38 +307,38 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
     });
 }
 
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.organization.is_open()
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.organization.is_open()
 }
-fn state<R>(ui: Ui, f: impl FnOnce(&Open) -> R) -> Option<R> {
-    ui.screens.organization.read(f)
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Open) -> R) -> Option<R> {
+    screens.organization.read(f)
 }
-fn update(ui: Ui, f: impl FnOnce(&mut Open)) {
-    ui.screens.organization.update(f)
+fn update(screens: crate::ScreensUi, f: impl FnOnce(&mut Open)) {
+    screens.organization.update(f)
 }
 pub fn back(ui: Ui) -> bool {
-    if state(ui, |s| s.saving).unwrap_or(false) {
+    if state(ui.screens, |s| s.saving).unwrap_or(false) {
         return true;
     }
-    if state(ui, |s| s.bulk_visibility.is_some()) == Some(true) {
-        update(ui, |s| {
+    if state(ui.screens, |s| s.bulk_visibility.is_some()) == Some(true) {
+        update(ui.screens, |s| {
             s.dismiss_bulk_visibility();
         });
         return true;
     }
     if matches!(
-        placement(ui),
+        placement(ui.screens),
         Placement::Sort(_) | Placement::RenameGroup { .. }
     ) {
         close(ui);
         return true;
     }
-    if reordering(ui) {
+    if reordering(ui.screens) {
         reorder_key(ui, Key::Back);
         return true;
     }
     let mut close = false;
-    update(ui, |s| close = !s.editor.back());
+    update(ui.screens, |s| close = !s.editor.back());
     dismiss_keyboard();
     if close {
         self::close(ui);
@@ -346,7 +346,7 @@ pub fn back(ui: Ui) -> bool {
     true
 }
 fn close(ui: Ui) {
-    if state(ui, |s| {
+    if state(ui.screens, |s| {
         matches!(
             s.placement,
             Placement::Guide {
@@ -356,19 +356,21 @@ fn close(ui: Ui) {
         )
     }) == Some(true)
     {
-        crate::guide::lists::open_groups(ui);
+        crate::guide::lists::open_groups(ui.guide);
     }
     ui.screens.organization.close();
     dismiss_keyboard();
 }
 pub fn key(ui: Ui, action: Action) {
-    if state(ui, |s| s.saving).unwrap_or(false) {
+    if state(ui.screens, |s| s.saving).unwrap_or(false) {
         return;
     }
-    if let Some((_, focus_confirm)) = state(ui, |s| s.bulk_visibility).flatten() {
+    if let Some((_, focus_confirm)) = state(ui.screens, |s| s.bulk_visibility).flatten() {
         match action {
             Action::MoveUp | Action::MoveDown => {
-                update(ui, |s| s.focus_bulk_visibility(action == Action::MoveDown));
+                update(ui.screens, |s| {
+                    s.focus_bulk_visibility(action == Action::MoveDown)
+                });
             }
             Action::Select => resolve_bulk_visibility(ui, focus_confirm),
             Action::Back => resolve_bulk_visibility(ui, false),
@@ -376,15 +378,15 @@ pub fn key(ui: Ui, action: Action) {
         }
         return;
     }
-    if reordering(ui) {
-        if confirming_order(ui) {
+    if reordering(ui.screens) {
+        if confirming_order(ui.screens) {
             match action {
-                Action::MoveUp | Action::MoveDown => update(ui, |s| {
+                Action::MoveUp | Action::MoveDown => update(ui.screens, |s| {
                     let by = if action == Action::MoveUp { -1 } else { 1 };
                     s.editor.leave_choice = step_choice(&LEAVE_CHOICES, s.editor.leave_choice, by);
                 }),
                 Action::Select => {
-                    if let Some(choice) = state(ui, |s| s.editor.leave_choice) {
+                    if let Some(choice) = state(ui.screens, |s| s.editor.leave_choice) {
                         resolve_order(ui, choice);
                     }
                 }
@@ -405,29 +407,29 @@ pub fn key(ui: Ui, action: Action) {
         return;
     }
     match action {
-        Action::MoveUp => update(ui, |s| s.editor.step(-1)),
-        Action::MoveDown => update(ui, |s| s.editor.step(1)),
+        Action::MoveUp => update(ui.screens, |s| s.editor.step(-1)),
+        Action::MoveDown => update(ui.screens, |s| s.editor.step(1)),
         Action::Back => {
             back(ui);
         }
         Action::Select => {
-            if let Some(sort) = state(ui, |s| s.editor.sort_focus).flatten() {
+            if let Some(sort) = state(ui.screens, |s| s.editor.sort_focus).flatten() {
                 perform(ui, Edit::Sort(sort));
                 return;
             }
-            match state(ui, |s| s.editor.mode) {
+            match state(ui.screens, |s| s.editor.mode) {
                 Some(Mode::Visibility) => return perform(ui, Edit::Visibility),
                 Some(Mode::Blocking) => return perform(ui, Edit::Blocking),
                 _ => {}
             }
-            if state(ui, |s| s.editor.text.is_some()).unwrap_or(false) {
+            if state(ui.screens, |s| s.editor.text.is_some()).unwrap_or(false) {
                 commit(ui);
                 return;
             }
-            if let Some(edit) = state(ui, |s| s.editor.action).flatten() {
+            if let Some(edit) = state(ui.screens, |s| s.editor.action).flatten() {
                 perform(ui, edit)
             } else {
-                update(ui, |s| {
+                update(ui.screens, |s| {
                     if let Some(id) = s.editor.focus.clone() {
                         s.editor.open_actions(id)
                     }
@@ -437,12 +439,12 @@ pub fn key(ui: Ui, action: Action) {
         _ => {}
     }
 }
-fn reordering(ui: Ui) -> bool {
-    state(ui, |s| s.editor.reorder.is_some()).unwrap_or(false)
+fn reordering(screens: crate::ScreensUi) -> bool {
+    state(screens, |s| s.editor.reorder.is_some()).unwrap_or(false)
 }
 
-fn confirming_order(ui: Ui) -> bool {
-    state(ui, |s| {
+fn confirming_order(screens: crate::ScreensUi) -> bool {
+    state(screens, |s| {
         s.editor
             .reorder
             .as_ref()
@@ -452,15 +454,15 @@ fn confirming_order(ui: Ui) -> bool {
 }
 
 fn reorder_key(ui: Ui, key: Key) {
-    if state(ui, |s| s.dragging) == Some(true) {
+    if state(ui.screens, |s| s.dragging) == Some(true) {
         return;
     }
-    if confirming_order(ui) && key == Key::Back {
+    if confirming_order(ui.screens) && key == Key::Back {
         resolve_order(ui, LeaveChoice::Stay);
         return;
     }
     let mut outcome = Outcome::Ignored;
-    update(ui, |s| {
+    update(ui.screens, |s| {
         outcome = s.reorder_key(key, key == Key::Back && ui.drag_editing())
     });
     if matches!(outcome, Outcome::Done(_)) {
@@ -474,17 +476,17 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
         return;
     }
     let mut outcome = Outcome::Ignored;
-    update(ui, |s| outcome = s.resolve_order(choice));
+    update(ui.screens, |s| outcome = s.resolve_order(choice));
     if matches!(outcome, Outcome::Done(_)) {
         close(ui);
     }
 }
 
 fn save_order(ui: Ui) {
-    if state(ui, |s| s.scope.is_none()) == Some(true) {
+    if state(ui.screens, |s| s.scope.is_none()) == Some(true) {
         let generation = ui.screens.organization.epoch();
-        crate::wiring::navigation::settings_guarded(ui, move || {
-            if !still_open(ui, generation) {
+        crate::wiring::navigation::settings_guarded(ui.screens, move || {
+            if !still_open(ui.screens, generation) {
                 return;
             }
             if !crate::wiring::settings::playlists_by_hand()
@@ -504,7 +506,7 @@ fn save_order(ui: Ui) {
 fn check_playlist_order_catalog(ui: Ui) -> bool {
     let valid = crate::runtime().playlists().is_ok_and(|rows| {
         untracked(|| {
-            state(ui, |s| {
+            state(ui.screens, |s| {
                 if let Some(saved) = &s.saved_playlist_positions {
                     // The saved positions can change the tie order of equal names.
                     // The draft can still be retried while its playlists all exist.
@@ -531,7 +533,7 @@ fn check_playlist_order_catalog(ui: Ui) -> bool {
 
 fn persist_order(ui: Ui) {
     let mut draft = None;
-    update(ui, |s| draft = s.begin_order_save());
+    update(ui.screens, |s| draft = s.begin_order_save());
     let Some(draft) = draft else { return };
     if matches!(draft, OrderSave::Unchanged) {
         return close(ui);
@@ -601,7 +603,7 @@ fn persist_order(ui: Ui) {
                 )
                 .await
         {
-            if !still_open(ui, generation) {
+            if !still_open(ui.screens, generation) {
                 return;
             }
             match error {
@@ -609,7 +611,7 @@ fn persist_order(ui: Ui) {
                     crate::screens::settings_view::notify_setting_error(error);
                 }
                 error => {
-                    update(ui, |s| {
+                    update(ui.screens, |s| {
                         if let Some(positions) = saved_positions {
                             s.saved_playlist_positions = Some(positions);
                             if let Some(order) = &mut s.editor.reorder {
@@ -632,14 +634,14 @@ fn persist_order(ui: Ui) {
                 }
             }
         }
-        if !still_open(ui, generation) {
+        if !still_open(ui.screens, generation) {
             return;
         }
         match result {
             Ok(()) => close(ui),
             Err(error) => {
                 log::warn!("iptv organization: {error}");
-                update(ui, Open::finish_save);
+                update(ui.screens, Open::finish_save);
                 if playlists && error.settings_locked() {
                     crate::screens::settings_view::notify_setting_error(
                         crate::wiring::settings::SaveError::ParentalLocked,
@@ -656,7 +658,7 @@ fn persist_order(ui: Ui) {
 
 fn perform(ui: Ui, edit: Edit) {
     if matches!(edit, Edit::HideAll | Edit::ShowAll) {
-        update(ui, |s| s.request_bulk_visibility(edit));
+        update(ui.screens, |s| s.request_bulk_visibility(edit));
         return;
     }
     apply_edit(ui, edit);
@@ -664,7 +666,7 @@ fn perform(ui: Ui, edit: Edit) {
 
 fn apply_edit(ui: Ui, edit: Edit) {
     let generation = ui.screens.organization.epoch();
-    let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
+    let Some(s) = state(ui.screens, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
     };
     let Some((source, scope_kind)) = s.scope.clone() else {
@@ -701,7 +703,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
                 crate::chrome::toast::notify(tr("This channel is blocked by a group."));
                 return;
             }
-            update(ui, Open::begin_block);
+            update(ui.screens, Open::begin_block);
             set_block(ui, source, kind, item.id, blocked == Block::None);
             return;
         }
@@ -715,21 +717,21 @@ fn apply_edit(ui: Ui, edit: Edit) {
             return;
         }
         Edit::Reorder => {
-            update(ui, |s| s.editor.start_reorder(|_| true));
+            update(ui.screens, |s| s.editor.start_reorder(|_| true));
             return;
         }
         Edit::SortOptions => {
-            update(ui, |s| s.editor.sort_focus = Some(s.editor.sort));
+            update(ui.screens, |s| s.editor.sort_focus = Some(s.editor.sort));
             return;
         }
         _ => {}
     }
     if edit == Edit::Rename {
-        update(ui, |s| s.editor.text = Some(item.name));
+        update(ui.screens, |s| s.editor.text = Some(item.name));
         return;
     }
     if edit == Edit::Select {
-        update(ui, |s| s.editor.toggle_selection());
+        update(ui.screens, |s| s.editor.toggle_selection());
         return;
     }
     if scope_kind == Kind::Favorites
@@ -758,7 +760,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         );
         crate::wiring::tasks::spawn_in_app(async move {
             let ordered = ordered.await;
-            if !still_open(ui, generation) {
+            if !still_open(ui.screens, generation) {
                 return;
             }
             let result = ordered.map(|keys| {
@@ -798,7 +800,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             s.editor.sort,
             false,
         );
-        update(ui, Open::begin_save);
+        update(ui.screens, Open::begin_save);
         crate::wiring::tasks::spawn_in_app(async move {
             finish(ui, &s, generation, result.await);
         });
@@ -811,7 +813,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     let Some(edit) = edit.edit() else {
         return;
     };
-    update(ui, Open::begin_save);
+    update(ui.screens, Open::begin_save);
     let finished = s.clone();
     let result = crate::runtime::commands::edit_organization(
         &crate::wiring::runtime_owner::runtime(),
@@ -837,16 +839,16 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
         sort,
     );
     let expected = s.clone();
-    update(ui, Open::begin_save);
+    update(ui.screens, Open::begin_save);
     crate::wiring::tasks::spawn_in_app(async move {
         let result = result.await;
-        if still_open(ui, generation) && result.is_ok() {
+        if still_open(ui.screens, generation) && result.is_ok() {
             if matches!(expected.placement, Placement::Sort(_)) {
                 close(ui);
                 data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
                 return;
             }
-            update(ui, |s| s.editor.sort_focus = None);
+            update(ui.screens, |s| s.editor.sort_focus = None);
         }
         finish(ui, &expected, generation, result);
     });
@@ -854,8 +856,8 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
 
 fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
     if let Err(e) = result {
-        if still_open(ui, generation) {
-            update(ui, Open::finish_save);
+        if still_open(ui.screens, generation) {
+            update(ui.screens, Open::finish_save);
         }
         log::warn!("iptv organization: change refused: {e}");
         crate::chrome::toast::notify(tr(
@@ -867,7 +869,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
         return;
     };
     if matches!(s.placement, Placement::RenameGroup { .. }) {
-        if still_open(ui, generation) {
+        if still_open(ui.screens, generation) {
             close(ui);
         }
         data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
@@ -876,8 +878,8 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
     let expected = s.clone();
     crate::wiring::tasks::spawn_in_app(async move {
         let loaded = items(source, &kind, None).await;
-        if still_open(ui, generation) {
-            update(ui, |s| s.finish_edit(&expected, loaded.ok()));
+        if still_open(ui.screens, generation) {
+            update(ui.screens, |s| s.finish_edit(&expected, loaded.ok()));
         }
         data::organization_changed(&crate::wiring::runtime_owner::runtime(), source);
     });
@@ -885,7 +887,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
 
 fn commit(ui: Ui) {
     let generation = ui.screens.organization.epoch();
-    let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
+    let Some(s) = state(ui.screens, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
     };
     let Some(item) = s.editor.focused().cloned() else {
@@ -915,26 +917,26 @@ fn commit(ui: Ui) {
         text,
     );
     dismiss_keyboard();
-    update(ui, Open::begin_save);
+    update(ui.screens, Open::begin_save);
     crate::wiring::tasks::spawn_in_app(async move {
         finish(ui, &s, generation, result.await);
     });
 }
 
-fn text_value(ui: Ui) -> String {
-    state(ui, |s| s.editor.text.clone())
+fn text_value(screens: crate::ScreensUi) -> String {
+    state(screens, |s| s.editor.text.clone())
         .flatten()
         .unwrap_or_default()
 }
-fn set_text(ui: Ui, text: &str) {
-    update(ui, |s| s.editor.text = Some(text.to_owned()))
+fn set_text(screens: crate::ScreensUi, text: &str) {
+    update(screens, |s| s.editor.text = Some(text.to_owned()))
 }
 fn cancel(ui: Ui) {
-    if matches!(placement(ui), Placement::RenameGroup { .. }) {
+    if matches!(placement(ui.screens), Placement::RenameGroup { .. }) {
         close(ui);
         return;
     }
-    update(ui, |s| s.editor.text = None);
+    update(ui.screens, |s| s.editor.text = None);
     dismiss_keyboard();
 }
 fn label(edit: Edit, hidden: bool, blocked: bool, groups: bool) -> &'static str {
@@ -1027,10 +1029,10 @@ fn screen_caption(s: &Open) -> &'static str {
 /// Row `at` of the items: its name, then whether it is selected and
 /// whether it is hidden. A press opens its actions.
 fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> impl IntoElement {
-    let item = move || state(ui, |s| s.editor.rows().get(at.index()).cloned()).flatten();
+    let item = move || state(ui.screens, |s| s.editor.rows().get(at.index()).cloned()).flatten();
     let focused = move || focus.get() == Some(at.index());
     let grabbed = move || {
-        state(ui, |s| {
+        state(ui.screens, |s| {
             s.editor
                 .reorder
                 .as_ref()
@@ -1040,20 +1042,21 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
         .unwrap_or(false)
     };
     let mark = move || Mark::of(ui.keys_shown() && focused() && !grabbed(), false);
-    let visibility = move || state(ui, |s| s.editor.mode == Mode::Visibility) == Some(true);
+    let visibility = move || state(ui.screens, |s| s.editor.mode == Mode::Visibility) == Some(true);
     let shown = move || item().is_some_and(|item| !item.hidden);
     let status = move || {
         ui.app.settings.get();
         item()
             .map(|i| {
-                if i.hidden && state(ui, |s| s.scope.is_none()) == Some(true) {
+                if i.hidden && state(ui.screens, |s| s.scope.is_none()) == Some(true) {
                     return tr("Hidden").to_owned();
                 }
-                if reordering(ui) || visibility() {
+                if reordering(ui.screens) || visibility() {
                     return String::new();
                 }
-                let blocked = state(ui, |s| block_state(s, &i.id)).unwrap_or_default();
-                let blocking = state(ui, |s| s.editor.mode == Mode::Blocking).unwrap_or(false);
+                let blocked = state(ui.screens, |s| block_state(s, &i.id)).unwrap_or_default();
+                let blocking =
+                    state(ui.screens, |s| s.editor.mode == Mode::Blocking).unwrap_or(false);
                 if blocking {
                     let status = match blocked {
                         Block::None => tr("Unblocked"),
@@ -1062,7 +1065,8 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
                     };
                     return status.to_owned();
                 }
-                let selected = state(ui, |s| s.editor.selected.contains(&i.id)).unwrap_or(false);
+                let selected =
+                    state(ui.screens, |s| s.editor.selected.contains(&i.id)).unwrap_or(false);
                 let shown = if i.hidden {
                     tr("Hidden")
                 } else {
@@ -1082,7 +1086,7 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
             .unwrap_or_default()
     };
     let is_selected = move || {
-        state(ui, |s| {
+        state(ui.screens, |s| {
             item().is_some_and(|i| s.editor.selected.contains(&i.id))
         })
         .unwrap_or(false)
@@ -1113,7 +1117,7 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
             ui.touched();
             if let Some(i) = item() {
                 let mut edit = None;
-                update(ui, |s| edit = s.activate_row(i.id));
+                update(ui.screens, |s| edit = s.activate_row(i.id));
                 if let Some(edit) = edit {
                     perform(ui, edit);
                 }
@@ -1128,8 +1132,8 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
         .child(ui_kit::detail(size, status).text_color(move || mark().secondary()))
         .child(when(
             move || {
-                reordering(ui)
-                    && (ui.drag_editing() || state(ui, |s| s.scope.is_none()) == Some(true))
+                reordering(ui.screens)
+                    && (ui.drag_editing() || state(ui.screens, |s| s.scope.is_none()) == Some(true))
             },
             move || reorder_drag::handle(size, at.index()),
         ))
@@ -1165,13 +1169,13 @@ fn visibility_switch(ui: Ui, size: Scale, shown: impl Fn() -> bool + Copy + 'sta
 /// beside the card goes back.
 fn actions_sheet(ui: Ui, size: Scale) -> impl IntoElement {
     let name = move || {
-        state(ui, |s| s.editor.focused().map(|i| i.name.clone()))
+        state(ui.screens, |s| s.editor.focused().map(|i| i.name.clone()))
             .flatten()
             .unwrap_or_default()
     };
     view()
         .accessibility_elements_hidden(move || {
-            state(ui, |screen| {
+            state(ui.screens, |screen| {
                 screen.editor.text.is_some()
                     || screen.editor.sort_focus.is_some()
                     || screen.bulk_visibility.is_some()
@@ -1202,7 +1206,7 @@ fn actions_sheet(ui: Ui, size: Scale) -> impl IntoElement {
 fn actions_list(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     effect(move || {
-        if let Some(at) = state(ui, |s| {
+        if let Some(at) = state(ui.screens, |s| {
             s.editor
                 .action
                 .and_then(|edit| s.editor.actions().iter().position(|action| *action == edit))
@@ -1213,7 +1217,7 @@ fn actions_list(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     virtual_list(
-        move || state(ui, |s| s.editor.actions().len()).unwrap_or(0),
+        move || state(ui.screens, |s| s.editor.actions().len()).unwrap_or(0),
         move |at| action_row(ui, size, at),
     )
     .element_ref(&rows)
@@ -1223,13 +1227,13 @@ fn actions_list(ui: Ui, size: Scale) -> impl IntoElement {
 
 /// Action `at` for the focused item (Hide reads Show for a hidden one).
 fn action_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
-    let edit = move || state(ui, |s| s.editor.actions().get(at.index()).copied()).flatten();
+    let edit = move || state(ui.screens, |s| s.editor.actions().get(at.index()).copied()).flatten();
     ui_kit::action(
         ui,
         size,
         move || {
             ui.app.settings.get();
-            state(ui, |s| {
+            state(ui.screens, |s| {
                 let item = s.editor.focused()?;
                 let blocked = match (block_kind(s.kind()?), block_state(s, &item.id)) {
                     (BlockKind::Channel, Block::Group) if edit() == Some(Edit::Blocking) => {
@@ -1248,7 +1252,7 @@ fn action_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
             .flatten()
             .unwrap_or("")
         },
-        move || state(ui, |s| s.editor.action) == Some(edit()),
+        move || state(ui.screens, |s| s.editor.action) == Some(edit()),
         0xFFFFFF,
         move || {
             if let Some(edit) = edit() {
@@ -1281,7 +1285,7 @@ fn modal(ui: Ui, size: Scale, title: &'static str, contents: impl IntoElement) -
 }
 
 fn sort_sheet(ui: Ui, size: Scale) -> impl IntoElement {
-    let title = match state(ui, |s| {
+    let title = match state(ui.screens, |s| {
         (
             matches!(s.placement, Placement::Sort(_)),
             s.kind() == Some(&Kind::Groups),
@@ -1292,7 +1296,7 @@ fn sort_sheet(ui: Ui, size: Scale) -> impl IntoElement {
         _ => tr("Sort order"),
     };
     let scroll = ui_kit::FocusScroll::new();
-    let sorts = state(ui, |s| s.editor.sorts()).unwrap_or_default();
+    let sorts = state(ui.screens, |s| s.editor.sorts()).unwrap_or_default();
     modal(
         ui,
         size,
@@ -1301,13 +1305,14 @@ fn sort_sheet(ui: Ui, size: Scale) -> impl IntoElement {
             .view()
             .max_h(move || px(window().height.0 * 0.67))
             .children(sorts.iter().copied().map(|sort| {
-                let focused = move || state(ui, |s| s.editor.sort_focus) == Some(Some(sort));
+                let focused =
+                    move || state(ui.screens, |s| s.editor.sort_focus) == Some(Some(sort));
                 scroll.control(
                     ui_kit::action(
                         ui,
                         size,
                         move || {
-                            if state(ui, |s| s.editor.sort == sort).unwrap_or(false) {
+                            if state(ui.screens, |s| s.editor.sort == sort).unwrap_or(false) {
                                 format!("✓ {}", sort_label(sort))
                             } else {
                                 sort_label(sort).to_owned()
@@ -1325,14 +1330,14 @@ fn sort_sheet(ui: Ui, size: Scale) -> impl IntoElement {
 
 fn resolve_bulk_visibility(ui: Ui, confirm: bool) {
     let mut requested = None;
-    update(ui, |s| requested = s.dismiss_bulk_visibility());
+    update(ui.screens, |s| requested = s.dismiss_bulk_visibility());
     if let Some(edit) = requested.filter(|_| confirm) {
         apply_edit(ui, edit);
     }
 }
 
 fn bulk_visibility_sheet(ui: Ui, size: Scale) -> impl IntoElement {
-    let title = if state(ui, |s| s.bulk_visibility)
+    let title = if state(ui.screens, |s| s.bulk_visibility)
         .flatten()
         .map(|(edit, _)| edit)
         == Some(Edit::HideAll)
@@ -1351,7 +1356,7 @@ fn bulk_visibility_sheet(ui: Ui, size: Scale) -> impl IntoElement {
                 size,
                 if confirm { tr("Confirm") } else { tr("Cancel") },
                 move || {
-                    state(ui, |s| s.bulk_visibility)
+                    state(ui.screens, |s| s.bulk_visibility)
                         .flatten()
                         .is_some_and(|(_, focus)| focus == confirm)
                 },
@@ -1377,7 +1382,7 @@ fn confirm_order_sheet(ui: Ui, size: Scale) -> impl IntoElement {
                 ui,
                 size,
                 label,
-                move || state(ui, |s| s.editor.leave_choice) == Some(choice),
+                move || state(ui.screens, |s| s.editor.leave_choice) == Some(choice),
                 0xFFFFFF,
                 move || resolve_order(ui, choice),
             )
@@ -1386,9 +1391,9 @@ fn confirm_order_sheet(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn reorder_hint(ui: Ui) -> &'static str {
-    if !reordering(ui) {
+    if !reordering(ui.screens) {
         ""
-    } else if guide_order_open(ui) {
+    } else if guide_order_open(ui.screens) {
         if ui.drag_editing() && !ui.keys_shown() {
             tr("Drag a handle to move a channel.")
         } else if idiom() == nsh_core::platform::Idiom::Desktop {
@@ -1399,7 +1404,7 @@ fn reorder_hint(ui: Ui) -> &'static str {
     } else if ui.drag_editing() && !ui.keys_shown() {
         tr("Drag the handles to reorder.")
     } else {
-        let selected = order_selection(ui).is_some();
+        let selected = order_selection(ui.screens).is_some();
         match (idiom() == nsh_core::platform::Idiom::Desktop, selected) {
             (true, true) => tr("Use the arrows to move. Press Enter to place."),
             (true, false) => tr("Press Enter to select a row."),
@@ -1420,8 +1425,8 @@ pub(crate) fn order_outline(ui: Ui, shown: impl Fn() -> bool + 'static) -> View 
         .pointer_events(PointerEvents::None)
 }
 
-fn order_selection(ui: Ui) -> Option<usize> {
-    state(ui, |s| {
+fn order_selection(screens: crate::ScreensUi) -> Option<usize> {
+    state(screens, |s| {
         let order = s.editor.reorder.as_ref()?;
         order.selected()?;
         order.focus_index()
@@ -1429,8 +1434,8 @@ fn order_selection(ui: Ui) -> Option<usize> {
     .flatten()
 }
 
-pub(crate) fn guide_order_focus(ui: Ui) -> Option<(usize, bool)> {
-    state(ui, |s| {
+pub(crate) fn guide_order_focus(screens: crate::ScreensUi) -> Option<(usize, bool)> {
+    state(screens, |s| {
         if !matches!(s.placement, Placement::Guide { .. }) {
             return None;
         }
@@ -1440,8 +1445,8 @@ pub(crate) fn guide_order_focus(ui: Ui) -> Option<(usize, bool)> {
     .flatten()
 }
 
-pub(crate) fn guide_order_scope(ui: Ui) -> Option<(SourceId, ListId)> {
-    state(ui, |s| {
+pub(crate) fn guide_order_scope(screens: crate::ScreensUi) -> Option<(SourceId, ListId)> {
+    state(screens, |s| {
         let Placement::Guide { list, .. } = &s.placement else {
             return None;
         };
@@ -1461,7 +1466,7 @@ pub(crate) fn guide_order_keys(ui: Ui, source: SourceId, list: &ListId) -> HashM
             .channels()
             .iter()
             .filter_map(|&ch| {
-                let target = crate::screens::parental_view::live_target(ui, ch)?;
+                let target = crate::screens::parental_view::live_target(ui.app, ch)?;
                 (target.source == source.0).then_some((target.id, ch))
             })
             .collect()
@@ -1470,8 +1475,11 @@ pub(crate) fn guide_order_keys(ui: Ui, source: SourceId, list: &ListId) -> HashM
 
 /// The draft only changes grid rendering. Playback and focus restoration
 /// keep using the ordinary guide list and its stable channel keys.
-pub(crate) fn guide_order(ui: Ui, keys: &HashMap<String, usize>) -> Option<Vec<usize>> {
-    state(ui, |s| {
+pub(crate) fn guide_order(
+    screens: crate::ScreensUi,
+    keys: &HashMap<String, usize>,
+) -> Option<Vec<usize>> {
+    state(screens, |s| {
         if !matches!(s.placement, Placement::Guide { .. }) {
             return None;
         }
@@ -1486,7 +1494,7 @@ pub(crate) fn guide_order(ui: Ui, keys: &HashMap<String, usize>) -> Option<Vec<u
 }
 
 pub(crate) fn invalidate_changed_guide_order(ui: Ui, keys: &HashMap<String, usize>) {
-    let stale = state(ui, |s| {
+    let stale = state(ui.screens, |s| {
         matches!(s.placement, Placement::Guide { .. })
             && !s.saving
             && s.editor.reorder.as_ref().is_some_and(|order| {
@@ -1505,34 +1513,37 @@ pub(crate) fn invalidate_changed_guide_order(ui: Ui, keys: &HashMap<String, usiz
     }
 }
 
-pub(crate) fn guide_order_open(ui: Ui) -> bool {
-    matches!(placement(ui), Placement::Guide { .. })
+pub(crate) fn guide_order_open(screens: crate::ScreensUi) -> bool {
+    matches!(placement(screens), Placement::Guide { .. })
 }
 
-pub(crate) fn group_column_order_open(ui: Ui) -> bool {
-    placement(ui) == Placement::Groups
+pub(crate) fn group_column_order_open(screens: crate::ScreensUi) -> bool {
+    placement(screens) == Placement::Groups
 }
 
-pub(crate) fn inline_order_open(ui: Ui) -> bool {
-    matches!(placement(ui), Placement::Groups | Placement::Guide { .. })
+pub(crate) fn inline_order_open(screens: crate::ScreensUi) -> bool {
+    matches!(
+        placement(screens),
+        Placement::Groups | Placement::Guide { .. }
+    )
 }
 
 pub(crate) fn guide_order_accessible(ui: Ui) -> bool {
-    guide_order_open(ui)
+    guide_order_open(ui.screens)
         && ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
-        && !contents_hidden(ui)
+        && !contents_hidden(ui.screens)
 }
 
-fn placement(ui: Ui) -> Placement {
-    state(ui, |s| s.placement.clone()).unwrap_or_default()
+fn placement(screens: crate::ScreensUi) -> Placement {
+    state(screens, |s| s.placement.clone()).unwrap_or_default()
 }
 
 fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
-    let title = move || state(ui, screen_title).unwrap_or("");
-    let saves = move || reordering(ui) && !contents_hidden(ui);
+    let title = move || state(ui.screens, screen_title).unwrap_or("");
+    let saves = move || reordering(ui.screens) && !contents_hidden(ui.screens);
     let scope = move || {
         ui.guide_data();
-        state(ui, |s| {
+        state(ui.screens, |s| {
             let Placement::Panel(list) = &s.placement else {
                 return String::new();
             };
@@ -1575,7 +1586,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .child(
                     view()
-                        .accessibility_elements_hidden(move || contents_hidden(ui))
+                        .accessibility_elements_hidden(move || contents_hidden(ui.screens))
                         .gap(px(4.0))
                         .child(ui_kit::title(size, title))
                         .child(when(
@@ -1613,13 +1624,13 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
                 )),
         )
         .child(when(
-            move || confirming_order(ui),
+            move || confirming_order(ui.screens),
             move || confirm_order_sheet(ui, size),
         ))
 }
 
 fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
-    let groups = move || group_column_order_open(ui);
+    let groups = move || group_column_order_open(ui.screens);
     view()
         .test_id("organization-screen")
         .absolute()
@@ -1641,9 +1652,9 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .rounded(px(crate::theme::RADIUS))
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .p(size.px(12.0))
-                .accessibility_elements_hidden(move || contents_hidden(ui))
+                .accessibility_elements_hidden(move || contents_hidden(ui.screens))
                 .child(ui_kit::label(size, move || {
-                    state(ui, screen_title).unwrap_or("")
+                    state(ui.screens, screen_title).unwrap_or("")
                 }))
                 .max_w(move || px((window().width.0 - size.of(40.0)).max(0.0)))
                 .child(ui_kit::caption(size, move || reorder_hint(ui)))
@@ -1651,9 +1662,9 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                     move || {
                         ui.top_overlay() == Some(crate::chrome::overlays::Overlay::Organization)
                             && ui.drag_editing()
-                            && reordering(ui)
-                            && !contents_hidden(ui)
-                            && state(ui, |s| !s.dragging && !s.saving) == Some(true)
+                            && reordering(ui.screens)
+                            && !contents_hidden(ui.screens)
+                            && state(ui.screens, |s| !s.dragging && !s.saving) == Some(true)
                     },
                     move || {
                         view()
@@ -1664,7 +1675,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                                 ui,
                                 size,
                                 move || {
-                                    if state(ui, |s| s.saved_playlist_positions.is_some())
+                                    if state(ui.screens, |s| s.saved_playlist_positions.is_some())
                                         == Some(true)
                                     {
                                         tr("Close")
@@ -1694,15 +1705,15 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .absolute()
                 .top(move || px(safe_area().top.0 + crate::playback::panels::header_now().0))
                 .bottom(px(0.0))
-                .left(move || px(crate::chrome::rail::width(ui)))
-                .w(move || px(crate::playback::panels::groups_width(ui)))
+                .left(move || px(crate::chrome::rail::width(ui.guide)))
+                .w(move || px(crate::playback::panels::groups_width(ui.guide)))
                 .px(px(8.0))
                 .py(px(6.0))
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
                 .child(editor_rows(ui, size))
         }))
         .child(when(
-            move || confirming_order(ui),
+            move || confirming_order(ui.screens),
             move || confirm_order_sheet(ui, size),
         ))
 }
@@ -1712,7 +1723,7 @@ pub(crate) mod reorder_drag;
 fn editor_rows(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     let drag = reorder_drag::DragList::new(ui, size, rows);
-    let focus = computed(move || state(ui, |s| s.editor.focus_index()).flatten());
+    let focus = computed(move || state(ui.screens, |s| s.editor.focus_index()).flatten());
     effect(move || {
         if let Some(at) = focus.get()
             && !untracked(|| drag.active())
@@ -1724,10 +1735,10 @@ fn editor_rows(ui: Ui, size: Scale) -> impl IntoElement {
         view()
             .flex_1()
             .overflow_hidden()
-            .accessibility_elements_hidden(move || contents_hidden(ui))
+            .accessibility_elements_hidden(move || contents_hidden(ui.screens))
             .child(
                 virtual_list(
-                    move || state(ui, |s| s.editor.rows().len()).unwrap_or(0),
+                    move || state(ui.screens, |s| s.editor.rows().len()).unwrap_or(0),
                     move |at| item_row(ui, size, at, focus),
                 )
                 .estimated_item_size(list_rows::pitch(size, ROW))
@@ -1743,7 +1754,7 @@ fn name_sheet(ui: Ui) -> TextSheet {
     TextSheet {
         label: tr("Display name"),
         placeholder: if matches!(
-            placement(ui),
+            placement(ui.screens),
             Placement::RenameGroup {
                 restore_name: false
             }
@@ -1754,15 +1765,15 @@ fn name_sheet(ui: Ui) -> TextSheet {
         },
         url: false,
         masked: false,
-        text: text_value,
-        set_text,
+        text: |ui| text_value(ui.screens),
+        set_text: |ui, text| set_text(ui.screens, text),
         commit,
         cancel,
     }
 }
 
-fn contents_hidden(ui: Ui) -> bool {
-    state(ui, |screen| {
+fn contents_hidden(screens: crate::ScreensUi) -> bool {
+    state(screens, |screen| {
         screen.bulk_visibility.is_some()
             || screen.editor.action.is_some()
             || screen.editor.text.is_some()
@@ -1781,12 +1792,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     effect(move || {
         ui.app.library.version.get();
         ui.app.settings.get();
-        if untracked(|| state(ui, |s| s.scope.is_none() && !s.saving)) == Some(true) {
+        if untracked(|| state(ui.screens, |s| s.scope.is_none() && !s.saving)) == Some(true) {
             check_playlist_order_catalog(ui);
             return;
         }
         if let Some((source, kind)) = untracked(|| {
-            state(ui, |s| {
+            state(ui.screens, |s| {
                 s.scope
                     .clone()
                     .filter(|_| !s.saving && s.editor.reorder.is_none())
@@ -1796,30 +1807,35 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             let generation = ui.screens.organization.epoch();
             crate::wiring::tasks::spawn_in_app(async move {
                 if let Ok(loaded) = items(source, &kind, None).await
-                    && still_open(ui, generation)
+                    && still_open(ui.screens, generation)
                 {
-                    update(ui, |s| s.refresh(loaded));
+                    update(ui.screens, |s| s.refresh(loaded));
                 }
             });
         }
     });
     when(
-        move || is_open(ui),
+        move || is_open(ui.screens),
         move || {
             view()
                 .absolute()
                 .inset_0()
                 .pointer_events(PointerEvents::BoxNone)
                 .child(when(
-                    move || matches!(placement(ui), Placement::Groups | Placement::Guide { .. }),
+                    move || {
+                        matches!(
+                            placement(ui.screens),
+                            Placement::Groups | Placement::Guide { .. }
+                        )
+                    },
                     move || inline_order(ui, size),
                 ))
                 .child(when(
-                    move || matches!(placement(ui), Placement::Panel(_)),
+                    move || matches!(placement(ui.screens), Placement::Panel(_)),
                     move || reorder_panel(ui, size),
                 ))
                 .child(when(
-                    move || matches!(placement(ui), Placement::Sort(_)),
+                    move || matches!(placement(ui.screens), Placement::Sort(_)),
                     move || {
                         view()
                             .absolute()
@@ -1831,14 +1847,15 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             })
                             .child(when(
                                 move || {
-                                    state(ui, |s| s.editor.sort_focus.is_some()).unwrap_or(false)
+                                    state(ui.screens, |s| s.editor.sort_focus.is_some())
+                                        .unwrap_or(false)
                                 },
                                 move || sort_sheet(ui, size),
                             ))
                     },
                 ))
                 .child(when(
-                    move || placement(ui) == Placement::Screen,
+                    move || placement(ui.screens) == Placement::Screen,
                     move || {
                         ui_kit::screen(ui, size)
                             .test_id("organization-screen")
@@ -1851,37 +1868,43 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                     ui,
                                     size,
                                     move || {
-                                        state(ui, screen_title).unwrap_or(tr("Organize channels"))
+                                        state(ui.screens, screen_title)
+                                            .unwrap_or(tr("Organize channels"))
                                     },
                                     |ui| {
                                         back(ui);
                                     },
                                 )
-                                .accessibility_elements_hidden(move || contents_hidden(ui)),
+                                .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                             )
                             .child(
                                 ui_kit::caption(size, move || {
-                                    if reordering(ui) {
+                                    if reordering(ui.screens) {
                                         reorder_hint(ui)
                                     } else {
-                                        state(ui, screen_caption).unwrap_or("")
+                                        state(ui.screens, screen_caption).unwrap_or("")
                                     }
                                 })
-                                .accessibility_elements_hidden(move || contents_hidden(ui)),
+                                .accessibility_elements_hidden(move || contents_hidden(ui.screens)),
                             )
                             .child(when(
-                                move || state(ui, |s| s.editor.items.is_empty()).unwrap_or(true),
+                                move || {
+                                    state(ui.screens, |s| s.editor.items.is_empty()).unwrap_or(true)
+                                },
                                 move || {
                                     ui_kit::body(
                                         size,
                                         tr("This playlist has no items to organize."),
                                     )
-                                    .accessibility_elements_hidden(move || contents_hidden(ui))
+                                    .accessibility_elements_hidden(move || {
+                                        contents_hidden(ui.screens)
+                                    })
                                 },
                             ))
                             .child(when(
                                 move || {
-                                    state(ui, |s| s.editor.mode == Mode::Visibility) == Some(true)
+                                    state(ui.screens, |s| s.editor.mode == Mode::Visibility)
+                                        == Some(true)
                                 },
                                 move || {
                                     view()
@@ -1893,14 +1916,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             .child(editor_rows(ui, size))
                             .child(when(
                                 move || {
-                                    state(ui, |s| s.editor.mode == Mode::Visibility)
+                                    state(ui.screens, |s| s.editor.mode == Mode::Visibility)
                                         .unwrap_or(false)
                                 },
                                 move || {
                                     view()
                                         .flex_row()
                                         .gap(px(6.0))
-                                        .accessibility_elements_hidden(move || contents_hidden(ui))
+                                        .accessibility_elements_hidden(move || {
+                                            contents_hidden(ui.screens)
+                                        })
                                         .child(ui_kit::action(
                                             ui,
                                             size,
@@ -1920,11 +1945,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 },
                             ))
                             .child(when(
-                                move || reordering(ui) && ui.drag_editing(),
+                                move || reordering(ui.screens) && ui.drag_editing(),
                                 move || {
                                     view()
                                         .items_end()
-                                        .accessibility_elements_hidden(move || contents_hidden(ui))
+                                        .accessibility_elements_hidden(move || {
+                                            contents_hidden(ui.screens)
+                                        })
                                         .child(ui_kit::action(
                                             ui,
                                             size,
@@ -1936,27 +1963,33 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 },
                             ))
                             .child(when(
-                                move || confirming_order(ui),
+                                move || confirming_order(ui.screens),
                                 move || confirm_order_sheet(ui, size),
                             ))
                             .child(when(
-                                move || state(ui, |s| s.editor.action.is_some()).unwrap_or(false),
+                                move || {
+                                    state(ui.screens, |s| s.editor.action.is_some())
+                                        .unwrap_or(false)
+                                },
                                 move || actions_sheet(ui, size),
                             ))
                             .child(when(
-                                move || state(ui, |s| s.bulk_visibility.is_some()) == Some(true),
+                                move || {
+                                    state(ui.screens, |s| s.bulk_visibility.is_some()) == Some(true)
+                                },
                                 move || bulk_visibility_sheet(ui, size),
                             ))
                             .child(when(
                                 move || {
-                                    state(ui, |s| s.editor.sort_focus.is_some()).unwrap_or(false)
+                                    state(ui.screens, |s| s.editor.sort_focus.is_some())
+                                        .unwrap_or(false)
                                 },
                                 move || sort_sheet(ui, size),
                             ))
                     },
                 ))
                 .child(when(
-                    move || state(ui, |s| s.editor.text.is_some()).unwrap_or(false),
+                    move || state(ui.screens, |s| s.editor.text.is_some()).unwrap_or(false),
                     move || {
                         entry::text_sheet(ui, name_sheet(ui)).test_id("organization-name-sheet")
                     },

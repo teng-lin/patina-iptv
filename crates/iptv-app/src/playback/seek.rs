@@ -57,9 +57,9 @@ thread_local! {
 
 /// The archived program playing: its start and length in seconds and how
 /// far into it the archive can go now.
-fn program(ui: Ui) -> Option<(i32, i32, i32)> {
-    let channel = ui.playback.playing.get_untracked()?;
-    let Playback::CatchUp { start, offset } = ui.playback.playback.get_untracked() else {
+fn program(ui: crate::PlaybackUi) -> Option<(i32, i32, i32)> {
+    let channel = ui.playing.get_untracked()?;
+    let Playback::CatchUp { start, offset } = ui.playback.get_untracked() else {
         return None;
     };
     let schedule = crate::wiring::runtime_owner::schedule();
@@ -72,23 +72,22 @@ fn program(ui: Ui) -> Option<(i32, i32, i32)> {
 
 /// Seconds into the archived program: the seek being chosen, else where
 /// the stream is. `None` unless a program plays from the archive.
-pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
+pub fn elapsed(ui: crate::PlaybackUi) -> Option<(i32, i32)> {
     if crate::playback::on_demand::active(ui) {
-        let t = ui.playback.player.main().timeline.get();
+        let t = ui.player.main().timeline.get();
         return Some((
             i32::try_from(t.position_ms / 1000).unwrap_or(i32::MAX),
             i32::try_from(t.duration_ms.unwrap_or(0) / 1000).unwrap_or(i32::MAX),
         ));
     }
-    let Playback::CatchUp { offset, start } = ui.playback.playback.get() else {
+    let Playback::CatchUp { offset, start } = ui.playback.get() else {
         return None;
     };
-    let channel = ui.playback.playing.get()?;
+    let channel = ui.playing.get()?;
     let p = crate::wiring::runtime_owner::schedule().program_at(channel, start);
     let length = (p.end - p.start) * 60;
-    let at = ui.playback.seek_target.get().unwrap_or_else(|| {
-        let played =
-            i32::try_from(ui.playback.player.main().position_ms.get() / 1000).unwrap_or(i32::MAX);
+    let at = ui.seek_target.get().unwrap_or_else(|| {
+        let played = i32::try_from(ui.player.main().position_ms.get() / 1000).unwrap_or(i32::MAX);
         offset.saturating_add(played)
     });
     Some((at.clamp(0, length), length))
@@ -97,14 +96,14 @@ pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
 /// Moves the seek target by `delta` seconds; the archive reopens there
 /// once the keys pause. False when nothing plays from the archive.
 pub fn step(ui: Ui, delta: i32) -> bool {
-    if crate::playback::on_demand::active(ui) {
+    if crate::playback::on_demand::active(ui.playback) {
         let moved = crate::playback::on_demand::step(ui, delta);
         if moved {
             show_info(ui);
         }
         return moved;
     }
-    let Some((offset, _, limit)) = program(ui) else {
+    let Some((offset, _, limit)) = program(ui.playback) else {
         return false;
     };
     let from = ui.playback.seek_target.get_untracked().unwrap_or_else(|| {
@@ -112,7 +111,7 @@ pub fn step(ui: Ui, delta: i32) -> bool {
             .unwrap_or(i32::MAX);
         offset.saturating_add(played)
     });
-    crate::playback::interruption::viewer_acted(ui);
+    crate::playback::interruption::viewer_acted(ui.playback);
     ui.playback
         .seek_target
         .set(Some((from + delta).clamp(0, limit)));
@@ -133,20 +132,20 @@ pub fn key(ui: Ui, step: i32, repeat: bool) -> bool {
     });
     match factor {
         Some(f) => self::step(ui, step.saturating_mul(f)),
-        None => program(ui).is_some() || crate::playback::on_demand::seekable(ui),
+        None => program(ui.playback).is_some() || crate::playback::on_demand::seekable(ui.playback),
     }
 }
 
 /// A seek is being chosen (the archive has not reopened there yet).
-pub fn pending(ui: Ui) -> bool {
-    ui.playback.seek_target.get_untracked().is_some()
+pub fn pending(playback: crate::PlaybackUi) -> bool {
+    playback.seek_target.get_untracked().is_some()
 }
 
 /// Retires the old archive's draft whenever playback changes or stops.
-pub(crate) fn cancel(ui: Ui) {
-    if pending(ui) {
+pub(crate) fn cancel(playback: crate::PlaybackUi) {
+    if pending(playback) {
         PRESSES.with(|p| p.set(p.get().wrapping_add(1)));
-        ui.playback.seek_target.set(None);
+        playback.seek_target.set(None);
     }
 }
 
@@ -158,7 +157,7 @@ pub fn commit_now(ui: Ui) {
 
 /// The program playing from the archive: its length in seconds and how
 /// far into it a seek may go now. `None` unless one plays.
-pub fn span(ui: Ui) -> Option<(i32, i32)> {
+pub fn span(ui: crate::PlaybackUi) -> Option<(i32, i32)> {
     if crate::playback::on_demand::active(ui) {
         if !crate::playback::on_demand::seekable(ui) {
             return None;
@@ -174,11 +173,11 @@ pub fn span(ui: Ui) -> Option<(i32, i32)> {
 /// [`span`]'s limit): shown at once, opened once `commit` says so or the
 /// pointer pauses.
 pub fn to(ui: Ui, target: i32, commit_now: bool) {
-    if crate::playback::on_demand::active(ui) {
+    if crate::playback::on_demand::active(ui.playback) {
         crate::playback::on_demand::seek_to(ui, target.max(0) as u64 * 1000);
         return;
     }
-    crate::playback::interruption::viewer_acted(ui);
+    crate::playback::interruption::viewer_acted(ui.playback);
     ui.playback.seek_target.set(Some(target.max(0)));
     commit_later(
         ui,

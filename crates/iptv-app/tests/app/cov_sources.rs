@@ -207,7 +207,7 @@ fn add_by_link(t: &mut T, srv: &Server) {
     t.press("text:Add playlist");
     t.wait("text:Playlist added", 30);
     t.press("text:Watch");
-    t.wait("text:Test Link Channel 1 · Linked", 10);
+    t.wait("id:guide-row >> text:Test Link Channel 1", 10);
     open_playlists(t);
     t.wait("text:Linked", 5);
     // Two playlists: they can be ordered and arranged.

@@ -52,6 +52,15 @@ impl Schedule for Catalog {
     fn channel_name(&self, channel: usize) -> String {
         format!("C{channel}")
     }
+    fn channel_playlist(&self, channel: usize) -> Option<&str> {
+        if channel >= self.channel_count() {
+            None
+        } else if channel < 5 {
+            Some("Alpha")
+        } else {
+            Some("Beta")
+        }
+    }
     fn channel_number(&self, channel: usize) -> u32 {
         100 + channel as u32
     }
@@ -159,6 +168,16 @@ fn a_list_view_reads_the_catalog_channel_behind_each_row() {
     assert_eq!(fav.channel_count(), 2);
     assert_eq!(fav.channel(0), Some(7));
     assert_eq!(fav.channel_name(0), "C7");
+    assert_eq!(fav.channel_playlist(0), Some("Beta"));
+    assert_eq!(fav.channel_playlist(1), Some("Alpha"));
+    assert_eq!(
+        fav.channel_group_label(0),
+        Some(GroupName::Named("Kids".into()))
+    );
+    assert_eq!(
+        fav.channel_group_label(1),
+        Some(GroupName::Named("Sports".into()))
+    );
     assert_eq!(fav.channel_key(1).as_deref(), Some("k4"));
     assert_eq!(fav.channel_logo(0).as_deref(), Some("logo7"));
     assert_eq!(fav.channel_logo(1), None, "a channel without a logo");
@@ -177,6 +196,8 @@ fn a_list_view_reads_the_catalog_channel_behind_each_row() {
     assert_eq!(fav.group_label(0), GroupName::Favorites);
     // Rows the list does not have still answer (an empty list's cursor).
     assert_eq!(fav.channel_name(5), "");
+    assert_eq!(fav.channel_playlist(5), None);
+    assert_eq!(fav.channel_group_label(5), None);
     assert_eq!(fav.listing(5, fav.program_at(5, 75)), None);
     assert_eq!(fav.program_at(5, 75).airing(75), Airing::Live);
 }

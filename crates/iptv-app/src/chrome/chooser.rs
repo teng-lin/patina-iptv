@@ -56,14 +56,14 @@ fn row_keys(open: Option<&Open>, len: usize) -> Vec<RowKey> {
 }
 
 pub(crate) fn open_more(
-    ui: Ui,
+    screens: crate::ScreensUi,
     controls: Vec<iptv_presentation::play_bar::Control>,
     window: Option<nsh_core::element::desktop::WindowRef>,
 ) {
     if controls.is_empty() {
         return;
     }
-    ui.screens.chooser.set(Some(Open {
+    screens.chooser.set(Some(Open {
         kind: Kind::More,
         list: Chooser::new(controls.len(), 0),
         labels: Vec::new(),
@@ -135,11 +135,11 @@ fn picture_label(size: PictureSize) -> &'static str {
 }
 
 /// Stable source-scoped identity; on-demand content uses the global size.
-pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
+pub(crate) fn picture_identity(ui: crate::PlaybackUi, surface: usize) -> Option<String> {
     if surface == 0 && crate::playback::on_demand::active(ui) {
         return None;
     }
-    let key = ui.playback.player.stream(surface).key.get()?;
+    let key = ui.player.stream(surface).key.get()?;
     let schedule = crate::wiring::runtime_owner::schedule();
     let channel = schedule.find_channel(&key)?;
     let identity =
@@ -149,7 +149,7 @@ pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
 
 /// The current picture size's name (the control row shows it).
 pub fn picture_name(ui: Ui) -> &'static str {
-    let ch = picture_identity(ui, ui.playback.player_surface);
+    let ch = picture_identity(ui.playback, ui.playback.player_surface);
     picture_label(ui.app.picture.with(|p| p.for_channel(ch.as_deref())))
 }
 
@@ -171,15 +171,15 @@ fn title(kind: Kind) -> &'static str {
     }
 }
 
-fn volume_index(ui: Ui) -> usize {
-    (usize::from(crate::playback::media::audible_volume(ui.playback)) + 5) / 10
+fn volume_index(ui: crate::PlaybackUi) -> usize {
+    (usize::from(crate::playback::media::audible_volume(ui)) + 5) / 10
 }
 
 /// The entries, what each sets, and the one in effect.
 fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
     match kind {
         Kind::Picture => {
-            let ch = picture_identity(ui, ui.playback.player_surface);
+            let ch = picture_identity(ui.playback, ui.playback.player_surface);
             let size = ui
                 .app
                 .picture
@@ -257,7 +257,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
         Kind::Volume => (
             (0..=10).map(|n| format!("{}%", n * 10)).collect(),
             Vec::new(),
-            volume_index(ui),
+            volume_index(ui.playback),
         ),
     }
 }
@@ -335,15 +335,15 @@ pub(crate) fn ask_to_leave(ui: Ui) -> bool {
     true
 }
 
-pub fn move_focus(ui: Ui, step: isize) {
-    ui.screens
+pub fn move_focus(screens: crate::ScreensUi, step: isize) {
+    screens
         .chooser
         .update(|c| c.iter_mut().for_each(|c| c.list.move_focus(step)));
 }
 
 /// Left selects No and Right selects Yes without wrapping on repeats.
-pub(crate) fn focus_leave(ui: Ui, yes: bool) {
-    ui.screens.chooser.update(|open| {
+pub(crate) fn focus_leave(screens: crate::ScreensUi, yes: bool) {
+    screens.chooser.update(|open| {
         if let Some(open) = open.as_mut().filter(|open| open.kind == Kind::Leave) {
             open.list.focus = usize::from(yes);
         }
@@ -363,7 +363,7 @@ pub fn pick(ui: Ui, index: usize) {
     close(ui);
     match open.kind {
         Kind::Picture => {
-            let ch = picture_identity(ui, ui.playback.player_surface);
+            let ch = picture_identity(ui.playback, ui.playback.player_surface);
             match PictureSize::ALL.get(index) {
                 Some(size) => ui
                     .app
@@ -473,8 +473,8 @@ fn start_sleep(ui: Ui, minutes: u32) {
 /// Whether a chooser is open in the layer of the question before leaving
 /// (`leave`, over every screen) or in the one of the others (over the
 /// video, under the play bar).
-pub(crate) fn is_open(ui: Ui, leave: bool) -> bool {
-    ui.screens
+pub(crate) fn is_open(screens: crate::ScreensUi, leave: bool) -> bool {
+    screens
         .chooser
         .with(|c| c.as_ref().is_some_and(|c| (c.kind == Kind::Leave) == leave))
 }

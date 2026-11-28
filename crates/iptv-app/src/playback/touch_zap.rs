@@ -108,14 +108,14 @@ pub(crate) struct Preview {
 pub(crate) fn live(ui: Ui) -> bool {
     ui.chrome.mode.get() == ViewMode::Fullscreen
         && ui.playback.playing.get().is_some()
-        && changes_channel(ui)
-        && !crate::playback::multiview::is_open(ui)
+        && changes_channel(ui.playback)
+        && !crate::playback::multiview::is_open(ui.playback)
 }
 
 /// Whether what plays is a live channel, which Ch± changes (not a replay
 /// or an on-demand title): the video then has the channel actions.
-pub(crate) fn changes_channel(ui: Ui) -> bool {
-    ui.playback.playback.get() == Playback::Live && !crate::playback::on_demand::active(ui)
+pub(crate) fn changes_channel(ui: crate::PlaybackUi) -> bool {
+    ui.playback.get() == Playback::Live && !crate::playback::on_demand::active(ui)
 }
 
 /// Whether a swipe on the video may change channel now: live video with
@@ -123,7 +123,7 @@ pub(crate) fn changes_channel(ui: Ui) -> bool {
 fn takes_swipes(ui: Ui) -> bool {
     live(ui)
         && !ui.any_overlay_open()
-        && crate::playback::pip::ui_shown(ui)
+        && crate::playback::pip::ui_shown(ui.playback)
         && crate::wiring::settings::flag(keys::SWIPE_TO_ZAP)
 }
 
@@ -161,7 +161,7 @@ pub(crate) fn zap(ui: Ui, direction: Direction) {
 /// A touch used the video or the bar: as [`Ui::touched`], except that a
 /// zap waiting for its switch delay stays, so the next one starts from
 /// it (a burst of swipes or presses skips channels).
-fn touched(ui: Ui) {
+pub(crate) fn touched(ui: Ui) {
     crate::playback::browse_playback::activity(ui);
     ui.chrome.input.set(ui.chrome.last_press.get_untracked());
 }
@@ -320,47 +320,6 @@ pub(crate) fn act(ui: Ui, action: &str) {
         "previous_channel" | "decrement" => zap(ui, Direction::Previous),
         _ => {}
     }
-}
-
-/// A channel button beside the channel's name in the play bar's top line.
-pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
-    let (id, icon) = match direction {
-        Direction::Next => (
-            "play-bar-next-channel",
-            crate::chrome::ui_kit::icons::Icon::ChannelNext,
-        ),
-        Direction::Previous => (
-            "play-bar-previous-channel",
-            crate::chrome::ui_kit::icons::Icon::ChannelPrevious,
-        ),
-    };
-    let label = move || match direction {
-        Direction::Next => crate::chrome::i18n::tr("Next channel"),
-        Direction::Previous => crate::chrome::i18n::tr("Previous channel"),
-    };
-    view()
-        .test_id(id)
-        .role(AccessibilityRole::Button)
-        .accessible(true)
-        .label(label)
-        .flex_shrink_0()
-        .w(px(28.0))
-        .h(px(28.0))
-        .rounded(px(14.0))
-        .items_center()
-        .justify_center()
-        // A finger's target: 44 dp around the 28 dp circle.
-        .hit_slop(EdgeInsets::all(px(8.0)))
-        .hover(|s| s.bg(tint(WHITE, crate::theme::RESTING_ALPHA * 2)))
-        .on_press(move || {
-            touched(ui);
-            zap(ui, direction);
-        })
-        .child(
-            svg(move || crate::chrome::ui_kit::icons::src(icon))
-                .size(px(18.0))
-                .text_color(rgb(WHITE)),
-        )
 }
 
 /// The banner a swipe drags over the video, centered on the finger: the

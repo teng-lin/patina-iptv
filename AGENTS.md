@@ -46,6 +46,11 @@
   `tv.player` per further tile while it is open (`video.rs`). The
   desktops' picture-in-picture window shows surface 0's player through
   its `tv.pip` view without a second player or stream (`mpv/pip.rs`).
+- **Desktop libmpv runtime.** Never launch `iptv-app` on Linux against the
+  system `/usr/lib/libmpv.so.2` — it lacks the `patina-relay-guard-v1` IO
+  guard and refuses to play streams. Fetch the pinned runtime first
+  (`python3 tools/mpv-runtime-unix/runtime.py fetch --platform linux --destination target/mpv-runtime-linux`)
+  and run with `LD_LIBRARY_PATH="$PWD/target/mpv-runtime-linux/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"`.
 - **Check before finishing:** `cargo test -p iptv-core -p iptv-presentation`, the wasm
   builds of both crates, `cargo build -p iptv-app`, and for Android changes a run on
   `tab36` and/or `tv36`.

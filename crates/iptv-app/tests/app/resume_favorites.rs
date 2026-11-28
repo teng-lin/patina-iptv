@@ -239,12 +239,9 @@ fn another_playlists_favorite_returns_to_all_channels() {
 fn a_resumed_favorite_beside_another_playlist_returns_to_favorites() {
     let Some(home) = isolated!() else { return };
     let mut app = resume(&home, Setup::new(Favorite::HereBeside));
-    lands_in(&mut app, "Favorites", "Local C · Synthetic resume");
-    assert!(
-        !app.screen()
-            .matches("id:guide-ui >> label:Local C · Synthetic other")
-            .unwrap()
-    );
+    lands_in(&mut app, "Favorites", "Local C");
+    step(app.wait_for("id:guide-header-details >> text:Synthetic resume · Sport"));
+    assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
 }
 
 #[test]

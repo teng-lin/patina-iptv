@@ -7,8 +7,27 @@ use iptv_providers::{ContentId, model::ContentKind};
 use std::future::Future;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+
+pub(crate) const UNSAVED_EDITS: StoreError =
+    StoreError::Unavailable("recent favorite edits are not saved");
+
+/// Keeps a write counted in the unsaved-edit counter until it ran or was dropped.
+pub(crate) struct Counted(Arc<AtomicUsize>);
+
+impl Counted {
+    pub(crate) fn new(unsaved: Arc<AtomicUsize>) -> Self {
+        unsaved.fetch_add(1, Ordering::AcqRel);
+        Self(unsaved)
+    }
+}
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[derive(Clone)]
 pub(crate) enum FavoriteWrite {
@@ -190,13 +209,13 @@ impl FavoritesRepo {
         original: Vec<String>,
         order: Vec<String>,
         failed: Arc<AtomicBool>,
-        counted: crate::favorites::Counted,
+        counted: Counted,
     ) -> Result<(), StoreError> {
         self.services
             .call(move |store| {
                 let _counted = counted;
                 if failed.swap(false, Ordering::AcqRel) {
-                    return Err(crate::favorites::UNSAVED_EDITS);
+                    return Err(UNSAVED_EDITS);
                 }
                 store.save_favorite_order(source, &original, &order)
             })

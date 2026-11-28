@@ -45,8 +45,8 @@ fn item_height(ui: Ui) -> f32 {
 }
 
 /// The rail's width now (0 while the guide has the focus).
-pub fn width(ui: Ui) -> f32 {
-    match ui.guide.focus.with(|f| f.layout_pane()) {
+pub fn width(guide: crate::GuideUi) -> f32 {
+    match guide.focus.with(|f| f.layout_pane()) {
         Pane::Guide | Pane::Preview => 0.0,
         Pane::Groups => RAIL_W,
         Pane::Rail => RAIL_W + (RAIL_OPEN_W - RAIL_W) * crate::chrome::scale::now(),
@@ -210,8 +210,8 @@ pub fn column(ui: Ui) -> impl IntoElement {
     };
     view()
         .test_id("navigation-rail")
-        .pointer_events(move || crate::guide_chrome_pointer_events(ui))
-        .w(move || px(width(ui)))
+        .pointer_events(move || crate::guide_chrome_pointer_events(ui.screens))
+        .w(move || px(width(ui.guide)))
         .overflow_hidden()
         .py(px(8.0))
         .pb_safe_area()

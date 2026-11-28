@@ -9,113 +9,42 @@ use iptv_import::CancelToken;
 use std::{
     cell::RefCell,
     future::Future,
-    pin::Pin,
     sync::{Arc, Mutex, mpsc},
 };
 
 mod pairing;
+pub(crate) mod port;
 pub use pairing::{PairingPrompt, PairingRequest, pairing_prompt};
+pub use port::{
+    Admitted, AirPlayMode, Authorization, NativePort, Port, Prepared, Remote, Retirement, Task,
+};
 
-/// Whether the host cast port includes AirPlay receivers alongside Chromecast.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AirPlayMode {
-    Disabled,
-    Enabled,
-}
+impl port::AuthorizationServices for crate::store_service::Services {}
 
-pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
-pub trait Port: Send + Sync {
-    fn configure_airplay(&self, _mode: AirPlayMode) {}
-    fn last_peer_ip(&self) -> Option<String> {
-        None
-    }
-    fn discover(&self) -> Task<'_, Vec<Receiver>>;
-    fn forget(&self, _receiver: Receiver) -> Task<'_, ()> {
-        Box::pin(std::future::ready(Err(Error::Unsupported)))
-    }
-    /// Connects and prepares the handoff without opening the upstream.
-    fn prepare(
-        &self,
-        receiver: Receiver,
-        source: PlaySource,
-        pairing: PairingPrompt,
-    ) -> Task<'_, Box<dyn Prepared>>;
-}
-/// A system route picker is mounted by the host; its player remains owned by
-/// this runtime's transport. The opaque view identity carries no media metadata.
-pub trait NativePort: Send + Sync {
-    fn view_id(&self) -> Option<u64>;
-    fn prepare(&self, source: PlaySource) -> Task<'_, Box<dyn Prepared>>;
-    fn cancel_pending(&self);
-    /// Join queued player cleanup before local audio resumes after a failed handoff.
-    fn flush(&self) -> Retirement<'_> {
-        Box::pin(std::future::ready(()))
-    }
-}
-pub trait Prepared: Send {
-    /// Recheck policy and intent while a system picker waits for owner approval.
-    fn guard(&mut self, _current: Box<dyn Fn() -> bool + Send + Sync>) {}
-    /// Sends LOAD and waits for the selected TV's first authorized HTTP request.
-    fn load(&mut self) -> Task<'_, ()>;
-    /// Open and settle under the grant, joining relay retirement on denial.
-    fn allow(self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted>;
-}
-/// Monitors the playback grant while the receiver owns an unpublished relay.
-pub struct Authorization {
-    grant: ExternalPlaybackAuthorization,
-    services: crate::store_service::Services,
-}
 impl Authorization {
+    fn services(&self) -> &crate::store_service::Services {
+        (&*self.services as &dyn std::any::Any)
+            .downcast_ref::<crate::store_service::Services>()
+            .expect("Authorization holds store_service::Services")
+    }
+
     /// Drop the pending operation on revocation, including while a LOAD reply is outstanding.
     pub async fn while_current<T>(
         &self,
         work: impl Future<Output = Result<T, Error>>,
     ) -> Result<T, Error> {
         let mut work = std::pin::pin!(work);
-        if !self.services.tasks_ready() {
+        let services = self.services();
+        if !services.tasks_ready() {
             return Err(Error::Unavailable);
         }
         while self.grant.is_current() {
             let deadline = crate::time::Instant::now() + std::time::Duration::from_millis(250);
-            if let Ok(result) = self.services.timeout_at(deadline, work.as_mut()).await {
+            if let Ok(result) = services.timeout_at(deadline, work.as_mut()).await {
                 return result;
             }
         }
         Err(Error::Denied)
-    }
-}
-pub struct Admitted {
-    pub remote: Arc<dyn Remote>,
-    pub paused: bool,
-}
-pub type Retirement<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-pub trait Remote: Send + Sync {
-    fn command(&self, command: Command) -> Task<'_, ()>;
-    /// The most recent session capabilities, available without making a network request.
-    fn controls(&self) -> Option<Controls> {
-        Some(Controls::ALL)
-    }
-    /// Reports the owned media session, or a transport error if its state is unknown.
-    fn state(&self) -> Task<'_, RemoteState>;
-    /// Joins upstream retirement before the account claim can be released.
-    fn retire(&self) -> Retirement<'_>;
-    /// A native receiver can keep its route for the immediately following channel.
-    fn retire_for_replacement(&self) -> Retirement<'_> {
-        self.retire()
-    }
-    /// Revoke relay access even when the control connection has been lost.
-    fn stop(&self) -> Retirement<'_> {
-        Box::pin(async {
-            self.retire().await;
-            let _ = self.command(Command::Stop).await;
-        })
-    }
-    /// Joins retirement and tells the viewer if the remote outcome is uncertain.
-    fn stop_checked(&self) -> Task<'_, ()> {
-        Box::pin(async {
-            self.stop().await;
-            Ok(())
-        })
     }
 }
 pub struct Destination {
@@ -370,7 +299,7 @@ impl Runtime {
         let services = self.services();
         let authorization = Arc::new(Authorization {
             grant,
-            services: services.clone(),
+            services: Box::new(services.clone()),
         });
         let worker_authorization = authorization.clone();
         let admission = async move {

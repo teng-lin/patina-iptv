@@ -21,8 +21,7 @@ impl Choice {
         program: Program,
         playing_context: bool,
     ) -> Option<Self> {
-        let authority = iptv_guide::combined::epg_channel(schedule, channel)
-            .and_then(|(epg, local)| epg.resolution_authority(local));
+        let authority = crate::runtime::Runtime::playback_authority(schedule, channel);
         Some(Self {
             list,
             playing_context,
@@ -46,8 +45,7 @@ impl Choice {
         let (channel, Playback::CatchUp { start, .. }) = self.pending.remap(schedule)? else {
             return None;
         };
-        let authority = iptv_guide::combined::epg_channel(schedule, channel)
-            .and_then(|(epg, local)| epg.resolution_authority(local));
+        let authority = crate::runtime::Runtime::playback_authority(schedule, channel);
         let program = schedule.program_at(channel, start);
         if (self.playing_context && playing != Some(channel))
             || authority != self.authority
@@ -85,7 +83,7 @@ impl Choice {
             && self.playing_context
             && playing.is_none()
             && let Some(authority) = &self.authority
-            && crate::playback::external_player::pending_target(ui).as_ref()
+            && crate::playback::external_player::pending_target(ui.cast).as_ref()
                 == Some(&iptv_core::parental::Target::live(
                     authority.source(),
                     authority.channel().id.as_str(),
@@ -165,7 +163,7 @@ pub(crate) fn select(
     };
     // Internal fallback uses the same captured choice after PIN entry. Ui::play
     // remains the internal player operation and still applies its own gates.
-    crate::playback::external_player::cancel_pending(ui);
+    crate::playback::external_player::cancel_pending(ui.cast);
     let ticket = ui.cast.external.request.get_untracked();
     crate::playback::browse_playback::hold(ui);
     let guarded = choice.clone();
@@ -211,12 +209,12 @@ pub(crate) fn select(
                 .apply(crate::chrome::mode::Action::EnterFullscreen);
             ui.show_playing();
             if let Some(list) = missing_handler {
-                crate::playback::external_player::missing_handler(ui, list);
+                crate::playback::external_player::missing_handler(ui.screens, list);
             }
         }
     };
-    if let Some(target) = crate::screens::parental_view::live_target(ui, channel) {
-        crate::wiring::navigation::request_if(ui, target, current, play);
+    if let Some(target) = crate::screens::parental_view::live_target(ui.app, channel) {
+        crate::wiring::navigation::request_if(ui.screens, target, current, play);
     } else {
         // The built-in generated guide has no provider or protected target.
         play();

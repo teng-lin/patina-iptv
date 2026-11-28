@@ -1,6 +1,8 @@
 //! Typed catalog and library repositories over an owner's accepted store lane.
 
-use super::{Services, StoreError};
+use super::{ParentalRepo, Services, StoreError};
+use crate::parental::gate::{ExternalPlaybackAuthorization, Snapshot, policy_settings};
+use crate::state::{LibrarySnapshot, RefreshSource};
 use iptv_core::membership::Member;
 use iptv_core::organization::{BlockKind, Blocks, Edit, Item, Sort};
 use iptv_core::parental::Target;
@@ -8,16 +10,100 @@ use iptv_guide::playback::ResolutionAuthority;
 use iptv_library::OrganizationScope as Scope;
 use iptv_library::SourceId;
 use iptv_library::{Playlist, SourcePolicy};
-use iptv_providers::model::SourceConfig;
+use iptv_providers::model::{Channel, ContentKind, Group, SourceConfig};
 use iptv_providers::{ContentId, GroupId};
 use iptv_store_sqlite::{
     ChannelOrder, ChannelQuery, ChannelScope, CustomGroup, CustomGroupId, MoveTarget, OrderScope,
-    Store, StoredSource,
+    Store, StoredGuide, StoredSource,
 };
 use std::collections::BTreeMap;
 use std::future::Future;
 
-fn snapshot_in(store: &Store) -> Result<crate::library::Snapshot, StoreError> {
+const LAST_CHANNEL_FILE: &str = "last_channel";
+const COMBINED_CHANNEL_FILE: &str = "last_channel_combined";
+
+fn last_channel_path(services: &Services, source: Option<SourceId>) -> std::path::PathBuf {
+    services.directory().join(match source {
+        Some(id) => format!("{LAST_CHANNEL_FILE}-{}", id.0),
+        None => LAST_CHANNEL_FILE.to_owned(),
+    })
+}
+
+/// Queues the write: a zap never waits for the disk (`file_writer`).
+pub(crate) fn save_last_channel(services: &Services, source: Option<SourceId>, key: &str) {
+    drop(
+        services
+            .files()
+            .write(last_channel_path(services, source), key.as_bytes().to_vec()),
+    );
+}
+
+/// Includes a write still queued, so a zap is remembered at once.
+pub(crate) fn load_last_channel(services: &Services, source: Option<SourceId>) -> Option<String> {
+    let read = |path: std::path::PathBuf| {
+        let key = String::from_utf8(services.files().read(&path)?).ok()?;
+        let key = key.trim();
+        (!key.is_empty()).then(|| key.to_owned())
+    };
+    read(last_channel_path(services, source)).or_else(|| read(last_channel_path(services, None)))
+}
+
+/// Playlist `source` was deleted: its last channel goes too (after any
+/// write still queued for it).
+pub(crate) fn forget_source(services: &Services, source: SourceId) {
+    drop(
+        services
+            .files()
+            .remove(last_channel_path(services, Some(source))),
+    );
+}
+
+pub(crate) fn save_combined_channel(services: &Services, key: &str) {
+    drop(services.files().write(
+        services.directory().join(COMBINED_CHANNEL_FILE),
+        key.as_bytes().to_vec(),
+    ));
+}
+
+pub(crate) fn load_combined_channel(services: &Services) -> Option<String> {
+    let bytes = services
+        .files()
+        .read(&services.directory().join(COMBINED_CHANNEL_FILE))?;
+    let key = String::from_utf8(bytes).ok()?;
+    (!key.trim().is_empty()).then(|| key.trim().to_owned())
+}
+
+/// A stored source's live groups and channels, in provider order, from an open store.
+pub(crate) fn catalog_in(
+    store: &Store,
+    source: SourceId,
+) -> Result<(Vec<Group>, Vec<Channel>), StoreError> {
+    let groups = store.groups(source, Some(ContentKind::Live))?;
+    let query = ChannelQuery {
+        include_hidden: true,
+        order: ChannelOrder::Provider,
+        ..ChannelQuery::default()
+    };
+    let channels = store
+        .load_channels(source, &query)?
+        .into_iter()
+        .map(|row| row.channel)
+        .collect();
+    Ok((groups, channels))
+}
+
+/// What the views see of a stored guide: how its last update went, without
+/// its feeds or their configuration.
+pub(crate) fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
+    iptv_library::GuideSnapshot {
+        replaced_at: guide.replaced_at,
+        attempted_at: guide.attempted_at,
+        last_error: guide.last_error,
+        bound_channels: guide.bound_channels,
+    }
+}
+
+fn snapshot_in(store: &Store) -> Result<LibrarySnapshot, StoreError> {
     let playlists = playlists_in(store)?;
     let mut details = BTreeMap::new();
     let mut imports = BTreeMap::new();
@@ -27,7 +113,7 @@ fn snapshot_in(store: &Store) -> Result<crate::library::Snapshot, StoreError> {
             details.insert(playlist.id, source);
         }
     }
-    Ok(crate::library::Snapshot {
+    Ok(LibrarySnapshot {
         playlists,
         details,
         imports,
@@ -124,16 +210,14 @@ pub(crate) struct CatalogRepo {
 }
 
 impl CatalogRepo {
-    pub(crate) async fn refresh_sources(
-        self,
-    ) -> Result<Vec<crate::library::RefreshSource>, StoreError> {
+    pub(crate) async fn refresh_sources(self) -> Result<Vec<RefreshSource>, StoreError> {
         self.services
             .call(|store| {
                 store
                     .sources()?
                     .into_iter()
                     .map(|source| {
-                        Ok(crate::library::RefreshSource {
+                        Ok(RefreshSource {
                             id: source.id,
                             last_attempt_at: source.import.last_attempt_at,
                             policy: store.source_policy(source.id)?,
@@ -160,7 +244,7 @@ impl CatalogRepo {
                         snapshot.guides.insert(
                             source.id,
                             crate::state::CachedGuide {
-                                summary: crate::stored::guide_snapshot(&guide),
+                                summary: guide_snapshot(&guide),
                                 has_feeds: !guide.feeds.is_empty(),
                             },
                         );
@@ -207,7 +291,7 @@ impl CatalogRepo {
         let files = self.services.clone();
         self.services
             .read(move |store| {
-                Ok(crate::playback::load_combined_channel(&files)
+                Ok(load_combined_channel(&files)
                     .or(store.combined_last_channel()?)
                     .or_else(|| {
                         // The first combined browse may still use a legacy single-source file.
@@ -215,7 +299,7 @@ impl CatalogRepo {
                         if !store.source_policy(source).ok()?.enabled {
                             return None;
                         }
-                        let key = crate::playback::load_last_channel(&files, Some(source))?;
+                        let key = load_last_channel(&files, Some(source))?;
                         Some(iptv_guide::combined::qualified_key(source.0, &key))
                     }))
             })
@@ -225,7 +309,7 @@ impl CatalogRepo {
     pub(crate) fn startup_library(
         &self,
     ) -> impl Future<
-        Output = Result<(Option<StoredSource>, bool, bool, crate::library::Snapshot), StoreError>,
+        Output = Result<(Option<StoredSource>, bool, bool, LibrarySnapshot), StoreError>,
     > + use<> {
         let directory = self.services.directory().to_owned();
         self.services.call_at_startup(move |store| {
@@ -248,7 +332,7 @@ impl CatalogRepo {
     pub(crate) fn update_source_policy<F>(
         self,
         id: SourceId,
-        access: crate::parental::Snapshot,
+        access: Snapshot,
         edit: F,
     ) -> impl Future<Output = Result<(SourcePolicy, bool), StoreError>> + use<F>
     where
@@ -256,11 +340,7 @@ impl CatalogRepo {
     {
         let services = self.services.clone();
         self.services.call(move |store| {
-            crate::store_service::ParentalRepo::require_settings_write(
-                store,
-                &access,
-                &services.settings(),
-            )?;
+            ParentalRepo::require_settings_write(store, &access, &services.settings())?;
             let mut policy = store.source_policy(id)?;
             let was_enabled = policy.enabled;
             edit(&mut policy);
@@ -363,22 +443,18 @@ impl CatalogRepo {
     }
     pub(crate) fn snapshot(
         &self,
-    ) -> impl Future<Output = Result<crate::library::Snapshot, StoreError>> + use<> {
+    ) -> impl Future<Output = Result<LibrarySnapshot, StoreError>> + use<> {
         self.services.read(snapshot_in)
     }
 
     pub(crate) fn set_source_order(
         self,
         order: Vec<SourceId>,
-        access: crate::parental::Snapshot,
+        access: Snapshot,
     ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         let services = self.services.clone();
         self.services.call(move |store| {
-            crate::store_service::ParentalRepo::require_settings_write(
-                store,
-                &access,
-                &services.settings(),
-            )?;
+            ParentalRepo::require_settings_write(store, &access, &services.settings())?;
             store.set_source_order(&order)
         })
     }
@@ -403,10 +479,10 @@ impl CatalogRepo {
     pub(crate) fn delete_source(
         self,
         id: SourceId,
-        access: crate::parental::Snapshot,
+        access: Snapshot,
     ) -> impl Future<Output = Result<bool, StoreError>> + use<> {
         self.services.call(move |store| {
-            crate::store_service::ParentalRepo::require_admin(store, &access)?;
+            ParentalRepo::require_admin(store, &access)?;
             store.delete_source(id)
         })
     }
@@ -494,11 +570,11 @@ impl CatalogRepo {
         self,
         group: CustomGroupId,
         members: Vec<ContentId>,
-        access: crate::parental::Snapshot,
+        access: Snapshot,
     ) -> Result<(), StoreError> {
         self.services
             .call(move |store| {
-                crate::store_service::ParentalRepo::require_group_edit(store, group, &access)?;
+                ParentalRepo::require_group_edit(store, group, &access)?;
                 store.remove_custom_members(group, &members)
             })
             .await
@@ -511,12 +587,12 @@ impl CatalogRepo {
         to: CustomGroupId,
         members: Vec<ContentId>,
         moving: bool,
-        access: crate::parental::Snapshot,
+        access: Snapshot,
     ) -> Result<usize, StoreError> {
         self.services
             .call(move |store| {
                 if moving && let Some(group) = from {
-                    crate::store_service::ParentalRepo::require_group_edit(store, group, &access)?;
+                    ParentalRepo::require_group_edit(store, group, &access)?;
                 }
                 store.transfer_custom_members(source, from, to, &members, moving)
             })
@@ -526,11 +602,11 @@ impl CatalogRepo {
     pub(crate) async fn delete_custom_group(
         self,
         group: CustomGroupId,
-        access: crate::parental::Snapshot,
+        access: Snapshot,
     ) -> Result<(), StoreError> {
         self.services
             .call(move |store| {
-                crate::store_service::ParentalRepo::require_group_edit(store, group, &access)?;
+                ParentalRepo::require_group_edit(store, group, &access)?;
                 store.delete_custom_group(group).map(|_| ())
             })
             .await
@@ -556,15 +632,15 @@ impl CatalogRepo {
         self,
         source: SourceId,
         channel: ContentId,
-        mut access: crate::parental::Snapshot,
+        mut access: Snapshot,
     ) -> Result<Option<crate::model::PlaybackChannel>, StoreError> {
         let services = self.services.clone();
         self.services
             .read(move |store| {
-                access.access.policy = crate::parental::policy_settings(&services.settings());
+                access.access.policy = policy_settings(&services.settings());
                 let target = Target::live(source.0, channel.as_str());
                 if store.guide_channel_blocked(source, channel.as_str())?
-                    || !crate::store_service::ParentalRepo::native_allowed(store, &target, &access)?
+                    || !ParentalRepo::native_allowed(store, &target, &access)?
                 {
                     return Ok(None);
                 }
@@ -582,8 +658,8 @@ impl CatalogRepo {
         self,
         authority: ResolutionAuthority,
         external_group: Option<String>,
-        access: crate::parental::Snapshot,
-    ) -> Result<Option<crate::operations::ExternalPlaybackAuthorization>, StoreError> {
+        access: Snapshot,
+    ) -> Result<Option<ExternalPlaybackAuthorization>, StoreError> {
         self.services
             .read(move |store| {
                 playback_handoff_in(store, &authority, external_group.as_deref(), access)
@@ -595,8 +671,8 @@ impl CatalogRepo {
         self,
         authority: ResolutionAuthority,
         external_group: Option<String>,
-        access: crate::parental::Snapshot,
-    ) -> Result<Option<crate::operations::ExternalPlaybackAuthorization>, StoreError> {
+        access: Snapshot,
+    ) -> Result<Option<ExternalPlaybackAuthorization>, StoreError> {
         self.services
             .call(move |store| {
                 playback_handoff_in(store, &authority, external_group.as_deref(), access)
@@ -871,15 +947,13 @@ fn playback_handoff_in(
     store: &Store,
     authority: &ResolutionAuthority,
     external_group: Option<&str>,
-    access: crate::parental::Snapshot,
-) -> Result<Option<crate::operations::ExternalPlaybackAuthorization>, StoreError> {
+    access: Snapshot,
+) -> Result<Option<ExternalPlaybackAuthorization>, StoreError> {
     let source = SourceId(authority.source());
     let channel = &authority.channel().id;
     let target = Target::live(source.0, channel.as_str());
     store.read_snapshot(|store| {
-        let Some(grants) =
-            crate::store_service::ParentalRepo::native_grants(store, &target, &access)?
-        else {
+        let Some(grants) = ParentalRepo::native_grants(store, &target, &access)? else {
             return Ok(None);
         };
         if !store.source_policy(source)?.enabled
@@ -911,8 +985,7 @@ fn playback_handoff_in(
             && stored.source.config == *authority.config()
             && row.channel == *authority.channel()
             && access.playback_current(&target, &grants);
-        Ok(allowed
-            .then(|| crate::operations::ExternalPlaybackAuthorization::new(access, target, grants)))
+        Ok(allowed.then(|| ExternalPlaybackAuthorization::new(access, target, grants)))
     })
 }
 

@@ -100,7 +100,7 @@ pub fn rect(ui: Ui) -> (f32, f32, f32, f32) {
 /// shrinks to nothing in the main window, where a placeholder takes its
 /// place (`desktop/pip_window.rs`).
 pub fn surface_rect(ui: Ui, surface: usize) -> (f32, f32, f32, f32) {
-    if surface == 0 && crate::playback::pip::in_window(ui) {
+    if surface == 0 && crate::playback::pip::in_window(ui.playback) {
         return (0.0, 0.0, 0.0, 0.0);
     }
     layout_rect(ui, surface)
@@ -109,15 +109,15 @@ pub fn surface_rect(ui: Ui, surface: usize) -> (f32, f32, f32, f32) {
 /// Where the view mode puts surface `surface`.
 pub fn layout_rect(ui: Ui, surface: usize) -> (f32, f32, f32, f32) {
     // Android's picture-in-picture window: surface 0 fills it (`pip.rs`).
-    if crate::playback::pip::fills_app(ui) {
+    if crate::playback::pip::fills_app(ui.playback) {
         let w = window();
         return match surface {
             0 => (0.0, 0.0, w.width.0, w.height.0),
             _ => (0.0, 0.0, 0.0, 0.0),
         };
     }
-    if crate::playback::multiview::is_open(ui) {
-        return crate::playback::multiview::surface_rect(ui, surface)
+    if crate::playback::multiview::is_open(ui.playback) {
+        return crate::playback::multiview::surface_rect(ui.playback, surface)
             .unwrap_or((0.0, 0.0, 0.0, 0.0));
     }
     if surface != 0 {
@@ -125,7 +125,7 @@ pub fn layout_rect(ui: Ui, surface: usize) -> (f32, f32, f32, f32) {
     }
     let w = window();
     if ui.chrome.mode.get() != ViewMode::Guide {
-        crate::screens::channels_view::preview_rect(ui, w.width.0, w.height.0)
+        crate::screens::channels_view::preview_rect(ui.playback, w.width.0, w.height.0)
             .unwrap_or((0.0, 0.0, w.width.0, w.height.0))
     } else {
         crate::playback::panels::preview_rect()
@@ -186,7 +186,7 @@ pub(crate) fn backdrop_clear(ui: Ui) -> bool {
 fn plays(ui: Ui, surface: usize) -> bool {
     if surface == 0 {
         ui.playback.playing.get().is_some()
-            || crate::playback::player::resume::playing(ui)
+            || crate::playback::player::resume::playing(ui.playback)
             || ui.playback.player.recorded.with(Option::is_some)
             || ui.playback.player.vod.with(Option::is_some)
     } else {
@@ -233,7 +233,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         }),
         seek: Box::new(move || stream.seek.get()),
         picture_size: Box::new(move || {
-            let identity = crate::chrome::chooser::picture_identity(ui, surface);
+            let identity = crate::chrome::chooser::picture_identity(ui.playback, surface);
             ui.app
                 .picture
                 .with(|p| p.for_channel(identity.as_deref()))
@@ -287,7 +287,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         }
         match PlayerEvent::decode(&e.name, &e.data) {
             Ok(event) => on_event(ui, surface, event),
-            Err(error) => on_unread(ui, surface, error),
+            Err(error) => on_unread(ui.playback, surface, error),
         }
     })
 }
@@ -297,8 +297,8 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
 /// the four names shows on the status line and changes nothing else, a
 /// `size` without its two numbers still marks reported size (the
 /// stream's size stays), and the rest sets nothing.
-fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
-    if !ui.playback.player.stream(surface).accepts_native(None) {
+fn on_unread(playback: crate::PlaybackUi, surface: usize, error: PlayerEventError) {
+    if !playback.player.stream(surface).accepts_native(None) {
         return;
     }
     let (kind, status) = match error {
@@ -325,15 +325,15 @@ fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
             (PlayerEventKind::Size, format!("{width}×{height}"))
         }
     };
-    report(ui, surface, kind, status);
+    report(playback, surface, kind, status);
 }
 
 /// Logs `status`, what the `kind` event from `surface` said, and shows
 /// surface 0's on the status line.
-fn report(ui: Ui, surface: usize, kind: PlayerEventKind, status: String) {
+fn report(playback: crate::PlaybackUi, surface: usize, kind: PlayerEventKind, status: String) {
     log::info!("iptv player {surface} {}: {status}", kind.wire());
     if surface == 0 {
-        ui.playback.player_status.set(status);
+        playback.player_status.set(status);
     }
 }
 
@@ -438,5 +438,5 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
             format!("error {code}")
         }
     };
-    report(ui, surface, kind, status);
+    report(ui.playback, surface, kind, status);
 }

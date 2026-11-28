@@ -5,8 +5,8 @@ use iptv_core::vod::Card;
 use iptv_presentation::browse::RailItem;
 use iptv_presentation::vod::{CatalogGroup, Destination};
 
-fn all_label(ui: Ui) -> &'static str {
-    if ui.screens.vod.with(|s| s.query.kind == Kind::Series) {
+fn all_label(screens: crate::ScreensUi) -> &'static str {
+    if screens.vod.with(|s| s.query.kind == Kind::Series) {
         tr("All shows")
     } else {
         tr("All movies")
@@ -41,15 +41,15 @@ pub(super) fn activate_navigation(ui: Ui) {
 
 /// Whether the rail widens to show its labels: while the remote is on it,
 /// except beside the one-pane empty catalog, which keeps the width.
-fn rail_labels(ui: Ui) -> bool {
-    ui.screens
+fn rail_labels(screens: crate::ScreensUi) -> bool {
+    screens
         .vod
         .with(|s| s.control == Control::Navigation && !s.one_pane())
 }
 
 fn navigation(ui: Ui, size: Scale) -> View {
     view()
-        .w(move || size.px(if rail_labels(ui) { 275.0 } else { 70.0 }))
+        .w(move || size.px(if rail_labels(ui.screens) { 275.0 } else { 70.0 }))
         .h_full()
         .flex_shrink_0()
         .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
@@ -142,7 +142,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
                                 }),
                         )
                         .child(when(
-                            move || rail_labels(ui),
+                            move || rail_labels(ui.screens),
                             move || {
                                 ui_kit::label(size, label).number_of_lines(1).text_color(
                                     move || {
@@ -271,7 +271,7 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                                 size,
                                 move || match at.index() {
                                     0 => tr("Continue watching").into(),
-                                    1 => all_label(ui).into(),
+                                    1 => all_label(ui.screens).into(),
                                     _ => category().map(|c| c.name).unwrap_or_default(),
                                 },
                                 move || {
@@ -315,8 +315,8 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
     )
 }
 
-pub(super) fn focused_card(ui: Ui) -> Option<Card> {
-    ui.screens.vod.with(|s| {
+pub(super) fn focused_card(screens: crate::ScreensUi) -> Option<Card> {
+    screens.vod.with(|s| {
         if let Some(details) = &s.details {
             return Some(details.item.clone());
         }
@@ -437,12 +437,14 @@ pub(super) fn hero(ui: Ui, size: Scale) -> View {
         ))
         .child(
             ui_kit::library_title(size, move || {
-                focused_card(ui).map(|c| c.name).unwrap_or_default()
+                focused_card(ui.screens).map(|c| c.name).unwrap_or_default()
             })
             .pr(move || size.px(130.0)),
         )
         .child(ui_kit::body(size, move || {
-            let mut line = focused_card(ui).map(|c| summary(&c)).unwrap_or_default();
+            let mut line = focused_card(ui.screens)
+                .map(|c| summary(&c))
+                .unwrap_or_default();
             let seasons = ui.screens.vod.with(|s| {
                 s.details
                     .as_ref()
@@ -466,7 +468,9 @@ pub(super) fn hero(ui: Ui, size: Scale) -> View {
         }))
         .child(
             ui_kit::body(size, move || {
-                focused_card(ui).and_then(|c| c.plot).unwrap_or_default()
+                focused_card(ui.screens)
+                    .and_then(|c| c.plot)
+                    .unwrap_or_default()
             })
             .number_of_lines(4),
         )
@@ -686,7 +690,7 @@ fn category_heading_button(ui: Ui, size: Scale) -> View {
                                 .find(|c| c.source == *source && c.id == *id)
                         })
                         .map(|c| c.name.clone())
-                        .unwrap_or_else(|| all_label(ui).into())
+                        .unwrap_or_else(|| all_label(ui.screens).into())
                 }
             })
         },
@@ -713,7 +717,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         ui.app.library.version.get();
         (
             !crate::guide::lists::live_only(),
-            crate::wiring::capabilities::recordings_library(ui),
+            crate::wiring::capabilities::recordings_library(ui.screens),
         )
     });
     effect(move || {
@@ -829,7 +833,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                             })
                     },
                 ))
-                .child(ui_kit::caption(size, move || status_message(ui)))
+                .child(ui_kit::caption(size, move || status_message(ui.screens)))
                 .child(when(
                     move || ui.screens.vod.with(|s| s.retry.is_some() && !s.busy),
                     move || {

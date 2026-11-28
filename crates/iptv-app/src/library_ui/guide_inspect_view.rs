@@ -14,31 +14,31 @@ use iptv_presentation::library::guide_inspect::{Mode, Reply, Row, Screen};
 use nsh_core::{element::input, prelude::*};
 use std::time::Duration;
 
-fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.screens.guide_inspect.with(|s| s.as_ref().map(f))
+fn state<R>(screens: crate::ScreensUi, f: impl FnOnce(&Screen) -> R) -> Option<R> {
+    screens.guide_inspect.with(|s| s.as_ref().map(f))
 }
-fn update(ui: Ui, f: impl FnOnce(&mut Screen)) {
-    ui.screens.guide_inspect.update(|s| {
+fn update(screens: crate::ScreensUi, f: impl FnOnce(&mut Screen)) {
+    screens.guide_inspect.update(|s| {
         if let Some(s) = s {
             f(s);
         }
     });
 }
-fn cancel(ui: Ui) {
-    ui.screens.guide_inspect_cancel.with(|token| {
+fn cancel(screens: crate::ScreensUi) {
+    screens.guide_inspect_cancel.with(|token| {
         if let Some(token) = token.take() {
             token.cancel();
         }
     });
 }
 fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
-    cancel(ui);
+    cancel(ui.screens);
     let control = InspectionControl {
         timeout: Duration::from_secs(60),
         ..Default::default()
     };
     let mut request = None;
-    update(ui, |s| {
+    update(ui.screens, |s| {
         let id = s.begin();
         request = Some((s.clone(), id, control.clone()));
     });
@@ -47,13 +47,13 @@ fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
         .with(|token| *token = Some(control.cancel.clone()));
     request
 }
-fn finish(ui: Ui, id: u64, result: InspectionResult<Reply>) {
-    update(ui, |s| {
+fn finish(screens: crate::ScreensUi, id: u64, result: InspectionResult<Reply>) {
+    update(screens, |s| {
         s.finish(id, result);
     });
 }
-fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
-    !control.cancel.is_canceled() && state(ui, |s| s.request == id).unwrap_or(false)
+fn current(screens: crate::ScreensUi, id: u64, control: &InspectionControl) -> bool {
+    !control.cancel.is_canceled() && state(screens, |s| s.request == id).unwrap_or(false)
 }
 
 pub fn open(ui: Ui, source: SourceId) {
@@ -74,39 +74,39 @@ pub fn open(ui: Ui, source: SourceId) {
     ui.screens.guide_inspect.set(Some(screen));
     audit(ui, false);
 }
-pub fn is_open(ui: Ui) -> bool {
-    ui.screens.guide_inspect.with(Option::is_some)
+pub fn is_open(screens: crate::ScreensUi) -> bool {
+    screens.guide_inspect.with(Option::is_some)
 }
-pub fn close(ui: Ui) {
-    cancel(ui);
-    ui.screens.guide_inspect.set(None);
+pub fn close(screens: crate::ScreensUi) {
+    cancel(screens);
+    screens.guide_inspect.set(None);
     dismiss_keyboard();
 }
 pub fn back(ui: Ui) -> bool {
-    if state(ui, |s| s.typing).unwrap_or(false) {
-        update(ui, |s| s.typing = false);
+    if state(ui.screens, |s| s.typing).unwrap_or(false) {
+        update(ui.screens, |s| s.typing = false);
         dismiss_keyboard();
         return true;
     }
-    cancel(ui);
+    cancel(ui.screens);
     let mut keep = false;
-    update(ui, |s| keep = s.back());
+    update(ui.screens, |s| keep = s.back());
     if !keep {
-        close(ui);
+        close(ui.screens);
     }
     true
 }
 pub fn key(ui: Ui, action: Action) {
     match action {
-        Action::MoveUp => update(ui, |s| s.move_focus(-1)),
-        Action::MoveDown => update(ui, |s| s.move_focus(1)),
-        Action::PageUp => update(ui, |s| s.move_focus(-8)),
-        Action::PageDown => update(ui, |s| s.move_focus(8)),
+        Action::MoveUp => update(ui.screens, |s| s.move_focus(-1)),
+        Action::MoveDown => update(ui.screens, |s| s.move_focus(1)),
+        Action::PageUp => update(ui.screens, |s| s.move_focus(-8)),
+        Action::PageDown => update(ui.screens, |s| s.move_focus(8)),
         Action::Back | Action::ShowMenu => {
             back(ui);
         }
         Action::Select => {
-            if let Some(row) = state(ui, |s| s.focus.clone()) {
+            if let Some(row) = state(ui.screens, |s| s.focus.clone()) {
                 activate(ui, row);
             }
         }
@@ -126,10 +126,10 @@ fn audit(ui: Ui, next: bool) {
         let result = crate::wiring::runtime_owner::runtime()
             .epg_audit(query, screen.window, control.clone())
             .await;
-        if !current(ui, id, &control) {
+        if !current(ui.screens, id, &control) {
             return;
         }
-        finish(ui, id, result.map(Reply::Audit));
+        finish(ui.screens, id, result.map(Reply::Audit));
     });
 }
 fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
@@ -145,7 +145,7 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
         let result = crate::wiring::runtime_owner::runtime()
             .epg_candidates(subject.clone(), query, control.clone())
             .await;
-        if !current(ui, id, &control) {
+        if !current(ui.screens, id, &control) {
             return;
         }
         match result {
@@ -155,11 +155,11 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
                 let programs = crate::wiring::runtime_owner::runtime()
                     .query_programs(query, screen.window, Some(subject.clone()), control.clone())
                     .await;
-                if !current(ui, id, &control) {
+                if !current(ui.screens, id, &control) {
                     return;
                 }
                 finish(
-                    ui,
+                    ui.screens,
                     id,
                     Ok(Reply::Candidates {
                         subject,
@@ -168,12 +168,12 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
                     }),
                 );
             }
-            Err(error) => finish(ui, id, Err(error)),
+            Err(error) => finish(ui.screens, id, Err(error)),
         }
     });
 }
 fn inspect_link(ui: Ui) {
-    update(ui, |s| s.typing = false);
+    update(ui.screens, |s| s.typing = false);
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
@@ -186,7 +186,7 @@ fn inspect_link(ui: Ui) {
         let result = crate::wiring::runtime_owner::runtime()
             .probe_feed(request, control.clone())
             .await;
-        if !current(ui, id, &control) {
+        if !current(ui.screens, id, &control) {
             return;
         }
         match result {
@@ -200,12 +200,16 @@ fn inspect_link(ui: Ui) {
                         control.clone(),
                     )
                     .await;
-                if !current(ui, id, &control) {
+                if !current(ui.screens, id, &control) {
                     return;
                 }
-                finish(ui, id, page.map(|page| Reply::StagedProbe { stage, page }));
+                finish(
+                    ui.screens,
+                    id,
+                    page.map(|page| Reply::StagedProbe { stage, page }),
+                );
             }
-            Err(error) => finish(ui, id, Err(error)),
+            Err(error) => finish(ui.screens, id, Err(error)),
         }
     });
 }
@@ -221,10 +225,10 @@ fn staged_candidates(ui: Ui) {
         let result = crate::wiring::runtime_owner::runtime()
             .probe_candidates(stage.evidence, screen.query, after, 50, control.clone())
             .await;
-        if !current(ui, id, &control) {
+        if !current(ui.screens, id, &control) {
             return;
         }
-        finish(ui, id, result.map(Reply::ProbeCandidates));
+        finish(ui.screens, id, result.map(Reply::ProbeCandidates));
     });
 }
 fn samples(ui: Ui, candidate: CandidateRef) {
@@ -248,13 +252,13 @@ fn samples(ui: Ui, candidate: CandidateRef) {
                 )
                 .await
         };
-        if !current(ui, id, &control) {
+        if !current(ui.screens, id, &control) {
             return;
         }
         let stage = match stage {
             Ok(stage) => stage,
             Err(error) => {
-                finish(ui, id, Err(error));
+                finish(ui.screens, id, Err(error));
                 return;
             }
         };
@@ -267,11 +271,11 @@ fn samples(ui: Ui, candidate: CandidateRef) {
                 control.clone(),
             )
             .await;
-        if !current(ui, id, &control) {
+        if !current(ui.screens, id, &control) {
             return;
         }
         finish(
-            ui,
+            ui.screens,
             id,
             result.map(|programs| Reply::Samples {
                 stage,
@@ -283,25 +287,25 @@ fn samples(ui: Ui, candidate: CandidateRef) {
     });
 }
 fn activate(ui: Ui, row: Row) {
-    if state(ui, |s| s.busy).unwrap_or(true) && row != Row::Back {
+    if state(ui.screens, |s| s.busy).unwrap_or(true) && row != Row::Back {
         return;
     }
-    update(ui, |s| s.activate_row(row.clone()));
+    update(ui.screens, |s| s.activate_row(row.clone()));
     if row != Row::Search {
         dismiss_keyboard();
     }
     match row {
         Row::Channel(subject) => {
-            update(ui, |s| s.inspect_channel(subject.clone()));
+            update(ui.screens, |s| s.inspect_channel(subject.clone()));
             candidates(ui, subject, false);
         }
         Row::Candidate(candidate) => samples(ui, candidate),
         Row::ReuseInspected => {
-            update(ui, Screen::reuse_probe);
+            update(ui.screens, Screen::reuse_probe);
             staged_candidates(ui);
         }
         Row::UseCandidate => {
-            if let Some((Some(channel), Some(candidate), stage, window)) = state(ui, |s| {
+            if let Some((Some(channel), Some(candidate), stage, window)) = state(ui.screens, |s| {
                 (
                     s.subject.clone(),
                     s.selected.clone(),
@@ -321,7 +325,9 @@ fn activate(ui: Ui, row: Row) {
             }
         }
         Row::AutomaticRepair | Row::NoGuideRepair => {
-            if let Some((Some(channel), window)) = state(ui, |s| (s.subject.clone(), s.window)) {
+            if let Some((Some(channel), window)) =
+                state(ui.screens, |s| (s.subject.clone(), s.window))
+            {
                 let target = if row == Row::AutomaticRepair {
                     iptv_library::guide_repair::Target::Automatic
                 } else {
@@ -330,19 +336,19 @@ fn activate(ui: Ui, row: Row) {
                 crate::library_ui::guide_repair_view::add(ui, channel, target, window);
             }
         }
-        Row::ReviewRepair => crate::library_ui::guide_repair_view::reopen(ui),
+        Row::ReviewRepair => crate::library_ui::guide_repair_view::reopen(ui.screens),
         Row::RepairHistory => {
-            if let Some((source, window)) = state(ui, |s| (s.source, s.window)) {
+            if let Some((source, window)) = state(ui.screens, |s| (s.source, s.window)) {
                 crate::library_ui::guide_repair_view::history(ui, source, window);
             }
         }
-        Row::Search => update(ui, |s| s.typing = true),
+        Row::Search => update(ui.screens, |s| s.typing = true),
         Row::InspectLink => inspect_link(ui),
-        Row::NewLink => update(ui, Screen::new_link),
+        Row::NewLink => update(ui.screens, Screen::new_link),
         Row::Back => {
             back(ui);
         }
-        Row::Next => match state(ui, |s| (s.mode, s.subject.clone())) {
+        Row::Next => match state(ui.screens, |s| (s.mode, s.subject.clone())) {
             Some((Mode::Audit, _)) => audit(ui, true),
             Some((Mode::Candidates, Some(subject))) => candidates(ui, subject, true),
             Some((Mode::ProbeCandidates, _)) => staged_candidates(ui),
@@ -391,7 +397,7 @@ pub(crate) fn error_text(error: InspectionError) -> &'static str {
 }
 fn title(ui: Ui, row: &Row) -> String {
     match row {
-        Row::Channel(key) => state(ui, |s| {
+        Row::Channel(key) => state(ui.screens, |s| {
             s.audit
                 .iter()
                 .find(|r| r.channel.key == *key)
@@ -399,7 +405,7 @@ fn title(ui: Ui, row: &Row) -> String {
         })
         .flatten()
         .unwrap_or_default(),
-        Row::Candidate(key) => state(ui, |s| {
+        Row::Candidate(key) => state(ui.screens, |s| {
             s.candidates
                 .iter()
                 .find(|c| c.key == *key)
@@ -422,7 +428,7 @@ fn title(ui: Ui, row: &Row) -> String {
 }
 fn detail(ui: Ui, row: &Row) -> String {
     match row {
-        Row::Channel(key) => state(ui, |s| {
+        Row::Channel(key) => state(ui.screens, |s| {
             s.audit.iter().find(|r| r.channel.key == *key).map(|r| {
                 format!(
                     "{} · {} / {}",
@@ -434,7 +440,7 @@ fn detail(ui: Ui, row: &Row) -> String {
         })
         .flatten()
         .unwrap_or_default(),
-        Row::Candidate(key) => state(ui, |s| {
+        Row::Candidate(key) => state(ui.screens, |s| {
             s.candidates.iter().find(|c| c.key == *key).map(|c| {
                 let evidence = c
                     .evidence
@@ -458,8 +464,12 @@ fn detail(ui: Ui, row: &Row) -> String {
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let rows = element_ref();
-    let focused =
-        computed(move || state(ui, |s| s.rows().iter().position(|row| *row == s.focus)).flatten());
+    let focused = computed(move || {
+        state(ui.screens, |s| {
+            s.rows().iter().position(|row| *row == s.focus)
+        })
+        .flatten()
+    });
     effect(move || {
         if ui.keys_shown()
             && let Some(index) = focused.get()
@@ -468,9 +478,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     let field = element_ref();
-    crate::chrome::input::bind_field_focus(field, move || state(ui, |s| s.typing).unwrap_or(false));
+    crate::chrome::input::bind_field_focus(field, move || {
+        state(ui.screens, |s| s.typing).unwrap_or(false)
+    });
     when(
-        move || is_open(ui),
+        move || is_open(ui.screens),
         move || {
             ui_kit::screen(ui, size)
                 .test_id("guide-inspection-screen")
@@ -481,10 +493,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     ui,
                     size,
                     move || tr("Inspect guide coverage"),
-                    close,
+                    |ui| close(ui.screens),
                 ))
                 .child(ui_kit::caption(size, move || {
-                    state(ui, |s| {
+                    state(ui.screens, |s| {
                         format!(
                             "{} — {}",
                             crate::guide::clock::label(
@@ -503,14 +515,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     tr("Program coverage does not verify channel identity")
                 }))
                 .child(when(
-                    move || state(ui, |s| s.busy).unwrap_or(false),
+                    move || state(ui.screens, |s| s.busy).unwrap_or(false),
                     move || ui_kit::body(size, move || tr("Loading…")),
                 ))
                 .child(when(
-                    move || state(ui, |s| s.error.is_some()).unwrap_or(false),
+                    move || state(ui.screens, |s| s.error.is_some()).unwrap_or(false),
                     move || {
                         ui_kit::body(size, move || {
-                            state(ui, |s| s.error.clone().map(error_text))
+                            state(ui.screens, |s| s.error.clone().map(error_text))
                                 .flatten()
                                 .unwrap_or_default()
                         })
@@ -519,25 +531,29 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
                 .child(when(
                     move || {
-                        state(ui, |s| s.mode != Mode::Samples && s.mode != Mode::Link)
-                            .unwrap_or(false)
+                        state(ui.screens, |s| {
+                            s.mode != Mode::Samples && s.mode != Mode::Link
+                        })
+                        .unwrap_or(false)
                     },
                     move || {
                         ui_kit::field(size, input())
                             .test_id("guide-inspection-search")
                             .element_ref(&field)
-                            .value(move || state(ui, |s| s.query.clone()).unwrap_or_default())
+                            .value(move || {
+                                state(ui.screens, |s| s.query.clone()).unwrap_or_default()
+                            })
                             .placeholder(tr("Search"))
                             .auto_capitalize(AutoCapitalize::None)
                             .auto_correct(false)
                             .on_change(move |value: &str| {
-                                update(ui, |s| s.query = value.to_owned())
+                                update(ui.screens, |s| s.query = value.to_owned())
                             })
-                            .on_focus(move || update(ui, |s| s.typing = true))
+                            .on_focus(move || update(ui.screens, |s| s.typing = true))
                             .on_submit(move |_: &str| {
-                                update(ui, Screen::submit_search);
+                                update(ui.screens, Screen::submit_search);
                                 dismiss_keyboard();
-                                match state(ui, |s| (s.mode, s.subject.clone())) {
+                                match state(ui.screens, |s| (s.mode, s.subject.clone())) {
                                     Some((Mode::Audit, _)) => audit(ui, false),
                                     Some((Mode::Candidates, Some(subject))) => {
                                         candidates(ui, subject, false)
@@ -550,12 +566,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
                 .child(when(
                     move || {
-                        state(ui, |s| s.mode == Mode::Candidates && !s.current.is_empty())
-                            .unwrap_or(false)
+                        state(ui.screens, |s| {
+                            s.mode == Mode::Candidates && !s.current.is_empty()
+                        })
+                        .unwrap_or(false)
                     },
                     move || {
                         ui_kit::caption(size, move || {
-                            state(ui, |s| {
+                            state(ui.screens, |s| {
                                 format!(
                                     "{}: {}",
                                     tr("Current"),
@@ -572,33 +590,39 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
                 .child(when(
                     move || {
-                        state(ui, |s| s.mode == Mode::Samples && s.samples.is_empty())
-                            .unwrap_or(false)
+                        state(ui.screens, |s| {
+                            s.mode == Mode::Samples && s.samples.is_empty()
+                        })
+                        .unwrap_or(false)
                     },
                     move || ui_kit::body(size, move || tr("No programs in this interval")),
                 ))
                 .child(when(
-                    move || state(ui, |s| s.mode == Mode::Link).unwrap_or(false),
+                    move || state(ui.screens, |s| s.mode == Mode::Link).unwrap_or(false),
                     move || {
                         ui_kit::field(size, input())
                             .test_id("guide-inspection-link")
                             .element_ref(&field)
-                            .value(move || state(ui, |s| s.link.clone()).unwrap_or_default())
+                            .value(move || {
+                                state(ui.screens, |s| s.link.clone()).unwrap_or_default()
+                            })
                             .placeholder(tr("An XMLTV link (.xml or .xml.gz)"))
                             .auto_capitalize(AutoCapitalize::None)
                             .auto_correct(false)
-                            .on_change(move |value: &str| update(ui, |s| s.link = value.to_owned()))
+                            .on_change(move |value: &str| {
+                                update(ui.screens, |s| s.link = value.to_owned())
+                            })
                             .on_submit(move |_: &str| inspect_link(ui))
                     },
                 ))
                 .child(when(
-                    move || state(ui, |s| s.mode == Mode::Samples).unwrap_or(false),
+                    move || state(ui.screens, |s| s.mode == Mode::Samples).unwrap_or(false),
                     move || {
                         virtual_list(
-                            move || state(ui, |s| s.samples.len()).unwrap_or(0),
+                            move || state(ui.screens, |s| s.samples.len()).unwrap_or(0),
                             move |at| {
                                 ui_kit::body(size, move || {
-                                    state(ui, |s| {
+                                    state(ui.screens, |s| {
                                         s.samples.get(at.index()).map(|p| {
                                             format!(
                                                 "{} — {} · {}",
@@ -625,13 +649,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
                 .child(
                     virtual_list(
-                        move || state(ui, |s| s.rows().len()).unwrap_or(0),
+                        move || state(ui.screens, |s| s.rows().len()).unwrap_or(0),
                         move |at| {
-                            let row =
-                                move || state(ui, |s| s.rows().get(at.index()).cloned()).flatten();
+                            let row = move || {
+                                state(ui.screens, |s| s.rows().get(at.index()).cloned()).flatten()
+                            };
                             let mark = move || {
                                 Mark::of(
-                                    state(ui, |s| row().is_some_and(|r| s.focus == r))
+                                    state(ui.screens, |s| row().is_some_and(|r| s.focus == r))
                                         .unwrap_or(false)
                                         && ui.keys_shown(),
                                     false,

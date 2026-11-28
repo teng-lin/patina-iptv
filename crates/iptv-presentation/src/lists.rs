@@ -434,6 +434,12 @@ impl Schedule for ListView {
         self.channel(row)
             .map_or_else(String::new, |c| self.catalog.channel_name(c))
     }
+    fn channel_playlist(&self, row: usize) -> Option<&str> {
+        self.catalog.channel_playlist(self.channel(row)?)
+    }
+    fn channel_group_label(&self, row: usize) -> Option<GroupName> {
+        self.catalog.channel_group_label(self.channel(row)?)
+    }
     fn channel_number(&self, row: usize) -> u32 {
         ChannelList::number(row)
     }

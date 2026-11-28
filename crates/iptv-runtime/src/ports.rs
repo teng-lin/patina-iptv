@@ -22,8 +22,8 @@ pub enum RecordingFailure {
 
 #[derive(Clone)]
 pub struct Ports {
-    pub cast: Option<Arc<dyn crate::cast::Port>>,
-    pub native_cast: Option<Arc<dyn crate::cast::NativePort>>,
+    pub cast: Option<Arc<dyn crate::cast::port::Port>>,
+    pub native_cast: Option<Arc<dyn crate::cast::port::NativePort>>,
     pub directory: PathBuf,
     /// Native host keeps recording independently of UI engine ownership.
     pub background_recordings: bool,
