@@ -89,6 +89,7 @@ impl VerifyScratch {
             for _ in 0..256 {
                 let seq = NEXT.fetch_add(1, Ordering::Relaxed);
                 let candidate = base.join(format!(".iptv-verify-{pid}-{seq}"));
+                #[cfg_attr(not(unix), allow(unused_mut))]
                 let mut builder = std::fs::DirBuilder::new();
                 #[cfg(unix)]
                 {
