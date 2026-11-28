@@ -29,9 +29,14 @@ jobs:
       - uses: ./.github/actions/setup-windows
         with:
           cache-on-failure: 'true'
+      - name: Verify Windows bootstrap prerequisites
+        shell: pwsh
+        run: ./tools/bootstrap.ps1 -CheckOnly -SkipNsh -AllowMinimalToolchain
       - name: Verify dependency packaging helpers
         shell: pwsh
         run: |
+          python tools/ci/test-bootstrap.py
+          if ($LASTEXITCODE -ne 0) { throw 'Bootstrap contract checks failed.' }
           python tools/ci/test-check-parity.py
           if ($LASTEXITCODE -ne 0) { throw 'Shared Rust validation parity checks failed.' }
           python tools/ci/test-check-plan.py

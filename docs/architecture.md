@@ -38,7 +38,7 @@ not a reason to split the type:
 - **flow step**: where the person is in a task (`wizard::Step`, `parental::Phase`);
 - **focus**: which item an action applies to, restored by content identity (`recording::Screen::focus` is a `JobId`, a search result a `ResultId`);
 - **viewport**: which part of the content is on screen (`Focus::window`);
-- **editable input**: what has been typed or chosen and not yet submitted, with where its errors show (`wizard::FormValues`, `recording::Draft`);
+- **editable input**: what has been typed or chosen and not yet submitted, with where its errors show (`wizard::FormValues`, `library::details::Form`);
 - **operation tracking**: a request in flight (`busy`, `read_generation`, the identity of the import it waits for);
 - **interaction policy**: timing rules of the interface (a panel's auto-hide, a held seek key, a digit entry's deadline).
 

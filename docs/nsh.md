@@ -2,7 +2,19 @@
 
 Patina uses the `patina` branch of the `teng-lin/nsh` fork. The exact commit in
 [`nsh.rev`](../nsh.rev) pins the framework crates, CLI and Android Java runtime.
-From the Patina repository root, set up the sibling checkout and build the CLI:
+
+`tools/bootstrap.sh` (or `./tools/bootstrap.ps1` on Windows) handles both
+first-time setup and `nsh.rev` updates automatically, refusing to touch a dirty
+checkout unless `IPTV_ALLOW_NSH_DRIFT=1`. With `IPTV_ALLOW_NSH_DRIFT=1`,
+bootstrap leaves a dirty or drifted checkout at its current revision and builds
+`nsh-cli` from that revision without syncing `nsh.rev`; unset the override
+before re-running bootstrap to sync the pin.
+
+To set up the sibling checkout and build the CLI manually from the Patina
+repository root (a manual `cargo build` does not write bootstrap's
+`.patina-nsh-cli.rev` verification stamp; run `tools/bootstrap.sh` or
+`./tools/bootstrap.ps1` normally before relying on `--check-only` or
+`-CheckOnly`):
 
 ```sh
 git clone --branch patina https://github.com/teng-lin/nsh.git ../nsh-patina
@@ -10,7 +22,8 @@ git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
 cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
 ```
 
-When the pin changes, fetch the new commit and rebuild the CLI:
+When the pin changes, re-run `tools/bootstrap.sh` (or fetch the new commit and
+rebuild the CLI manually):
 
 ```sh
 git -C ../nsh-patina fetch origin "$(cat nsh.rev)"

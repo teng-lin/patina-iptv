@@ -121,6 +121,8 @@ jobs:
           IPTV_RS_MPV_LIB_DIR: ${{ github.workspace }}/target/mpv-runtime-macos/lib
         run: |
           command -v ffmpeg >/dev/null || brew install ffmpeg
+          PATINA_MPV_RUNTIME_DIR="${{ github.workspace }}/target/mpv-runtime-macos" \
+            /bin/bash tools/bootstrap.sh --check-only --skip-nsh --allow-minimal-toolchain
           if [[ "$HOST_TIER" == full ]]; then
             rustup component add clippy
           fi

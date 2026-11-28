@@ -11,3 +11,4 @@ hosts/android/local.properties
 # cargo cyclonedx writes these beside each manifest (tools/ci/sbom.py removes them).
 *.cdx.json
 hosts/android/.kotlin/
+/.envrc
