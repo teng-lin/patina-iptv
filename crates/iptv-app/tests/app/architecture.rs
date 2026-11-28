@@ -520,7 +520,11 @@ fn is_view_dependency(root: &Path, name: &str) -> bool {
 /// and relative paths that climb from the current file to the crate root.
 fn rooted_paths<'a>(source: &'a str, file: &str) -> BTreeSet<Vec<&'a str>> {
     let mut absolute = paths_from(source, "crate");
-    let depth = file.split('/').count();
+    let depth = file
+        .strip_suffix("/mod.rs")
+        .unwrap_or(file)
+        .split('/')
+        .count();
     for path in paths_from(source, "super") {
         let parents = path.iter().take_while(|part| **part == "super").count() + 1;
         if parents >= depth && parents <= path.len() {
@@ -852,6 +856,22 @@ fn kit_has_no_feature_shell_or_dispatch_wiring_dependency() {
                 assert!(
                     !is_module_in(&root, "wiring", first),
                     "{name} depends on wiring via root alias {}",
+                    path.join("::")
+                );
+            }
+        }
+    }
+    // Keep the ambient wiring facades themselves free of feature trees and shell
+    // so `kit/` cannot transitively depend on them.
+    for service in KIT_WIRING_SERVICES {
+        let name = format!("wiring/{service}.rs");
+        let source = shipped(&code(&root.join(&name)));
+        for path in rooted_paths(&source, &name) {
+            let first = path[0];
+            for forbidden in FEATURE_TREES.into_iter().chain(["shell"]) {
+                assert!(
+                    first != forbidden && !is_module_in(&root, forbidden, first),
+                    "{name} (used by kit/) depends on {forbidden} via {}",
                     path.join("::")
                 );
             }

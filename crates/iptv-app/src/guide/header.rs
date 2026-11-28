@@ -539,7 +539,7 @@ fn corner_back(ui: Ui) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use crate::kit::overlay_wanted;
+    use super::overlay_wanted;
 
     #[test]
     fn the_corner_back_clears_a_leading_inset_inside_the_preview() {
