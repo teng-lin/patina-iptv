@@ -7,6 +7,12 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+### Added
+
+- Cast to AirPlay receivers from Linux and Windows. Turn on **AirPlay casting**
+  in Settings. On Linux, Patina shows the firewall command that lets your TV
+  connect back.
+
 ## [0.1.12] - 2026-11-27
 
 ### Added
