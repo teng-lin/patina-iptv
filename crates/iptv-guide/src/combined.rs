@@ -298,8 +298,16 @@ impl Schedule for CombinedSchedule {
     }
     fn channel_name(&self, c: usize) -> String {
         self.channel_source(c)
-            .map(|(s, c)| format!("{} · {}", s.schedule.channel_name(c), s.name))
+            .map(|(s, c)| s.schedule.channel_name(c))
             .unwrap_or_default()
+    }
+    fn channel_playlist(&self, c: usize) -> Option<&str> {
+        self.channel_source(c).map(|(s, _)| s.name.as_str())
+    }
+    fn channel_group_label(&self, c: usize) -> Option<GroupName> {
+        let (source, local) = self.channel_source(c)?;
+        iptv_core::lists::group_of(&*source.schedule, local)
+            .map(|group| source.schedule.group_label(group))
     }
     fn channel_hidden(&self, c: usize) -> bool {
         self.channel_source(c)
@@ -521,5 +529,27 @@ mod group_name_tests {
         assert_eq!(combined.all_channels_label(), GroupName::AllPlaylists);
         assert_eq!(combined.group_label(0), GroupName::Named("Other".into()));
         assert_eq!(combined.group_label(1), GroupName::Ungrouped);
+    }
+
+    #[test]
+    fn combined_channel_name_is_clean_and_playlist_is_separate() {
+        use crate::test_support::combined::{NOW, part};
+
+        let alpha = part(1, "Alpha", NOW);
+        let beta = part(2, "Beta", NOW);
+        assert_eq!(alpha.schedule.channel_playlist(0), None);
+        let alpha_name = alpha.schedule.channel_name(0);
+        let beta_name = beta.schedule.channel_name(0);
+
+        let combined = CombinedSchedule::new(vec![alpha, beta], NOW);
+        assert_eq!(combined.channel_name(0), alpha_name);
+        assert_eq!(combined.channel_name(1), beta_name);
+        assert!(!combined.channel_name(0).contains(" · "));
+        assert!(!combined.channel_name(0).contains("Alpha"));
+        assert!(!combined.channel_name(1).contains(" · "));
+        assert!(!combined.channel_name(1).contains("Beta"));
+        assert_eq!(combined.channel_playlist(0), Some("Alpha"));
+        assert_eq!(combined.channel_playlist(1), Some("Beta"));
+        assert_eq!(combined.channel_playlist(2), None);
     }
 }

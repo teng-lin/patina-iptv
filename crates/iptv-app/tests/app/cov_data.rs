@@ -364,13 +364,14 @@ fn stored_playlists_switch_refresh_and_go() {
     step(app.wait_for("text:first"));
     step(app.press("id:settings-content >> text:Add a playlist"));
     add(&mut app, "second.m3u");
-    step(app.wait_for_within("text:Beta One · second", IMPORT));
-    step(app.wait_for("text:★ Alpha Two · first"));
+    step(app.wait_for_within("id:guide-row >> text:Beta One", IMPORT));
+    step(app.wait_for("id:guide-row >> text:★ Alpha Two"));
     // Both sources are visible. Explicit single-source actions remain
     // available for this journey's organization/background-refresh checks.
     rail(&mut app, "Playlists");
     act(&mut app, "second", "Show this playlist");
-    step(app.wait_for_within("text:Beta One", IMPORT));
+    step(app.wait_for_gone("id:guide-row >> text:/Alpha Two/", IMPORT));
+    step(app.wait_for_within("id:guide-row >> text:Beta One", IMPORT));
     assert!(!iptv_app::player_has_source(0), "playback stopped");
     assert!(
         !app.screen().matches("text:/^★/").unwrap(),
@@ -610,7 +611,7 @@ fn stored_playlists_switch_refresh_and_go() {
     std::fs::write(data.join("last_channel"), key).unwrap();
     let mut app = start();
     on_pick(&mut app);
-    step(app.wait_for_within("id:player-banner >> text:/Alpha Nine · first$/", IMPORT));
+    step(app.wait_for_within("id:player-banner >> text:/Alpha Nine$/", IMPORT));
     step(app.wait_until(
         "Alpha Nine authorized and loaded",
         Duration::from_secs(5),
@@ -632,7 +633,7 @@ fn stored_playlists_switch_refresh_and_go() {
     )
     .unwrap();
     let mut app = start();
-    step(app.wait_for_within("id:player-banner >> text:/Alpha One · first$/", IMPORT));
+    step(app.wait_for_within("id:player-banner >> text:/Alpha One$/", IMPORT));
     step(app.wait_until(
         "Alpha One authorized and loaded",
         Duration::from_secs(5),
@@ -685,7 +686,7 @@ fn stored_playlists_switch_refresh_and_go() {
     step(app.wait_for_gone("text:Renamed list", Duration::from_secs(2)));
     act(&mut app, "third_list", "Delete");
     step(app.press("text:Delete"));
-    step(app.wait_for_within("text:Alpha One · first", IMPORT));
+    step(app.wait_for_within("id:guide-row >> text:Alpha One", IMPORT));
     act(&mut app, "first", "Delete");
     step(app.press("text:Delete"));
     // The Playlists page keeps only "Add a playlist".

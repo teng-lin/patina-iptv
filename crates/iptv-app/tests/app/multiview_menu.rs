@@ -807,9 +807,9 @@ fn account_streams(home: &crate::isolated::Home, scenario: AccountScenario) {
     });
     let step = |result: Result<(), String>| result.unwrap_or_else(|error| panic!("{error}"));
     let first = if native_primary {
-        "text:/^Native Channel · Native$/"
+        "id:guide-row >> text:/^Native Channel$/"
     } else {
-        "text:/^Test Channel One · Alpha$/"
+        "id:guide-row >> text:/^Test Channel One$/ >> nth=0"
     };
     step(app.wait_for_within(first, IMPORT));
     step(app.press(first));
@@ -827,12 +827,10 @@ fn account_streams(home: &crate::isolated::Home, scenario: AccountScenario) {
     step(app.wait_for("label:Multiview"));
     step(app.press("label:Multiview"));
     step(app.wait_for("id:multiview-picker"));
-    let second = if another_playlist {
-        "id:multiview-picker >> text:/Test Channel Two · Beta$/"
-    } else {
-        "id:multiview-picker >> text:/Test Channel Two · Alpha$/"
-    };
-    step(app.press(second));
+    if another_playlist {
+        step(app.press("id:multiview-picker >> role:tab[Beta]"));
+    }
+    step(app.press("id:multiview-picker >> text:/Test Channel Two$/"));
     if limited {
         // Give each asynchronous refusal time to reach the health machine
         // between advancing retry deadlines. A genuine limit stays retryable.
@@ -852,9 +850,9 @@ fn account_streams(home: &crate::isolated::Home, scenario: AccountScenario) {
         // its scheduled retry without pressing Try again.
         step(app.press("id:multiview-tile >> nth=0"));
         step(app.press(if native_primary {
-            "label:Remove screen: Native Channel · Native"
+            "label:Remove screen: Native Channel"
         } else {
-            "label:Remove screen: Test Channel One · Alpha"
+            "label:Remove screen: Test Channel One"
         }));
         for _ in 0..35 {
             step(app.run_for(Duration::from_secs(1)));

@@ -5,8 +5,7 @@
 
 use crate::chrome::i18n::{tr, trf};
 
-use iptv_core::{guide::Schedule, lists::group_of};
-use iptv_guide::combined::CombinedSchedule;
+use iptv_core::guide::Schedule;
 use std::time::Duration;
 
 use nsh_core::prelude::*;
@@ -171,28 +170,19 @@ fn settled(ui: Ui, program: Memo<Focused>) -> Signal<Focused> {
     shown
 }
 
+/// Clean channel name and `{playlist} · {group}` source line for catalog index `channel`.
 fn channel_labels(
     catalog: &dyn Schedule,
     channel: usize,
     single_playlist: Option<&str>,
 ) -> (String, String) {
-    let (catalog, channel, playlist) = if let Some(combined) = catalog
-        .as_any()
-        .and_then(|catalog| catalog.downcast_ref::<CombinedSchedule>())
-    {
-        let Some((source, local)) = combined.channel_source(channel) else {
-            return (String::new(), String::new());
-        };
-        (
-            &*source.schedule as &dyn Schedule,
-            local,
-            Some(source.name.as_str()),
-        )
-    } else {
-        (catalog, channel, single_playlist)
-    };
-    let group = group_of(catalog, channel)
-        .map(|g| crate::guide::listing_labels::group(catalog.group_label(g)));
+    if channel >= catalog.channel_count() {
+        return (String::new(), String::new());
+    }
+    let playlist = catalog.channel_playlist(channel).or(single_playlist);
+    let group = catalog
+        .channel_group_label(channel)
+        .map(crate::guide::listing_labels::group);
     let source = match (playlist.filter(|name| !name.is_empty()), group) {
         (Some(playlist), Some(group)) if !group.is_empty() => format!("{playlist} · {group}"),
         (Some(playlist), _) => playlist.to_owned(),
@@ -687,5 +677,84 @@ mod description_regressions {
         let empty = schedule(now, None);
         assert_eq!(program_description(&empty, 0, empty.program_at(0, 0)), None);
         assert_eq!(program_description(&empty, 9, selected), None);
+    }
+
+    #[test]
+    fn channel_labels_keep_channel_name_clean_and_format_playlist_separately() {
+        let now = 1_800_000_000;
+        let first = Rc::new(schedule(now, None));
+        let second = Rc::new(schedule(now, None));
+        assert_eq!(
+            super::channel_labels(&*first, 0, Some("Single playlist")),
+            (
+                "Synthetic channel".to_owned(),
+                "Single playlist · Synthetic group".to_owned()
+            )
+        );
+        assert_eq!(
+            super::channel_labels(&*first, 0, Some("")),
+            ("Synthetic channel".to_owned(), "Synthetic group".to_owned())
+        );
+        let ungrouped = EpgSchedule::new(
+            vec![(
+                String::new(),
+                vec![GuideChannel {
+                    key: ChannelKey::new("synthetic-ungrouped"),
+                    name: "Synthetic ungrouped".into(),
+                    number: 1,
+                    catchup_days: 0,
+                }],
+            )],
+            GuideStore::new(),
+            now,
+        );
+        assert_eq!(
+            super::channel_labels(&ungrouped, 0, Some("Single playlist")),
+            (
+                "Synthetic ungrouped".to_owned(),
+                "Single playlist".to_owned()
+            )
+        );
+        let combined = CombinedSchedule::new(
+            vec![
+                SourceSchedule {
+                    id: 1,
+                    name: "Synthetic first".into(),
+                    schedule: first,
+                },
+                SourceSchedule {
+                    id: 2,
+                    name: "Synthetic second".into(),
+                    schedule: second,
+                },
+            ],
+            now,
+        );
+        assert_eq!(
+            super::channel_labels(&combined, 0, None),
+            (
+                "Synthetic channel".to_owned(),
+                "Synthetic first · Synthetic group".to_owned()
+            )
+        );
+        assert_eq!(
+            super::channel_labels(&combined, 1, None),
+            (
+                "Synthetic channel".to_owned(),
+                "Synthetic second · Synthetic group".to_owned()
+            )
+        );
+        let collapsed = combined.with_collapsed_sources([1]);
+        assert_eq!(
+            super::channel_labels(&collapsed, 0, None),
+            (
+                "Synthetic channel".to_owned(),
+                "Synthetic first · Synthetic group".to_owned()
+            )
+        );
+        assert_eq!(
+            super::channel_labels(&collapsed, 9, None),
+            (String::new(), String::new())
+        );
     }
 }

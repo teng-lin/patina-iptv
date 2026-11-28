@@ -92,12 +92,12 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap();
-    step(app.wait_for_within("text:A 0 · Synthetic A", Duration::from_secs(20)));
+    step(app.wait_for_within("id:guide-row >> text:/^A 0$/", Duration::from_secs(20)));
     step(app.open_playlist_actions("Synthetic A"));
     step(app.wait_for("text:Show this playlist"));
     step(app.press("text:Show this playlist"));
     step(app.close_settings());
-    step(app.wait_for_within("text:A 0", Duration::from_secs(20)));
+    step(app.wait_for_within("id:guide-row >> text:/^A 0$/", Duration::from_secs(20)));
     until(
         &mut app,
         "background startup refresh",
