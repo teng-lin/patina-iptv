@@ -13,6 +13,7 @@
 //! - `web`: a browser TV, over `iptv-web`'s adapters and the cooperative
 //!   executor.
 pub(crate) mod backup_documents;
+pub(crate) mod diagnostics;
 #[cfg(not(target_family = "wasm"))]
 mod native;
 pub(crate) mod updates;

@@ -9,13 +9,20 @@ the domain owner, adapter and nearest checks for a proposed change.
 
 ## Set up
 
-You need:
+Run `tools/bootstrap.sh` (Linux and macOS, then `source target/dev-env.sh`) or
+`./tools/bootstrap.ps1` (Windows PowerShell) to check prerequisites, sync the
+pinned NSH checkout, fetch the guarded `libmpv` runtime and verify a clean
+`iptv-app` check. Pass `--install-packages` to `tools/bootstrap.sh` to install
+missing OS packages automatically.
+
+Under the hood, a full local check environment needs:
 
 - Rust, the version pinned in `rust-toolchain.toml` (rustup installs it
   automatically), with the `wasm32-unknown-unknown` target.
 - The pinned [Patina NSH fork and CLI](docs/nsh.md).
 - The platform libraries listed under
-  [Build from source](README.md#build-from-source) in the README.
+  [Build from source](README.md#build-from-source) in the README
+  (`tools/ci/linux-packages.txt` on Debian/Ubuntu).
 - `cargo-deny` 0.20.2 for the dependency audit in `tools/check.sh`:
   `cargo install cargo-deny --version 0.20.2 --locked`.
 - `python3` (3.11 or newer) and `ffmpeg` for the scripts and the synthetic

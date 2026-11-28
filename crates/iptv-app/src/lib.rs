@@ -23,6 +23,7 @@ mod ui;
 mod wiring;
 
 pub use guide::{header::debug_overlay, timeline};
+pub use host::diagnostics::{flush as flush_diagnostics, install as install_diagnostics};
 pub use host::set_tui_mode;
 #[cfg(feature = "test-support")]
 pub use kit::i18n::pseudo_fixed_for_test;
@@ -65,6 +66,7 @@ use nsh_core::prelude::*;
 
 #[native_module("iptv-rs/native")]
 fn native_module(registry: &mut Registry) {
+    host::diagnostics::install();
     registry.register::<App>();
 }
 

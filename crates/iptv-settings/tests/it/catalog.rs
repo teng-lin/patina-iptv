@@ -478,7 +478,7 @@ const COMMANDS: &[(&str, &str, &[&str])] = &[
     ("general.restore", "cr", &[]),
     ("general.reset_watch_time", "c", &[]),
     ("general.restart", "c", &[]),
-    ("general.send_logs", "", &[]),
+    ("general.send_logs", "c", &[]),
     ("general.check_updates", "", &[]),
     ("general.about", "", &[]),
     ("about.privacy_policy", "", &[]),

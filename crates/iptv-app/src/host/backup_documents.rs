@@ -23,11 +23,23 @@ mod android {
         static ANSWER: RefCell<Option<(String, futures_channel::oneshot::Sender<Result<Document>>)>> = const { RefCell::new(None) };
         /// Bumped to have the host report its pickers again.
         static PROBE: Cell<Option<Signal<u64>>> = const { Cell::new(None) };
+        /// Whether Android resolved a non-stub `ACTION_CREATE_DOCUMENT` (`text/plain`) handler.
+        static CREATE_TEXT: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+        /// Whether Android resolved a non-stub `ACTION_SEND` (`text/plain`) handler.
+        static SHARE: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
     }
     pub fn probe() {
         if let Some(probe) = PROBE.with(Cell::get) {
             probe.update(|n| *n += 1);
         }
+    }
+    pub fn create_text_supported() -> bool {
+        CREATE_TEXT
+            .with(Cell::get)
+            .is_some_and(|create| create.get())
+    }
+    pub fn share_supported() -> bool {
+        SHARE.with(Cell::get).is_some_and(|share| share.get())
     }
     pub fn layer(on_pickers: impl Fn(bool, bool) + 'static) -> impl IntoElement {
         let request = signal(Value::Null);
@@ -36,6 +48,10 @@ mod android {
         // this changes and each time the app resumes: never per frame.
         let probe = signal(0u64);
         PROBE.with(|slot| slot.set(Some(probe)));
+        let create_text = signal(false);
+        CREATE_TEXT.with(|slot| slot.set(Some(create_text)));
+        let share = signal(false);
+        SHARE.with(|slot| slot.set(Some(share)));
         native("tv.backup")
             .absolute()
             .w(px(0.))
@@ -46,6 +62,14 @@ mod android {
             .prop("probe", move || Value::from(probe.get()))
             .on_native_event(move |event: &NativeEvent| {
                 if event.name.as_ref() == "pickers" {
+                    let can_create_text = event.data["createText"].as_bool() == Some(true);
+                    if create_text.get_untracked() != can_create_text {
+                        create_text.set(can_create_text);
+                    }
+                    let can_share = event.data["share"].as_bool() == Some(true);
+                    if share.get_untracked() != can_share {
+                        share.set(can_share);
+                    }
                     on_pickers(
                         event.data["create"].as_bool() == Some(true),
                         event.data["open"].as_bool() == Some(true),
@@ -80,7 +104,29 @@ mod android {
             return Err("The document service is unavailable".into());
         };
         let (tx, rx) = futures_channel::oneshot::channel();
-        ANSWER.with(|slot| *slot.borrow_mut() = Some((request_id.clone(), tx)));
+        let busy = ANSWER.with(|slot| {
+            let mut active = slot.borrow_mut();
+            if active.is_some() {
+                return true;
+            }
+            *active = Some((request_id.clone(), tx));
+            false
+        });
+        if busy {
+            return Err("The document service is unavailable".into());
+        }
+        struct SlotGuard<'a>(&'a str);
+        impl Drop for SlotGuard<'_> {
+            fn drop(&mut self) {
+                ANSWER.with(|slot| {
+                    let mut active = slot.borrow_mut();
+                    if active.as_ref().is_some_and(|(id, _)| id == self.0) {
+                        *active = None;
+                    }
+                });
+            }
+        }
+        let _guard = SlotGuard(&request_id);
         request.set(json!({"requestId": request_id, "archivePath": path.to_string_lossy(), "operation": operation}));
         rx.await.context("The document service stopped")?
     }
@@ -99,6 +145,14 @@ mod android {
     pub async fn close(root: PathBuf) {
         let request_id = next_document_request();
         let _ = document(request_id, &root, "close").await;
+    }
+    pub async fn save_diagnostic_log(path: PathBuf) -> Result<bool> {
+        let request_id = next_document_request();
+        let result = document(request_id, &path, "export-log")
+            .await
+            .map(|result| matches!(result, Document::Complete(_)));
+        let _ = fs::remove_file(path);
+        result
     }
     pub async fn select(root: PathBuf) -> Result<Option<ImportFile>> {
         let request_id = next_document_request();
@@ -119,7 +173,9 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-pub(crate) use android::{close, layer, probe};
+pub(crate) use android::{
+    close, create_text_supported, layer, probe, save_diagnostic_log, share_supported,
+};
 
 #[cfg(not(target_os = "android"))]
 pub(crate) fn probe() {}

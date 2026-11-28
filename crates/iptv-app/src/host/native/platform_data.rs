@@ -115,10 +115,13 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_TvActivity_initializeDataD
                     "java/lang/IllegalStateException",
                     "Files directory changed in one process",
                 );
+                return;
             }
         } else {
-            let _ = ANDROID_FILES.set(path);
+            let _ = ANDROID_FILES.set(path.clone());
         }
+        crate::host::diagnostics::install();
+        crate::host::diagnostics::seed_roots(&path);
     }));
     if set.is_err() {
         log::error!("iptv data: setting the files directory panicked");
@@ -169,6 +172,7 @@ pub(crate) fn host_handle() -> Option<iptv_runtime::HostHandle> {
 /// Waits, at most `limit`, for the registered owner's queued file writes.
 #[cfg(any(target_os = "android", test))]
 fn host_stop_flush(limit: std::time::Duration) -> bool {
+    crate::host::diagnostics::flush();
     // A host can stop before the application root exists.
     host_handle().is_none_or(|owner| owner.flush_files(limit))
 }
@@ -179,6 +183,7 @@ pub(crate) fn initialize() -> io::Result<PathBuf> {
     exit_background_recorder_launch();
     #[cfg(windows)]
     if crate::host::native::recording_host::activate_existing() {
+        crate::host::diagnostics::flush();
         std::process::exit(0);
     }
     let directory = resolve_data_dir()?;
@@ -209,6 +214,7 @@ pub fn exit_background_recorder_launch() {
             Err(error) => log::warn!("iptv recordings: no data directory ({:?})", error.kind()),
         }
         log::info!("iptv recordings: scheduled recording was removed; exiting a recorder launch");
+        crate::host::diagnostics::flush();
         std::process::exit(0);
     }
 }

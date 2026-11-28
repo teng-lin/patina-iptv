@@ -46,6 +46,7 @@ mod cov_sources_assign;
 mod desktop_workflows;
 mod device_settings;
 mod device_signals;
+mod diagnostics;
 mod foundation_inspection;
 mod foundation_repair;
 mod guide_check_recovery;

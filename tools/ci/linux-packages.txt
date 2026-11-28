@@ -1,0 +1,17 @@
+# Debian and Ubuntu host development packages for Patina IPTV.
+# Shared by .github/actions/setup/action.yml and tools/bootstrap.sh;
+# tools/ci/test-bootstrap.py checks that README.md lists the same set.
+clang
+cmake
+dbus-daemon
+ffmpeg
+libdbus-1-dev
+libgstreamer-plugins-base1.0-dev
+libgstreamer1.0-dev
+libgtk-4-dev
+libmpv-dev
+libpipewire-0.3-0t64
+libssl-dev
+libva-drm2
+ninja-build
+pkg-config

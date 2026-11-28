@@ -17,6 +17,7 @@ mod apple_airplay;
 ))]
 mod casting;
 mod clock;
+pub(crate) mod diagnostics;
 mod external_player;
 pub(crate) use external_player::*;
 pub(crate) mod credential_key;

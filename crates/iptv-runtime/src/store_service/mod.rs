@@ -71,20 +71,7 @@ pub(crate) struct Connection {
     retry_open_at: Option<crate::time::Instant>,
 }
 
-/// Numeric-only observations for one store lane; no query, path or provider data.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StoreQueueStats {
-    /// Fixed lane name: writer, reader or analysis.
-    pub lane: &'static str,
-    /// Requests waiting to start, excluding the request currently running.
-    pub pending: usize,
-    /// Time since the oldest still-pending request was admitted; zero when empty.
-    pub oldest_age: Duration,
-    /// Longest observed wait before a request started during this owner's lifetime.
-    pub max_wait: Duration,
-    /// Queued reader requests skipped because their reply futures were dropped.
-    pub skipped_reads: u64,
-}
+pub use crate::model::StoreQueueStats;
 
 #[derive(Default)]
 struct QueueMetrics {

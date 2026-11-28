@@ -57,6 +57,8 @@ pub(crate) const IMPORTS: bool = true;
 
 /// The name the store's memory files are kept under.
 const DIRECTORY: &str = "/patina";
+#[cfg(not(feature = "browser-package"))]
+pub(crate) const DIAGNOSTIC_DIR: &str = DIRECTORY;
 
 pub(crate) fn local_ipv4_subnet() -> Option<String> {
     None

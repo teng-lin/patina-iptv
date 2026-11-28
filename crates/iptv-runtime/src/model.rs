@@ -13,6 +13,23 @@ use iptv_settings::SettingsError;
 /// The sole adapter-owned boundary value: the credential broker supplies an
 /// opaque, redacting key; commands never return storage records or errors.
 pub use iptv_store_sqlite::DatabaseKey;
+/// Supported SQLite catalog schema version, exposed for diagnostic headers.
+pub const STORE_SCHEMA_VERSION: u32 = iptv_store_sqlite::SCHEMA_VERSION;
+
+/// Numeric-only observations for one store lane; no query, path or provider data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoreQueueStats {
+    /// Fixed lane name: writer, reader or analysis.
+    pub lane: &'static str,
+    /// Requests waiting to start, excluding the request currently running.
+    pub pending: usize,
+    /// Time since the oldest still-pending request was admitted; zero when empty.
+    pub oldest_age: Duration,
+    /// Longest observed wait before a request started during this owner's lifetime.
+    pub max_wait: Duration,
+    /// Queued reader requests skipped because their reply futures were dropped.
+    pub skipped_reads: u64,
+}
 #[cfg(feature = "native")]
 pub(crate) use iptv_store_sqlite::RecordingCompletion;
 use std::any::Any;
