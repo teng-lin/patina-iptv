@@ -1,5 +1,5 @@
 //! A finger's drag threshold and axis, shared by the guide's timeline
-//! (`iptv-app`'s `timeline.rs`) and the swipe that changes channel over
+//! ([`crate::guide::timeline`]) and the swipe that changes channel over
 //! full-screen video ([`crate::touch_zap`]).
 
 /// How far (dp) a finger moves before its drag picks an axis.
