@@ -276,7 +276,7 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                 assert!(b[2] >= 44.0 - 0.5, "a 44-point target {b:?}: {what}");
             }
             // The program title sits above the transport and auxiliary actions,
-            // with usable width and no overlap from the Ch± buttons.
+            // and Ch− / Ch+ flank Play/Pause in the transport row.
             let title = bounds(app, "bar-title").expect("the title line");
             assert!(title[2] > 0.0, "{title:?} keeps visible width: {what}");
             assert!(title[1] + title[3] <= top + 0.5, "{title:?} above: {what}");
@@ -284,12 +284,14 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                 title[0] + title[2] <= size.0 + 0.5,
                 "{title:?} inside: {what}"
             );
-            if let Some(next_ch) = bounds(app, "play-bar-next-channel") {
-                assert!(
-                    next_ch[0] + next_ch[2] <= title[0] + 0.5,
-                    "Ch± ({next_ch:?}) must not overlap bar-title ({title:?}): {what}"
-                );
-            }
+            let prev_ch = bounds(app, "play-bar-previous-channel").expect("previous channel");
+            let next_ch = bounds(app, "play-bar-next-channel").expect("next channel");
+            let left_gap = pause[0] - (prev_ch[0] + prev_ch[2]);
+            let right_gap = next_ch[0] - (pause[0] + pause[2]);
+            assert!(
+                left_gap >= -0.5 && right_gap >= -0.5 && (left_gap - right_gap).abs() <= 0.5,
+                "Ch± ({prev_ch:?}, {next_ch:?}) symmetrically flank play/pause ({pause:?}): {what}"
+            );
             // Live playback uses the slim two-row bar with a top hairline and
             // no interactive timeline row.
             assert!(
@@ -303,16 +305,16 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             persistent(app, &lifetime, surface);
         }
     }
-    // All ten buttons (nine controls and More, which holds Multiview) fit
+    // All twelve buttons (eleven controls and More, which holds Multiview) fit
     // at this width only by using spare space on the left.
-    present(app, (532.0, 280.0), 1.0);
+    present(app, (612.0, 280.0), 1.0);
     let direct: Vec<_> = phone_bar_controls()
         .into_iter()
         .chain(["play-bar-more"])
         .map(|id| bounds(app, id).expect(id))
         .collect();
     assert!(bounds(app, "play-bar-multiview").is_none());
-    assert!(direct.iter().all(|b| b[0] >= 0.0 && b[0] + b[2] <= 532.5));
+    assert!(direct.iter().all(|b| b[0] >= 0.0 && b[0] + b[2] <= 612.5));
     let mut ordered = direct.clone();
     ordered.sort_by(|a, b| a[0].total_cmp(&b[0]));
     assert!(
@@ -342,21 +344,31 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
     step(app.press("id:play-bar-more"));
     present(app, (371.0, 260.0), 1.0);
     step(app.wait_for("id:chooser-items >> text:Display"));
-    present(app, (532.0, 280.0), 1.0);
+    present(app, (612.0, 280.0), 1.0);
     step(app.wait_for_gone("id:chooser-items >> text:Display", WAIT));
     step(app.wait_for("id:chooser-items >> text:Multiview"));
-    step(app.press("label:Close the chooser"));
+    step(app.back());
     step(app.wait_for("id:play-bar-picture"));
     assert!(bounds(app, "play-bar-more").is_some());
 
-    // Upright, a phone offers no Multiview: More no longer lists it.
+    // Upright, a phone offers no Multiview: More no longer lists it, and
+    // Previous/Next channel overflow together as a pair (never split).
     present(app, UPRIGHT[1], 1.0);
     if bounds(app, "play-bar-back").is_none() {
         step(app.press("id:video"));
     }
     step(app.wait_for("id:play-bar-more"));
+    assert_eq!(
+        bounds(app, "play-bar-previous-channel").is_some(),
+        bounds(app, "play-bar-next-channel").is_some(),
+        "Ch± never split between the bar and More"
+    );
     step(app.press("id:play-bar-more"));
     step(app.wait_for("id:chooser-items >> text:Display"));
+    if bounds(app, "play-bar-previous-channel").is_none() {
+        step(app.wait_for("id:chooser-items >> text:Previous channel"));
+        step(app.wait_for("id:chooser-items >> text:Next channel"));
+    }
     assert!(
         !app.screen()
             .matches("id:chooser-items >> text:Multiview")
@@ -364,7 +376,7 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
         "no Multiview upright"
     );
     step(app.press("id:play-bar-more"));
-    present(app, (532.0, 280.0), 1.0);
+    present(app, (612.0, 280.0), 1.0);
 
     // A control that moves into More after a press must still extend the
     // bar's idle deadline, and that deadline must survive the resize.
