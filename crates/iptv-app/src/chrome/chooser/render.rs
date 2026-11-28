@@ -198,10 +198,27 @@ fn row(ui: Ui, size: Scale, at: Position) -> View {
             ..Default::default()
         })
         .on_press(move || {
-            ui.touched();
+            let index = at.index();
+            let channel_zap = ui.screens.chooser.with_untracked(|c| {
+                c.as_ref()
+                    .filter(|c| c.kind == Kind::More)
+                    .and_then(|c| c.more.as_ref()?.controls.get(index).copied())
+                    .is_some_and(|control| {
+                        matches!(
+                            control,
+                            iptv_presentation::play_bar::Control::PreviousChannel
+                                | iptv_presentation::play_bar::Control::NextChannel
+                        )
+                    })
+            });
+            if channel_zap {
+                crate::playback::touch_zap::touched(ui);
+            } else {
+                ui.touched();
+            }
             // The row unmounts on selection. Playback actions and timers
             // belong to the window where the chooser opened.
-            ui.owner.run(|| pick(ui, at.index()));
+            ui.owner.run(move || pick(ui, index));
         })
         .child(
             list_rows::name(size, move || {

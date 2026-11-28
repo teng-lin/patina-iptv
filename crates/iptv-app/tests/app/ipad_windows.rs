@@ -33,11 +33,13 @@ use serde_json::{Value as Json, json};
 
 const WAIT: Duration = Duration::from_secs(5);
 /// The play bar's buttons (`play_bar::control_id`): its panel's rows.
-pub(crate) const BAR_CONTROLS: [&str; 10] = [
+pub(crate) const BAR_CONTROLS: [&str; 12] = [
     "play-bar-mute",
     "play-bar-channels",
     "play-bar-guide",
+    "play-bar-previous-channel",
     "play-bar-play-pause",
+    "play-bar-next-channel",
     "play-bar-favorite",
     "play-bar-pip",
     "play-bar-multiview",

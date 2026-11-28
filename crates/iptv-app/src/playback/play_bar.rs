@@ -10,9 +10,8 @@
 //! navigation sit left of transport. Favorite, picture in picture, multiview
 //! and display sit to its right. More holds the available actions that do not
 //! fit, plus Record now on Android handhelds and multiview on Android phones.
-//! Live playback shows a thin hairline progress indicator at the top of the
-//! panel and omits the timeline row; catch-up and on-demand playback show the
-//! interactive timeline below the controls.
+//! Live playback omits the timeline row; catch-up and on-demand playback show
+//! the interactive timeline below the controls.
 //! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -160,8 +159,6 @@ pub fn height(ui: Ui) -> f32 {
     let row = target();
     let extra = if show_timeline(ui) {
         PANEL_GAP + progress::TIMELINE_HEIGHT
-    } else if ui.playback.playing.get().is_some() {
-        PANEL_GAP + progress::HAIRLINE_HEIGHT
     } else {
         0.0
     };
@@ -339,12 +336,13 @@ pub(crate) fn back_bg(ui: Ui) -> impl Fn() -> Rgba + Copy + 'static {
 const BAR_MARGIN: f32 = 24.0;
 const PHONE_BAR_MARGIN: f32 = 12.0;
 const BAR_BOTTOM_MARGIN: f32 = 10.0;
-const PANEL_PADDING: f32 = 12.0;
+const PANEL_PADDING: f32 = 10.0;
 const PANEL_PAD_Y: f32 = 6.0;
 const PANEL_GAP: f32 = 3.0;
-/// The gap between the bar's groups, and between the transport's buttons.
-const GROUP_GAP: f32 = 8.0;
-const TRANSPORT_GAP: f32 = 6.0;
+/// The gap between the bar's groups.
+const GROUP_GAP: f32 = 6.0;
+/// The gap between the transport's buttons.
+const TRANSPORT_GAP: f32 = 2.0;
 
 fn group_gap() -> f32 {
     if window().width.0 < 360.0 {
@@ -362,7 +360,13 @@ const LEFT: &[Control] = &[
     Control::Channels,
     Control::Guide,
 ];
-const CENTER: &[Control] = &[Control::Rewind, Control::PlayPause, Control::Forward];
+const CENTER: &[Control] = &[
+    Control::PreviousChannel,
+    Control::Rewind,
+    Control::PlayPause,
+    Control::Forward,
+    Control::NextChannel,
+];
 const RIGHT: &[Control] = &[
     Control::Favorite,
     Control::Cast,
@@ -464,9 +468,44 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
         // Keep transport direct where it fits, including at widths below
         // the full replay transport. A wide slider can yield to a later icon.
         for control in [
-            PlayPause, Cast, Rewind, Forward, Favorite, Guide, Pip, Mute, Multiview, Listen,
-            Record, Channels, Tracks, Volume, Details, Picture, Fullscreen,
+            PlayPause,
+            Cast,
+            Rewind,
+            Forward,
+            Favorite,
+            Guide,
+            Pip,
+            Mute,
+            PreviousChannel,
+            NextChannel,
+            Multiview,
+            Listen,
+            Record,
+            Channels,
+            Tracks,
+            Volume,
+            Details,
+            Picture,
+            Fullscreen,
         ] {
+            // Keep PreviousChannel and NextChannel paired: either both flank
+            // PlayPause or both overflow together into More.
+            if control == NextChannel {
+                continue;
+            }
+            if control == PreviousChannel {
+                if candidates.contains(&PreviousChannel)
+                    && candidates.contains(&NextChannel)
+                    && !under_more(&PreviousChannel)
+                    && !under_more(&NextChannel)
+                {
+                    row.extend([PreviousChannel, NextChannel]);
+                    if needed(&row) > available {
+                        row.truncate(row.len() - 2);
+                    }
+                }
+                continue;
+            }
             if candidates.contains(&control) && !under_more(&control) {
                 row.push(control);
                 if needed(&row) > available {
@@ -549,10 +588,6 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                 .bg(panel)
                 .on_mouse_enter(move |_: &MouseEvent| hover(ui, true))
                 .on_mouse_leave(move |_: &MouseEvent| hover(ui, false))
-                .child(when(
-                    move || !show_timeline(ui) && ui.playback.playing.get().is_some(),
-                    move || progress::live_hairline(ui),
-                ))
                 .child(info::header(ui))
                 .child(
                     view()
@@ -629,7 +664,16 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         })
         .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 3)))
         .on_press(move || {
-            ui.touched();
+            // Keep pending_zap intact across rapid channel-button taps (and
+            // opening More when the pair overflows there).
+            if matches!(
+                control,
+                Control::PreviousChannel | Control::NextChannel | Control::More
+            ) {
+                crate::playback::touch_zap::touched(ui);
+            } else {
+                ui.touched();
+            }
             activate(ui, control, target_window.clone());
         })
         .child(
@@ -665,9 +709,11 @@ fn control_label(control: Control) -> &'static str {
         Control::Listen => crate::chrome::i18n::key("Listen to this"),
         Control::More => crate::chrome::i18n::key("More options"),
         Control::Volume => crate::chrome::i18n::key("Volume"),
+        Control::PreviousChannel => crate::chrome::i18n::key("Previous channel"),
         Control::Rewind => crate::chrome::i18n::key("Rewind"),
         Control::PlayPause => crate::chrome::i18n::key("Play or pause"),
         Control::Forward => crate::chrome::i18n::key("Fast-forward"),
+        Control::NextChannel => crate::chrome::i18n::key("Next channel"),
         Control::Record => crate::chrome::i18n::key("Record"),
         Control::Favorite => crate::chrome::i18n::key("Favorite"),
         Control::Tracks => crate::chrome::i18n::key("Subtitles and tracks"),
@@ -689,9 +735,11 @@ fn control_id(control: Control) -> &'static str {
         Control::Listen => "play-bar-listen",
         Control::Volume => "play-bar-volume",
         Control::More => "play-bar-more",
+        Control::PreviousChannel => "play-bar-previous-channel",
         Control::Rewind => "play-bar-rewind",
         Control::PlayPause => "play-bar-play-pause",
         Control::Forward => "play-bar-forward",
+        Control::NextChannel => "play-bar-next-channel",
         Control::Record => "play-bar-record",
         Control::Favorite => "play-bar-favorite",
         Control::Tracks => "play-bar-tracks",
@@ -738,6 +786,9 @@ fn shown(ui: Ui, control: Control) -> bool {
 fn enabled(ui: Ui, control: Control) -> bool {
     use iptv_core::cast::Command;
     match control {
+        Control::PreviousChannel | Control::NextChannel => {
+            pointer_available() && crate::playback::touch_zap::live(ui)
+        }
         Control::Rewind | Control::Forward | Control::Timeline => {
             matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
                 || crate::playback::on_demand::seekable(ui)
@@ -836,6 +887,12 @@ pub(crate) fn activate(
         ),
         Control::Listen => crate::wiring::listen::listen(ui),
         Control::Volume => chooser::open(ui, Kind::Volume),
+        Control::PreviousChannel => {
+            crate::playback::touch_zap::zap(ui, iptv_presentation::touch_zap::Direction::Previous)
+        }
+        Control::NextChannel => {
+            crate::playback::touch_zap::zap(ui, iptv_presentation::touch_zap::Direction::Next)
+        }
         Control::Rewind | Control::Forward => {
             let steps = crate::playback::seek::steps();
             crate::playback::seek::step(
@@ -1033,10 +1090,12 @@ fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRe
         Control::Listen => Icon::Listen,
         Control::Channels => Icon::ChannelList,
         Control::Guide => Icon::Guide,
+        Control::PreviousChannel => Icon::ChannelPrevious,
         Control::Rewind => Icon::Rewind,
         Control::PlayPause if ui.playback.paused.get() || play_again(ui) => Icon::Play,
         Control::PlayPause => Icon::Pause,
         Control::Forward => Icon::Forward,
+        Control::NextChannel => Icon::ChannelNext,
         Control::Favorite
             if ui
                 .playback

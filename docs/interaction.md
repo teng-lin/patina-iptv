@@ -198,11 +198,13 @@ In the guide:
   opens only the last channel's stream. Its banner shows whatever
   `player.info_on_switch` says; while the play bar shows, the bar's own
   line names the channel instead.
-- **Now:** the play bar's top line has previous and next channel buttons
-  beside the channel's name, and the full-screen video has "Next channel"
-  and "Previous channel" accessibility actions for TalkBack and VoiceOver,
-  which take swipes for themselves. On an iPad the video is adjustable
-  too, so VoiceOver's swipe up and down changes channel.
+- **Now:** on desktop, tablet and phone (not TV), the play bar's transport
+  row places previous (Ch−) and next (Ch+) channel buttons on either side of
+  Play/Pause during live playback (moving together into More when narrow),
+  and the full-screen video has "Next channel" and "Previous channel"
+  accessibility actions for TalkBack and VoiceOver, which take swipes for
+  themselves. On an iPad the video is adjustable too, so VoiceOver's swipe
+  up and down changes channel.
 - **Now:** Swipe to change channel (`playback.swipe_to_zap`, on by
   default, offered where there is a touch screen or a pointer) turns the
   swipe off; the buttons and actions stay.

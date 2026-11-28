@@ -1,7 +1,6 @@
 //! Compact single-line program metadata above the transport controls.
 
 use iptv_core::guide::Listing;
-use iptv_presentation::touch_zap::Direction;
 use iptv_presentation::tracks::fps_label;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
@@ -119,19 +118,6 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                         .number_of_lines(1)
                         .text_size(px(detail_size))
                         .text_color(secondary)
-                    },
-                ))
-                // Ch± for a finger (#285): live only; direct flex sibling so it
-                // never shrinks or overlaps the program title.
-                .child(when(
-                    move || program.with(Option::is_some) && crate::playback::touch_zap::live(ui),
-                    move || {
-                        view()
-                            .flex_row()
-                            .flex_shrink_0()
-                            .gap(px(4.0))
-                            .child(crate::playback::touch_zap::button(ui, Direction::Previous))
-                            .child(crate::playback::touch_zap::button(ui, Direction::Next))
                     },
                 ))
                 .child(when(

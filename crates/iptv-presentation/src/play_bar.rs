@@ -23,9 +23,13 @@ pub enum Control {
     Volume,
     Listen,
     More,
+    /// Previous channel (Ch−, not last-channel recall).
+    PreviousChannel,
     Rewind,
     PlayPause,
     Forward,
+    /// Next channel (Ch+).
+    NextChannel,
     Record,
     Favorite,
     Tracks,

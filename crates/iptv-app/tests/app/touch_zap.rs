@@ -745,8 +745,8 @@ fn with_swiping_off_the_buttons_and_accessibility_actions_still_zap() {
     quiet(&mut app);
     assert_eq!(streams(&tuned).len(), opened, "the swipe is off");
 
-    // The play bar's next button, beside the channel's name: the bar's
-    // line names channel two at once.
+    // The play bar's next button, beside Play/Pause: the bar's line names
+    // channel two at once.
     if !app.screen().matches("id:play-bar-next-channel").unwrap() {
         step(app.press("id:video"));
     }
@@ -762,6 +762,18 @@ fn with_swiping_off_the_buttons_and_accessibility_actions_still_zap() {
     tunes(&mut app, &tuned, 2, "next: Ch+");
     step(app.press("id:play-bar-previous-channel"));
     tunes(&mut app, &tuned, 3, "previous: Ch−");
+
+    // Rapid consecutive presses before the switch delay skip channels and open
+    // only the final stream (3 -> 2 -> 1).
+    let opened = streams(&tuned).len();
+    step(app.press("id:play-bar-next-channel"));
+    step(app.press("id:play-bar-next-channel"));
+    assert_eq!(streams(&tuned).len(), opened, "burst waits for the delay");
+    tunes(&mut app, &tuned, 1, "double next: Ch+ twice");
+    assert_eq!(&streams(&tuned)[opened..], &[url(1)]);
+    step(app.press("id:play-bar-previous-channel"));
+    step(app.press("id:play-bar-previous-channel"));
+    tunes(&mut app, &tuned, 3, "double previous back to 3");
 
     // Over a chooser the bar stays usable: its next button closes the
     // chooser (about the channel it leaves), and the zap tunes.

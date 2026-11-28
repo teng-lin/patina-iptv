@@ -1,5 +1,4 @@
-//! The play bar's progress indicators: a slim top hairline (`live_hairline`)
-//! for live TV, and an interactive timeline (`line`) with start/end times for
+//! The play bar's interactive timeline (`line`) with start/end times for
 //! catch-up and on-demand playback (press or drag seeks, `seek.rs`).
 
 use crate::chrome::i18n::tr;
@@ -11,40 +10,7 @@ use crate::theme::{RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, clock, tint};
 
 const WHITE: u32 = 0xFFFFFF;
-pub(super) const HAIRLINE_HEIGHT: f32 = 2.5;
 pub(super) const TIMELINE_HEIGHT: f32 = 20.0;
-
-/// Slim non-interactive progress hairline shown at the top of the live bar.
-pub(super) fn live_hairline(ui: Ui) -> impl IntoElement {
-    let fraction = move || {
-        let (_, p) = program(ui);
-        p.progress(ui.guide.focus.with(|f| f.now)).clamp(0.0, 1.0)
-    };
-    let accent = move || rgb(ui.app.theme.with(|t| t.accent.light));
-    view()
-        .test_id("live-progress-hairline")
-        .accessible(true)
-        .label(move || {
-            let (_, p) = program(ui);
-            format!(
-                "{} · {} / {}",
-                tr("Playback position"),
-                clock(p.start),
-                clock(p.end)
-            )
-        })
-        .mx(px(4.0))
-        .h(px(HAIRLINE_HEIGHT))
-        .rounded(px(HAIRLINE_HEIGHT / 2.0))
-        .bg(tint(WHITE, RESTING_ALPHA * 2))
-        .child(
-            view()
-                .h_full()
-                .rounded(px(HAIRLINE_HEIGHT / 2.0))
-                .w(move || percentage(fraction()))
-                .bg(accent),
-        )
-}
 
 /// The program shown on the bar: the pending zap target when a channel switch
 /// is waiting to tune, otherwise the currently playing live or replayed program.
