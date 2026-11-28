@@ -1007,8 +1007,19 @@ pub(crate) fn has_interrupted_corrupt_restore(root: &Path) -> bool {
     sibling(root, "restore-corrupt-active").exists()
 }
 
-pub(crate) fn resume_interrupted_corrupt_restore(ports: &crate::Ports, root: &Path) -> Result<()> {
-    activate_locked(ports, root)
+pub(crate) fn resume_interrupted_corrupt_restore(
+    ports: &crate::Ports,
+    root: &Path,
+) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
+    match activate_locked_outcome(ports, root) {
+        Ok(_) => Ok(()),
+        Err(ActivateFailure::PreInstallStore(store_err)) => Err(store_err),
+        Err(ActivateFailure::PreInstall(_) | ActivateFailure::PostInstall(_)) => {
+            Err(iptv_store_sqlite::StoreError::Unavailable(
+                iptv_core::message::key("The saved library could not be opened"),
+            ))
+        }
+    }
 }
 
 enum ActiveMarker {
@@ -1090,6 +1101,7 @@ enum ActivateOutcome {
 }
 
 enum ActivateFailure {
+    PreInstallStore(iptv_store_sqlite::StoreError),
     PreInstall(Error),
     PostInstall(Error),
 }
@@ -1097,6 +1109,10 @@ enum ActivateFailure {
 impl ActivateFailure {
     fn into_error(self) -> Error {
         match self {
+            Self::PreInstallStore(store_err) => Error::new(
+                "The pending backup library is invalid; current data was kept",
+                store_err,
+            ),
             Self::PreInstall(error) | Self::PostInstall(error) => error,
         }
     }
@@ -1112,7 +1128,7 @@ fn activate_locked_outcome(
     ports: &crate::Ports,
     root: &Path,
 ) -> std::result::Result<ActivateOutcome, ActivateFailure> {
-    let outcome = prepare_and_install_locked(ports, root).map_err(ActivateFailure::PreInstall)?;
+    let outcome = prepare_and_install_locked(ports, root)?;
     if let ActivateOutcome::Installed {
         was_corrupt_restore,
         ref active_slot,
@@ -1124,9 +1140,12 @@ fn activate_locked_outcome(
     Ok(outcome)
 }
 
-fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<ActivateOutcome> {
-    remove_stale_work(root)?;
-    recover_replacement(root)?;
+fn prepare_and_install_locked(
+    ports: &crate::Ports,
+    root: &Path,
+) -> std::result::Result<ActivateOutcome, ActivateFailure> {
+    remove_stale_work(root).map_err(ActivateFailure::PreInstall)?;
+    recover_replacement(root).map_err(ActivateFailure::PreInstall)?;
     // No native export is active before App starts. A killed process can leave
     // a private prepared archive; never retain those credential-bearing copies.
     if let Ok(entries) = fs::read_dir(root) {
@@ -1140,7 +1159,7 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
             }
         }
     }
-    reconcile_previous_restore(root)?;
+    reconcile_previous_restore(root).map_err(ActivateFailure::PreInstall)?;
     let prior = sibling(root, "restore-prior");
     let staged_corrupt = sibling(root, "restore-corrupt-staged");
     let active_corrupt = sibling(root, "restore-corrupt-active");
@@ -1153,7 +1172,9 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
         }
         if matches!(active_state, Some(ActiveMarker::Rollback(_))) {
             if prior.exists() && !pending.exists() {
-                fs::rename(&prior, &pending).context("Could not recover the pending restore")?;
+                fs::rename(&prior, &pending)
+                    .context("Could not recover the pending restore")
+                    .map_err(ActivateFailure::PreInstall)?;
             }
             let _ = fs::remove_file(&active_corrupt);
             return Ok(ActivateOutcome::NoPendingWork);
@@ -1163,26 +1184,32 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
             let _ = fs::remove_dir_all(&prior);
         }
     } else {
-        finish_interrupted_sidecar_recovery(root, &root.join("iptv.sqlite"))
-            .context("Could not move the damaged library aside")?;
         if let Some(ActiveMarker::Rollback(slot)) = &active_state {
             if staged_corrupt.exists() {
                 let _ = fs::remove_dir_all(&staged_corrupt);
             }
             let _ = cancel(root);
             rollback_set_aside(&root.join("iptv.sqlite"), slot)
-                .context("Could not move the damaged library aside")?;
+                .context("Could not move the damaged library aside")
+                .map_err(ActivateFailure::PreInstall)?;
             if prior.exists() && !pending.exists() {
-                fs::rename(&prior, &pending).context("Could not recover the pending restore")?;
+                fs::rename(&prior, &pending)
+                    .context("Could not recover the pending restore")
+                    .map_err(ActivateFailure::PreInstall)?;
             }
             let _ = fs::remove_file(&active_corrupt);
             return Ok(ActivateOutcome::NoPendingWork);
         }
+        finish_interrupted_sidecar_recovery(root, &root.join("iptv.sqlite"))
+            .context("Could not move the damaged library aside")
+            .map_err(ActivateFailure::PreInstall)?;
         if staged_corrupt.exists() {
             if pending.exists() && !prior.exists() {
-                fs::rename(&pending, &prior).context("Could not schedule the restore")?;
+                fs::rename(&pending, &prior)
+                    .context("Could not schedule the restore")
+                    .map_err(ActivateFailure::PreInstall)?;
             }
-            publish_staged_path(root, &staged_corrupt)?;
+            publish_staged_path(root, &staged_corrupt).map_err(ActivateFailure::PreInstall)?;
         } else if !active_corrupt.exists() && prior.exists() && !pending.exists() {
             let _ = fs::rename(&prior, &pending);
         }
@@ -1193,31 +1220,43 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
     };
     if !pending.exists() {
         if !root.exists() && previous.exists() {
-            fs::rename(previous, root).context("Could not recover application storage")?;
+            fs::rename(previous, root)
+                .context("Could not recover application storage")
+                .map_err(ActivateFailure::PreInstall)?;
         }
         if active_corrupt.exists() && !root.join("iptv.sqlite").is_file() {
             if let Some(slot) = &active_slot {
                 rollback_set_aside(&root.join("iptv.sqlite"), slot)
-                    .context("Could not move the damaged library aside")?;
+                    .context("Could not move the damaged library aside")
+                    .map_err(ActivateFailure::PreInstall)?;
                 if prior.exists() {
                     fs::rename(&prior, &pending)
-                        .context("Could not recover the pending restore")?;
+                        .context("Could not recover the pending restore")
+                        .map_err(ActivateFailure::PreInstall)?;
                 }
                 let _ = fs::remove_file(&active_corrupt);
                 return Ok(ActivateOutcome::NoPendingWork);
             }
-            return Err("Could not move the damaged library aside".into());
+            return Err(ActivateFailure::PreInstall(
+                "Could not move the damaged library aside".into(),
+            ));
         }
         let _ = fs::remove_file(&active_corrupt);
         return Ok(ActivateOutcome::NoPendingWork);
     }
     // Revalidate persisted staging before moving the working state aside.
-    for entry in fs::read_dir(&pending).context("Could not read pending backup")? {
-        let entry = entry.context("Could not read pending backup entry")?;
+    for entry in fs::read_dir(&pending)
+        .context("Could not read pending backup")
+        .map_err(ActivateFailure::PreInstall)?
+    {
+        let entry = entry
+            .context("Could not read pending backup entry")
+            .map_err(ActivateFailure::PreInstall)?;
         if let Some(name) = entry.file_name().to_str() {
             let len = entry
                 .metadata()
-                .context("Could not read backup file size")?
+                .context("Could not read backup file size")
+                .map_err(ActivateFailure::PreInstall)?
                 .len();
             if let Err(err) = entry_limit(name, len) {
                 if let Some(slot) = &active_slot {
@@ -1229,7 +1268,10 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
                         &pending,
                     );
                 }
-                return Err(Error::new("Backup structured entry is too large", err));
+                return Err(ActivateFailure::PreInstall(Error::new(
+                    "Backup structured entry is too large",
+                    err,
+                )));
             }
         }
     }
@@ -1243,10 +1285,7 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
         if definitive && let Some(slot) = &active_slot {
             rollback_rejected_resumed_restore(root, slot, &active_corrupt, &prior, &pending);
         }
-        return Err(Error::new(
-            "The pending backup library is invalid; current data was kept",
-            store_err,
-        ));
+        return Err(ActivateFailure::PreInstallStore(store_err));
     }
     let settings_text = match read_small_file(&pending.join("settings.json"), "settings.json") {
         Ok(text) => text,
@@ -1256,7 +1295,7 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
             {
                 rollback_rejected_resumed_restore(root, slot, &active_corrupt, &prior, &pending);
             }
-            return Err(err);
+            return Err(ActivateFailure::PreInstall(err));
         }
     };
     if let Err(err) = validate_settings(&settings_text) {
@@ -1265,7 +1304,7 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
         {
             rollback_rejected_resumed_restore(root, slot, &active_corrupt, &prior, &pending);
         }
-        return Err(err);
+        return Err(ActivateFailure::PreInstall(err));
     }
     // Recording media stays beside the catalog directory under this host's
     // job ids, so the restored library takes this host's recording rows and
@@ -1299,7 +1338,8 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
     tests::crash_boundary("validated");
     if root.exists() {
         fs::rename(root, &previous)
-            .context("Could not prepare the restore; current data was kept")?;
+            .context("Could not prepare the restore; current data was kept")
+            .map_err(ActivateFailure::PreInstall)?;
     }
     #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("previous");
@@ -1308,10 +1348,10 @@ fn prepare_and_install_locked(ports: &crate::Ports, root: &Path) -> Result<Activ
         if previous.exists() {
             let _ = fs::rename(&previous, root);
         }
-        return Err(Error::new(
+        return Err(ActivateFailure::PreInstall(Error::new(
             "Could not activate the restore; current data was kept",
             error,
-        ));
+        )));
     }
     if was_corrupt_restore {
         started_for(root)
@@ -1360,12 +1400,18 @@ fn finish_installed_locked(
 }
 
 fn preserve_non_backup_entries(previous: &Path, root: &Path) -> Result<()> {
+    let mut moved_any = false;
     for name in ["recovered", "iptv.sqlite.encrypted"] {
         let from = previous.join(name);
         let to = root.join(name);
         if from.exists() && !to.exists() {
             fs::rename(&from, &to).context("Could not finish the previous restore")?;
+            moved_any = true;
         }
+    }
+    if moved_any {
+        sync_dir(root)?;
+        sync_dir(previous)?;
     }
     Ok(())
 }
@@ -1641,8 +1687,9 @@ fn rollback_set_aside(database: &Path, slot: &Path) -> io::Result<()> {
     if !database.exists() && slot.join("iptv.sqlite").is_file() {
         for suffix in ["-wal", "-shm", "-journal"] {
             let moved = slot.join(format!("iptv.sqlite{suffix}"));
-            if moved.exists() {
-                fs::rename(&moved, db_sidecar(database, suffix))?;
+            let target = db_sidecar(database, suffix);
+            if moved.exists() && !target.exists() {
+                fs::rename(&moved, target)?;
             }
         }
         if let Some(root) = database.parent() {
@@ -1859,6 +1906,20 @@ fn commit_corrupt_restore(
                     }
                     return Err(RecoveryRestoreError::Backup(Error::from(
                         "Could not activate the restore; current data was kept",
+                    )));
+                }
+                Err(ActivateFailure::PreInstallStore(store_err)) => {
+                    if !database.is_file() {
+                        rollback_failed_attempt(&slot);
+                    }
+                    if store_err.is_not_database()
+                        || matches!(store_err, iptv_store_sqlite::StoreError::KeyUnavailable(_))
+                    {
+                        return Err(RecoveryRestoreError::Store(crate::Error::from(store_err)));
+                    }
+                    return Err(RecoveryRestoreError::Backup(Error::new(
+                        "The pending backup library is invalid; current data was kept",
+                        store_err,
                     )));
                 }
                 Err(ActivateFailure::PreInstall(error)) => {

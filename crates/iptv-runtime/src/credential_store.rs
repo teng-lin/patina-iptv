@@ -19,11 +19,7 @@ pub(crate) fn open_database(ports: &crate::Ports, path: &Path) -> Result<Store, 
         {
             if crate::backup::has_interrupted_corrupt_restore(root) {
                 let _ = database_key(ports, path)?;
-                crate::backup::resume_interrupted_corrupt_restore(ports, root).map_err(|_| {
-                    StoreError::Unavailable(iptv_core::message::key(
-                        "The saved library could not be opened",
-                    ))
-                })?;
+                crate::backup::resume_interrupted_corrupt_restore(ports, root)?;
             } else {
                 crate::backup::finish_interrupted_sidecar_recovery(root, path).map_err(|_| {
                     StoreError::Unavailable(iptv_core::message::key(

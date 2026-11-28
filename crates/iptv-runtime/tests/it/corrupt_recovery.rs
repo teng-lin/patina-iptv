@@ -484,6 +484,7 @@ fn restore_backup_into_empty_library_validates_before_modifying_anything() {
     // Prepare target root with KEY_A, existing settings, and a corrupt library + WAL.
     let target_root = temp.path().join("target-app");
     let target_db = seed_multipage_encrypted_store(&target_root, KEY_A, "Damaged Target");
+    let intact_bytes = fs::read(&target_db).unwrap();
     let target_ports = ports_with_key(&target_root, KEY_A);
 
     // Refuses restore_backup_into_empty_library when target DB is healthy or wrong-key!
@@ -495,6 +496,7 @@ fn restore_backup_into_empty_library_validates_before_modifying_anything() {
         .is_err(),
         "healthy library must not use corrupt-recovery restore"
     );
+    assert_eq!(fs::read(&target_db).unwrap(), intact_bytes);
     assert!(
         backup::restore_backup_into_empty_library(
             &ports_with_key(&target_root, KEY_B),
@@ -503,6 +505,7 @@ fn restore_backup_into_empty_library_validates_before_modifying_anything() {
         .is_err(),
         "wrong-key library must never be overwritten by corrupt-recovery restore"
     );
+    assert_eq!(fs::read(&target_db).unwrap(), intact_bytes);
 
     let corrupt_bytes = corrupt_pages_after_header(&target_db);
     let wal_bytes = b"damaged-wal-sidecar".to_vec();
@@ -1177,6 +1180,11 @@ fn failed_restore_rollback_keeps_three_recovered_copies_and_second_owner_closes_
     corrupt_pages_after_header(&db_path);
     let owner_b = runtime_with_ports(ports.clone());
     let moved_slot = block_on(owner_b.recover_corrupt_start_fresh()).unwrap();
+    #[cfg(feature = "test-support")]
+    assert!(
+        !owner_a.host_handle().has_open_connections(),
+        "recovery must close warmed connections on sibling owners before moving files"
+    );
     assert!(moved_slot.join("iptv.sqlite").is_file());
     assert!(!db_path.exists());
     assert!(owner_a.drain_services());
@@ -1192,6 +1200,10 @@ fn failed_restore_rollback_keeps_three_recovered_copies_and_second_owner_closes_
         prior_slots.push(backup::set_aside_corrupt_library(&ports).unwrap());
     }
     assert_eq!(prior_slots.len(), backup::MAX_RECOVERED_LIBRARIES);
+    let prior_snapshots: Vec<(PathBuf, Vec<u8>)> = prior_slots
+        .iter()
+        .map(|slot| (slot.clone(), fs::read(slot.join("iptv.sqlite")).unwrap()))
+        .collect();
 
     // Seed a 4th corrupt live DB and simulate a pre-install rejection during
     // `activate_locked` (corrupt `staged_corrupt` resumed when an older `restore-pending`
@@ -1265,10 +1277,15 @@ fn failed_restore_rollback_keeps_three_recovered_copies_and_second_owner_closes_
     assert!(verifier.drain_services());
     assert_eq!(fs::read(&db_path).unwrap(), fourth_bytes);
     assert!(older_pending.join("older.txt").is_file());
-    for slot in &prior_slots {
+    for (slot, expected_bytes) in &prior_snapshots {
         assert!(
             slot.join("iptv.sqlite").is_file(),
             "rollback must keep all 3 prior recovered copies: {slot:?}"
+        );
+        assert_eq!(
+            fs::read(slot.join("iptv.sqlite")).unwrap(),
+            *expected_bytes,
+            "rollback must preserve the exact contents of prior copy {slot:?}"
         );
     }
     fs::remove_dir_all(&older_pending).unwrap();

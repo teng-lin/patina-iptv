@@ -58,6 +58,7 @@ enum Notice {
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct StoreFailure {
     path: Option<std::path::PathBuf>,
+    suppress_path_in_details: bool,
     cause: Cause,
     controls: Recovery,
     notice: Option<Notice>,
@@ -80,12 +81,13 @@ pub(crate) fn store_failed(
     path: Option<std::path::PathBuf>,
     error: iptv_runtime::Error,
 ) {
-    store_failed_in(ui.chrome, path, error);
+    store_failed_in(ui.chrome, path, false, error);
 }
 
 fn store_failed_in(
     chrome: crate::ChromeUi,
     path: Option<std::path::PathBuf>,
+    suppress_path_in_details: bool,
     error: iptv_runtime::Error,
 ) {
     let diagnostic = || {
@@ -147,8 +149,10 @@ fn store_failed_in(
             )
         };
         controls.set_restore_available(restore_available);
+        let suppress_path_in_details = suppress_path_in_details || matches!(cause, Cause::Corrupt);
         *failure = Some(StoreFailure {
             path,
+            suppress_path_in_details,
             cause,
             controls,
             notice: None,
@@ -200,19 +204,21 @@ fn handle_recovery_store_error(
     error: iptv_runtime::Error,
 ) {
     owner.start_recordings();
+    let (path, suppress_path) = chrome.store_startup_failure.with(|failure| {
+        failure.as_ref().map_or((None, false), |failure| {
+            (
+                failure.path.clone(),
+                failure.suppress_path_in_details || matches!(failure.cause, Cause::Corrupt),
+            )
+        })
+    });
     if error.is_credential_unavailable()
         || error.newer_schema().is_some()
         || error.reopen_reason().is_some()
     {
-        let path = chrome
-            .store_startup_failure
-            .with(|failure| failure.as_ref().and_then(|failure| failure.path.clone()));
-        store_failed_in(chrome, path, error);
+        store_failed_in(chrome, path, suppress_path, error);
     } else if error.is_library_not_corrupt() {
-        let path = chrome
-            .store_startup_failure
-            .with(|failure| failure.as_ref().and_then(|failure| failure.path.clone()));
-        store_failed_in(chrome, path, error);
+        store_failed_in(chrome, path, suppress_path, error);
         iptv_runtime::data::retry_startup(owner);
     } else {
         log::warn!("iptv recovery: library recovery failed: {error}");
@@ -713,11 +719,12 @@ fn failure_details(
                     .bg(move || rgb(app.theme.with(|theme| theme.background.window)))
                     .child(ui_kit::body(scale, diagnostic))
                     .children(
-                        (!matches!(failure.cause, Cause::Corrupt))
-                            .then_some(failure.path.as_ref())
-                            .flatten()
-                            .into_iter()
-                            .map(|path| ui_kit::body(scale, path.display().to_string())),
+                        (!failure.suppress_path_in_details
+                            && !matches!(failure.cause, Cause::Corrupt))
+                        .then_some(failure.path.as_ref())
+                        .flatten()
+                        .into_iter()
+                        .map(|path| ui_kit::body(scale, path.display().to_string())),
                     )
             })
         })

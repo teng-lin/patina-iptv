@@ -427,6 +427,13 @@ impl HostHandle {
     }
 
     #[cfg(feature = "test-support")]
+    pub fn has_open_connections(&self) -> bool {
+        self.0
+            .upgrade()
+            .is_some_and(|service| service.has_open_connections())
+    }
+
+    #[cfg(feature = "test-support")]
     pub fn hold_source_preparation(&self) -> Option<TestGate> {
         self.0
             .upgrade()
