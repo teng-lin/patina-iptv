@@ -30,6 +30,10 @@ use iptv_core::capabilities::{Host, Platform};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinuxFirewall {
     Ufw,
+    #[cfg_attr(
+        not(target_os = "linux"),
+        expect(dead_code, reason = "constructed only on Linux hosts")
+    )]
     Firewalld,
 }
 
