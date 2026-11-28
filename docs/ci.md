@@ -12,7 +12,7 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 | iOS device/simulator adapters | Compile shared production Rust/iOS input changes with verified MPVKit | Compile | Compile |
 | Production Linux credential broker | Credential/storage/build changes, isolated DBus and disposable keyring | Full | Full |
 | Portable crates and the Tizen core (`iptv-web`) built for wasm | Once, on Linux | Once, on Linux | Once, on Linux |
-| macOS/Windows | Compile all test targets, native player tests, Windows chrome tests, production app build | Full host suites | Full host suites |
+| macOS/Windows | Compile all test targets, native player tests, Windows chrome and application tests, production app build | Full host suites | Full host suites |
 | Linux GTK PiP/context-loss and correlated first-render journeys | Ordinary host checks; no dependency on coverage | Full | Full |
 | Reader/writer/analysis independence gates | Exact isolated gates on Linux | Exact gates on every host | Exact gates on every host |
 | Android compile | Both ARM ABIs for production Rust/dependency/Android changes | Both ARM ABIs | Shipping package jobs compile both |
@@ -30,6 +30,8 @@ the ordinary suite. The stress lane uses the existing `memory` executable and
 
 The PR native tier checks every test target, executes the native player suite
 and Windows chrome tests, and builds the production app without test-support.
+On Windows it also runs the application integration harness, so a failure that
+only Windows shows is caught before merge.
 Nightly and release tiers also execute shared suites on macOS and Windows,
 covering filesystem, process and platform behavior beyond Linux. wasm output
 and ordinary doctests are checked once on Linux rather than on three hosts.

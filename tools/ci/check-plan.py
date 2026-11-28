@@ -156,6 +156,13 @@ def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None,
             *([step("windows-updater-tests", "cargo", "test", "--locked", "--timings",
                     "-p", "iptv-runtime", "--features", "test-support", "--lib", "app_updates::windows::tests", "--", "--format=pretty")]
               if host == "windows" else []),
+            # Platform bugs in the app's journeys (open handles, paths) show
+            # only when they run, so Windows PRs run them too.
+            *([step("windows-app-tests", "cargo", "test", "--locked", "--features", COVERAGE_FEATURES,
+                    *package_args(workspace_crates(root)),
+                    *[argument for name in APP_HARNESSES for argument in ("--test", name)],
+                    "--timings", "--", "--format=pretty")]
+              if host == "windows" else []),
             *app_build_steps,
         ]
     memory = [argument for module in ("catalog_stream_memory::", "epg_memory::", "epg_stream_memory::")
