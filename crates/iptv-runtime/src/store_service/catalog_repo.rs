@@ -308,8 +308,9 @@ impl CatalogRepo {
 
     pub(crate) fn startup_library(
         &self,
-    ) -> impl Future<Output = Result<(Option<StoredSource>, bool, bool, LibrarySnapshot), StoreError>>
-    + use<> {
+    ) -> impl Future<
+        Output = Result<(Option<StoredSource>, bool, bool, LibrarySnapshot), StoreError>,
+    > + use<> {
         let directory = self.services.directory().to_owned();
         self.services.call_at_startup(move |store| {
             iptv_store_sqlite::EpgStage::remove_stale(&directory);

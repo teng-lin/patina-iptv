@@ -5,9 +5,7 @@
 #![warn(missing_docs)]
 
 mod probe;
-pub use crate::model::{
-    InspectionControl, ProbeLease, ProbeRequest, ProbeTarget, QUERY_DEADLINE,
-};
+pub use crate::model::{InspectionControl, ProbeLease, ProbeRequest, ProbeTarget, QUERY_DEADLINE};
 use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
 use iptv_import::CancelToken;

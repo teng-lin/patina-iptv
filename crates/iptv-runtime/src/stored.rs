@@ -4,12 +4,12 @@ use super::imports::{Downloaded, Imported, Msg, Streams};
 use super::private_files::Client as NetClient;
 use super::store_service::Services;
 use iptv_epg::{ChannelKey, DAY, GuideStore, Overrides, UnixTime};
+#[cfg(test)]
+use iptv_import::matching_fingerprint;
 use iptv_import::{
     CancelToken, Decision, EpgSourceConfig, ImportError, NoProgress, RefreshPolicy, Trigger,
     decide, store_options,
 };
-#[cfg(test)]
-use iptv_import::matching_fingerprint;
 use iptv_providers::SecretUrl;
 use iptv_providers::model::{Channel, Group};
 use iptv_settings::{Settings, Target};

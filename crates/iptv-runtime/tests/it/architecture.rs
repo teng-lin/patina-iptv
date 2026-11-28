@@ -820,12 +820,15 @@ const FOUNDATION_EXTRA_MAY_NAME: &[&str] = &[
 ];
 
 fn foundation_member(name: &str) -> bool {
-    if matches!(name, "parental/gate.rs" | "cast/port.rs" | "cast/pairing.rs") {
+    if matches!(
+        name,
+        "parental/gate.rs" | "cast/port.rs" | "cast/pairing.rs"
+    ) {
         return true;
     }
-    FOUNDATION.iter().any(|module| {
-        name == format!("{module}.rs") || name.starts_with(&format!("{module}/"))
-    })
+    FOUNDATION
+        .iter()
+        .any(|module| name == format!("{module}.rs") || name.starts_with(&format!("{module}/")))
 }
 
 #[test]

@@ -28,7 +28,8 @@ enum ErrorKind {
 const PROVIDER_CAPACITY_REASON: &str =
     iptv_core::message::key("No provider connection available; check Streams at once");
 
-pub(crate) const SETTINGS_LOCKED_REASON: &str = "Unlock parental controls before changing settings";
+pub(crate) const SETTINGS_LOCKED_REASON: &str =
+    iptv_core::message::key("Unlock parental controls before changing settings");
 
 pub struct Error(ErrorKind);
 

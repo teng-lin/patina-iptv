@@ -31,12 +31,12 @@ mod recording_repo;
 mod system_repo;
 mod vod_repo;
 
+#[cfg(test)]
+pub(crate) use catalog_repo::guide_snapshot;
 pub(crate) use catalog_repo::{
     CatalogRepo, catalog_in, forget_source, load_combined_channel, load_last_channel,
     save_combined_channel, save_last_channel,
 };
-#[cfg(test)]
-pub(crate) use catalog_repo::guide_snapshot;
 pub(crate) use epg_repo::{EpgRepo, RebuiltSchedule};
 pub(crate) use favorites_repo::{Counted, FavoriteWrite, FavoritesRepo, UNSAVED_EDITS};
 pub(crate) use parental_repo::ParentalRepo;

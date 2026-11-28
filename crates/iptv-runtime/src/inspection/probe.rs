@@ -565,9 +565,12 @@ impl ProbeLease {
         };
         let valid = snapshot
             .services
-            .try_block_on(guarded(&snapshot.services, &control, deadline, async move {
-                current.await.map_err(|_| InspectionError::Storage)?
-            }))
+            .try_block_on(guarded(
+                &snapshot.services,
+                &control,
+                deadline,
+                async move { current.await.map_err(|_| InspectionError::Storage)? },
+            ))
             .ok_or(InspectionError::Storage)??;
         if !valid {
             return Err(InspectionError::StaleEvidence);
